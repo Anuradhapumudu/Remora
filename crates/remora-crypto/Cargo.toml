@@ -1,0 +1,13 @@
+[package]
+name = "remora-crypto"
+description = "Remora cryptography: SPAKE2, Noise handshake, device identity keys, safety codes and media encryption."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+
+[lints]
+workspace = true

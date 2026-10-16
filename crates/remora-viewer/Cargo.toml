@@ -1,0 +1,13 @@
+[package]
+name = "remora-viewer"
+description = "Remora viewer: views and controls a remote Remora host."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+license = "GPL-3.0-or-later"
+
+[dependencies]
+
+[lints]
+workspace = true

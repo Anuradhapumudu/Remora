@@ -1,0 +1,13 @@
+[package]
+name = "remora-net"
+description = "Remora networking: single-socket STUN/ICE/QUIC transport with NAT traversal."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+
+[lints]
+workspace = true

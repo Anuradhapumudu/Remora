@@ -1,0 +1,13 @@
+[package]
+name = "remora-capture"
+description = "Remora screen capture: a ScreenCapture trait with per-OS backends."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+
+[lints]
+workspace = true

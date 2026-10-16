@@ -1,0 +1,6 @@
+# Pinned so local and CI builds use the same compiler (architecture.md D13).
+# MSRV (oldest supported) is `rust-version` in Cargo.toml.
+[toolchain]
+channel = "1.99.1"
+components = ["rustfmt", "clippy"]
+profile = "minimal"

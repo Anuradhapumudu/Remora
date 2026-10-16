@@ -1,0 +1,13 @@
+[package]
+name = "remora-proto"
+description = "Remora wire protocol: versioned, length-limited protobuf messages and datagram framing."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+
+[lints]
+workspace = true

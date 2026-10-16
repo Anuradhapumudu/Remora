@@ -1,0 +1,13 @@
+[package]
+name = "remora-codec"
+description = "Remora video codecs: hardware-first encoder and decoder backends with a software fallback."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+
+[lints]
+workspace = true

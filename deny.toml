@@ -1,0 +1,70 @@
+# cargo-deny policy (threat model §7.8, docs/dependencies.md).
+# Run locally: `cargo deny check`
+
+[graph]
+# Check the dependency graph for every platform we ship, from any machine.
+targets = [
+    "aarch64-apple-darwin",
+    "x86_64-apple-darwin",
+    "x86_64-pc-windows-msvc",
+    "x86_64-unknown-linux-gnu",
+    "x86_64-unknown-linux-musl",
+]
+all-features = false
+
+[advisories]
+# Any RustSec vulnerability or unsound advisory fails the build. Unmaintained
+# crates are reported for our direct dependencies only.
+unmaintained = "workspace"
+yanked = "deny"
+ignore = []
+
+[licenses]
+# Library crates are MIT OR Apache-2.0, so everything they pull in must be
+# permissive. GPL is deliberately NOT here: when Slint (GPL-3.0 option) is added
+# in Phase 4 it gets a per-crate [[licenses.exceptions]] entry, so a GPL crate
+# can never slip into a library crate unnoticed.
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "Unicode-3.0",
+]
+confidence-threshold = 0.93
+# Allow-list entries not used yet are fine (they cover future dependencies).
+unused-allowed-license = "allow"
+
+[licenses.private]
+# Our own crates are `publish = false`; their licenses are set by hand.
+ignore = true
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+allow-wildcard-paths = true
+deny = [
+    # One RustCrypto generation only (architecture.md D3): a second copy of any
+    # of these means two incompatible implementations of the same primitive.
+    { crate = "curve25519-dalek", deny-multiple-versions = true },
+    { crate = "ed25519-dalek", deny-multiple-versions = true },
+    { crate = "x25519-dalek", deny-multiple-versions = true },
+    { crate = "chacha20poly1305", deny-multiple-versions = true },
+    { crate = "hkdf", deny-multiple-versions = true },
+    { crate = "blake2", deny-multiple-versions = true },
+    { crate = "sha2", deny-multiple-versions = true },
+    { crate = "digest", deny-multiple-versions = true },
+    { crate = "snow", deny-multiple-versions = true },
+    { crate = "spake2", deny-multiple-versions = true },
+    # Build simplicity on Windows (D8) and a single TLS/crypto backend.
+    { crate = "openssl-sys", reason = "use rustls + ring" },
+    { crate = "aws-lc-sys", reason = "needs cmake + NASM on Windows; use ring (D8)" },
+]
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

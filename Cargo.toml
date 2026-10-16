@@ -1,0 +1,104 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.0.1"
+edition = "2024"
+# Slint 1.18 needs Rust 1.92 (architecture.md D13).
+rust-version = "1.92"
+publish = false
+
+# Verified against crates.io on 2026-10-17 — see docs/dependencies.md before
+# adding or bumping anything here. Entries only get compiled/locked once a
+# member crate uses them (`foo = { workspace = true }`).
+[workspace.dependencies]
+# internal
+remora-proto = { path = "crates/remora-proto" }
+remora-crypto = { path = "crates/remora-crypto" }
+remora-net = { path = "crates/remora-net" }
+remora-session = { path = "crates/remora-session" }
+remora-capture = { path = "crates/remora-capture" }
+remora-codec = { path = "crates/remora-codec" }
+remora-input = { path = "crates/remora-input" }
+remora-testkit = { path = "crates/remora-testkit" }
+
+# async + network
+tokio = { version = "1.53", default-features = false }
+quinn = { version = "0.11.12", default-features = false, features = ["runtime-tokio", "rustls-ring"] }
+rustls = { version = "0.23.46", default-features = false, features = ["ring", "std"] }
+is = "0.11.1"
+reed-solomon-simd = "3.1"
+bytes = "1"
+
+# crypto — one RustCrypto generation, matching snow 0.10 / spake2 0.4 (D3)
+snow = "0.10.0"
+spake2 = "0.4.0"
+ed25519-dalek = { version = "2.2", features = ["rand_core", "zeroize"] }
+chacha20poly1305 = "0.10"
+hkdf = "0.12"
+sha2 = "0.10"
+blake2 = "0.10"
+rand_core = { version = "0.6", features = ["getrandom"] }
+zeroize = { version = "1.8", features = ["derive"] }
+subtle = "2.6"
+keyring = "4.2"
+
+# protocol
+prost = "0.14.4"
+prost-build = "0.14.4"
+protox = "0.9.1"
+
+# platform
+objc2 = "0.6.5"
+objc2-foundation = "0.3.2"
+objc2-screen-capture-kit = "0.3.2"
+objc2-video-toolbox = "0.3.2"
+objc2-core-media = "0.3.2"
+objc2-core-video = "0.3.2"
+windows = "0.62.2"
+x11rb = "0.14.0"
+openh264 = "0.9.8"
+
+# UI / rendering
+wgpu = "30.0.1"
+slint = { version = "1.18.1", features = ["unstable-wgpu-30"] }
+
+# server
+axum = { version = "0.8.9", features = ["ws"] }
+
+# utilities
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+thiserror = "2.0"
+anyhow = "1.0"
+clap = { version = "4.6", features = ["derive"] }
+criterion = "0.8.2"
+
+[workspace.lints.rust]
+# Pure crates additionally put `#![forbid(unsafe_code)]` in lib.rs. The three
+# OS-backend crates rely on this `deny` so their `sys` modules can opt in.
+unsafe_code = "deny"
+unsafe_op_in_unsafe_fn = "deny"
+missing_docs = "warn"
+unreachable_pub = "warn"
+
+[workspace.lints.clippy]
+undocumented_unsafe_blocks = "deny"
+# Network data must never be able to panic us. Tests may unwrap (clippy.toml).
+unwrap_used = "deny"
+expect_used = "deny"
+dbg_macro = "deny"
+mem_forget = "deny"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+# Keep unwinding: panics in one thread must still let the session release
+# held keys (threat model INV10) rather than abort the process.
+panic = "unwind"
+strip = "symbols"
+
+# Fast-ish debug builds of heavy deps (video, crypto) without slowing our crates' compile.
+[profile.dev.package."*"]
+opt-level = 2
