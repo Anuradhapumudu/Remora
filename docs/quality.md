@@ -7,17 +7,21 @@ Status: design v1 (Phase 1). Implemented in Phases 2, 4 and 7. Numbers marked
 
 | Metric | Target | Measured |
 |---|---|---|
-| Remora-added latency (capture → encode → net stack → decode → render submit), 1080p60 | < 20 ms | — (Phase 4) |
+| Remora-added latency (capture → encode → net stack → decode → render submit), 1080p60 | < 20 ms (**never raised**; if exceeded, stop and report) | — (Phase 4) |
+| Encode, Apple M4 hardware H.264 low-latency | ≤ 7 ms p95 (revised from an unmeasured 6 ms estimate — phase2-criteria.md §6) | 6.38 p50 / 6.76 p95 (encoder-only) |
 | Total glass-to-glass latency | ≈ one-way network delay + 20 ms + display refresh wait | — |
 | Host CPU, static screen | < 2 % | — (Phase 2) |
 | Viewer memory | < 150 MB | — (Phase 4) |
+
+Measured stage numbers are **per chip** (here: Apple M4). Other Macs and other
+OSes are measured in their own phases; never reuse an M4 number for them.
 
 ## 2. Latency budget (Apple Silicon, 1080p60, *estimates*)
 
 | Stage | Budget | How we keep it small |
 |---|---|---|
 | Capture delivery (ScreenCaptureKit) | 2–4 ms | Frame-change-driven; `minimumFrameInterval` = 1/fps cap; queue depth 3 |
-| Encode (VideoToolbox) | 3–6 ms | Low-latency rate control, no B-frames, no lookahead, real-time priority, IOSurface passed zero-copy |
+| Encode (VideoToolbox) | ~~3–6 ms~~ **measured on M4: 6.4 p50 / 6.8 p95** |  Low-latency rate control, no B-frames, no lookahead, real-time priority, IOSurface passed zero-copy |
 | Packetise + FEC + encrypt + send | < 1 ms | ChaCha20 is a few GB/s per core |
 | Network | (not ours) | — |
 | Reassemble + decode (VideoToolbox) | 2–4 ms | Decode as soon as the last fragment (or enough FEC) arrives |
@@ -87,14 +91,29 @@ tested with recorded and synthetic traces.
 (30/60/120/144), bitrate cap, codec, hardware/software encoder. Auto adapts
 *within* these limits; it never exceeds them.
 
-### 4:4:4 reality check
+### 4:4:4 reality check — design constraint (measured on M4, Phase 2)
 
-Chroma subsampling (4:2:0) blurs coloured text. Hardware support for 4:4:4 is
-patchy: hardware H.264 4:4:4 *decode* barely exists on consumer GPUs; HEVC 4:4:4
-decode exists on newer Intel/NVIDIA/Apple hardware; VideoToolbox 4:4:4 *encode*
-support on Apple Silicon is verified in Phase 2. Sharp text therefore uses
-4:4:4 only when both peers report it in `Capabilities`; the stats overlay shows
-which you got.
+Chroma subsampling (4:2:0) blurs coloured text. Measured on the M4
+(`docs/evidence/phase2-probe-encoder-m4.txt`, verified by parsing the stream's
+own `chroma_format_idc`):
+
+* **True 4:4:4 hardware encode works — but ONLY in normal rate-control mode**
+  (H.264 High 4:4:4 Predictive and HEVC Range Extensions, `chroma_format_idc = 3`).
+* **In low-latency mode the encoder silently falls back to 4:2:0** (H.264 High,
+  `chroma_format_idc = 1`) even when fed 4:4:4 frames, and offers no 4:4:4
+  profile at all.
+
+Consequences:
+
+1. **Sharp text is a latency-vs-chroma trade-off.** 4:4:4 means leaving
+   low-latency rate control; Phase 7 measures what that costs (encode latency,
+   bitrate, rate-control behaviour) before the mode ships.
+2. **The stats overlay must show the chroma format actually in the stream**
+   (read from the SPS we send), never the format we *asked* for, because the
+   encoder can downgrade silently.
+3. Decode side: hardware H.264 4:4:4 *decode* is rare on consumer GPUs; HEVC
+   4:4:4 decode exists on newer Intel/NVIDIA/Apple hardware. 4:4:4 is used only
+   when both peers report support in `Capabilities`.
 
 ## 5. Static content refinement
 

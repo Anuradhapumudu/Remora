@@ -48,6 +48,17 @@ Each phase ends **runnable**, with tests and exact manual test steps.
 
 v0.1 is reached at the end of **Phase 8** (Linux X11 in Phase 9 is post-v0.1).
 
+## Known gaps before v0.1
+
+Things that could not be verified yet and must be closed (or explicitly
+accepted by the owner) before v0.1:
+
+| Gap | Why open | Close by |
+|---|---|---|
+| MSI install / uninstall / upgrade-in-place on real Windows | No Windows machine yet | Phase 6.5 |
+| macOS signing + notarization path | No Apple Developer ID yet | Before first public release |
+| Per-chip encoder floors for Intel Mac, NVENC, QuickSync, AMF | Only measured on Apple M4 | Phases 6.5 / 9 |
+
 ## Progress log
 
 | Date | Phase | v0.1 items open | Notes |

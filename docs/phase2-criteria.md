@@ -1,7 +1,12 @@
 # Phase 2 acceptance criteria — macOS capture + hardware encode
 
-Status: criteria fixed before any capture code (2026-10-17). **Results: partial —
-C2 FAILS on encoder-only evidence (§5); capture tests wait for Screen Recording permission.**
+Status: criteria fixed before any capture code (2026-10-17); **C2 revised by owner
+decision (§6)**. Results: partial (§5); capture tests wait for Screen Recording permission.
+
+> **These thresholds are PER-CHIP: they apply to the Apple M4 test machine only.**
+> Hardware encoders differ. Intel Macs, Windows (NVENC / QuickSync / AMF) and Linux
+> (VAAPI) are re-measured in their own phases and may have different floors.
+> Nobody may cite an M4 number for another chip.
 
 Rule: thresholds in §2 are not changed after measuring. If one FAILS, work stops
 and the failure is reported with the numbers and a proposed design change
@@ -32,7 +37,7 @@ reported at exactly 1920 × 1080 (letterboxed).
 | ID | Metric | PASS if | How it is measured |
 |---|---|---|---|
 | C1 | **Capture delivery** latency | p50 **≤ 4 ms** and p95 **≤ 4 ms** | Per frame: `mach_absolute_time()` at entry of our ScreenCaptureKit output handler − the frame's display time from `SCStreamFrameInfo.displayTime` (same clock). Motion test, 60 s, all `complete` frames. |
-| C2 | **Encode** latency | p50 **≤ 6 ms** and p95 **≤ 6 ms** | Per frame: time of VideoToolbox output callback − time of the `VTCompressionSessionEncodeFrame` call for the same frame (matched by presentation timestamp). Motion test, 60 s. |
+| C2 | **Encode** latency | p95 **≤ 7 ms** (p50 reported) — *revised 2026-10-17, §6* | Per frame: time of VideoToolbox output callback − time of the `VTCompressionSessionEncodeFrame` call for the same frame (matched by presentation timestamp). Motion test, 60 s. |
 | C3 | **Host CPU, static screen** | **< 2 %** of one core, averaged over 60 s | CPU time (user + system) consumed during the 60 s by our process **plus** every helper process whose CPU time grows because of the capture (expected: `VTEncoderXPCService`; any other found is listed), ÷ 60 s. Measured with `ps -o cputime` / `proc_pid_rusage` before and after. Cross-checked by a system-wide A/B (60 s idle vs 60 s capturing). "One core" is Activity Monitor's convention — stricter than "% of all 10 cores". |
 | C4 | **No memory growth** | footprint(min 10) − footprint(min 1) **≤ 2 MB** and least-squares slope over minutes 1–10 **≤ 0.1 MB/min** | `phys_footprint` (Activity Monitor's "Memory" column) of our process sampled every 10 s during a 10-minute motion capture + encode. Minute 0 excluded (pools warming up). |
 | C5 | **Encoder keeps up at 60 fps** | encoded frames **=** captured `complete` frames (**0 dropped**, **0 encoder errors**) **and** captured ≥ **3528** (98 % of 60 s × 60 fps) | 60 s motion test. Counters: frames delivered by SCK by status, frames submitted, frames encoded, frames dropped by our bounded queue, VT errors. If SCK delivers < 3528, that's reported as a capture shortfall even if the encoder kept up. |
@@ -77,8 +82,8 @@ cargo run --release -p remora-host -- bench-capture --seconds 60 --out /tmp/remo
 | ID | p50 | p95 | p99 | max | Other | Verdict |
 |---|---|---|---|---|---|---|
 | C1 capture delivery | — | — | — | — | needs Screen Recording permission | pending |
-| C2 encode — **encoder-only reference** (`--synthetic`, 1920×1248, 30 s) | **6.38** | **6.76** | 7.00 | 26.96 | 1801 frames | **FAIL** (> 6 ms) |
-| C2 encode — official motion-capture run | — | — | — | — | | pending (expected FAIL: encode time doesn't depend on the frame source) |
+| C2 encode — **encoder-only reference** (`--synthetic`, 1920×1248, 30 s) | **6.38** | **6.76** | 7.00 | 26.96 | 1801 frames | FAIL vs original 6 ms; **PASS vs revised ≤ 7 ms p95** |
+| C2 encode — official motion-capture run | — | — | — | — | | pending |
 | C3 static CPU | — | | | | | pending |
 | C4 memory growth | — | | | | | pending |
 | C5 keeps up — encoder-only reference | | | | | 1801/1801 encoded, 0 dropped, 0 errors, 60.0 fps | PASS (reference) |
@@ -105,8 +110,7 @@ Output validity: `ffprobe` decodes all 1801 frames — H.264 Constrained Baselin
 
 Conclusion: the M4's H.264 low-latency hardware path has a floor of about
 **6.1–6.4 ms p50 / 6.5–6.9 ms p95 for any frame ≥ 720p**. No documented or
-undocumented setting found lowers it. Decision requested from the owner
-(see the Phase 2 report).
+undocumented setting found lowers it. Owner decision: §6.
 
 ### 5.3 Questions
 
@@ -119,4 +123,29 @@ undocumented setting found lowers it. Decision requested from the owner
 
 ## 6. Changes to criteria
 
-None.
+### 2026-10-17 — C2 raised from "p50 and p95 ≤ 6 ms" to "p95 ≤ 7 ms" (owner-approved, option A)
+
+* **Why:** the original 6 ms was an **unmeasured planning estimate** from the
+  Phase 1 latency budget (quality.md §2), not a measured requirement.
+* **Evidence:** on the M4, the low-latency H.264 hardware encoder has a floor of
+  **≈ 6.4 ms p50 / ≈ 6.9 ms p95 at 720p and above**, shown by the 13-variation
+  probe in §5.2 (sizes from 640×360 to 2560×1664, 30–120 fps, both H.264
+  profiles, HEVC, power-efficiency off, slices, an undocumented latency key).
+  Nothing lowered it except shrinking frames to 640×360.
+* **What does NOT change:** the end-to-end budget. Remora's added latency
+  (capture → encode → send stack → decode → render) must stay **< 20 ms at
+  1080p60**. With encode at up to 7 ms, that leaves **≈ 13 ms for capture +
+  send stack + decode + render combined**. If the measured end-to-end pipeline
+  (Phase 4) exceeds 20 ms, work **STOPS** and is reported; the 20 ms total is
+  never raised to absorb it.
+* **Scope:** Apple M4 only (see the per-chip note at the top).
+
+## 7. Phase 2 completion checklist
+
+- [ ] C1, C3, C4, C5 measured on the M4 (worst of 3 runs) and recorded in §5
+- [ ] Q3 runtime "frames only on change" measured; Q4 events observed
+- [ ] Revoke whatever Screen Recording permission was granted for testing
+      (System Settings → Privacy & Security → Screen & System Audio Recording),
+      unless the owner decides to keep it
+- [ ] Known gaps carried into docs/roadmap.md ("Known gaps before v0.1")
+- [ ] Phase 2 report: commands, numbers vs criteria, limitations

@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Remora motion pattern</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+  canvas { display: block; width: 100vw; height: 100vh; }
+</style>
+</head>
+<body>
+<!-- Phase 2 motion test (docs/phase2-criteria.md §3): every display refresh draws
+     a different frame, so ScreenCaptureKit should deliver a new frame each time.
+     Open in Safari and press ⌃⌘F for full screen. -->
+<canvas id="c"></canvas>
+<script>
+  const c = document.getElementById("c");
+  const g = c.getContext("2d");
+  let frame = 0;
+  function resize() {
+    c.width = Math.round(innerWidth * devicePixelRatio);
+    c.height = Math.round(innerHeight * devicePixelRatio);
+  }
+  addEventListener("resize", resize);
+  resize();
+  function draw() {
+    const w = c.width, h = c.height;
+    // Shifting colour bars: whole-screen change every frame.
+    const bars = 16, bw = w / bars, shift = (frame * 8) % bw;
+    for (let i = -1; i < bars + 1; i++) {
+      g.fillStyle = `hsl(${(i * 360 / bars + frame) % 360} 70% 50%)`;
+      g.fillRect(i * bw + shift, 0, bw + 1, h);
+    }
+    // Moving white bar plus fine text (stresses chroma and detail).
+    g.fillStyle = "#fff";
+    g.fillRect((frame * 12) % w, 0, 24, h);
+    g.font = `${Math.round(h / 12)}px ui-monospace, Menlo, monospace`;
+    g.fillStyle = "#000";
+    g.fillRect(0, 0, w, h / 9);
+    g.fillStyle = "#fff";
+    g.fillText(`frame ${frame}  ${performance.now().toFixed(1)} ms`, h / 40, h / 12);
+    frame++;
+    requestAnimationFrame(draw);
+  }
+  requestAnimationFrame(draw);
+</script>
+</body>
+</html>

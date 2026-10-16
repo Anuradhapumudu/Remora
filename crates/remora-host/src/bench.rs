@@ -19,8 +19,10 @@ use crate::stats::{Samples, slope};
 use crate::sysmon;
 
 // Thresholds — copied from docs/phase2-criteria.md §2. Do not edit without §6.
+// PER-CHIP: measured for the Apple M4; other hardware gets its own numbers.
 const C1_CAPTURE_MS: f64 = 4.0;
-const C2_ENCODE_MS: f64 = 6.0;
+// C2 revised 2026-10-17 (criteria §6): p95 ≤ 7 ms; was an unmeasured 6 ms estimate.
+const C2_ENCODE_P95_MS: f64 = 7.0;
 const C3_CPU_PERCENT: f64 = 2.0;
 const C4_GROWTH_MB: f64 = 2.0;
 const C4_SLOPE_MB_PER_MIN: f64 = 0.1;
@@ -462,8 +464,8 @@ fn report(
         }
         if let Some(m) = enc {
             println!(
-                "  C2 encode  ≤ {C2_ENCODE_MS} ms p50 & p95 → {}",
-                verdict(m.p50 <= C2_ENCODE_MS && m.p95 <= C2_ENCODE_MS)
+                "  C2 encode  ≤ {C2_ENCODE_P95_MS} ms p95 → {}",
+                verdict(m.p95 <= C2_ENCODE_P95_MS)
             );
         }
         let min_frames = (C5_MIN_FRACTION * a.seconds as f64 * f64::from(a.fps)).ceil() as u64;
