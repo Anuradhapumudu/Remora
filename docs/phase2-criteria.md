@@ -77,19 +77,29 @@ scripts/macos/dev-app.sh run bench-capture --seconds 60 --out /tmp/remora.h264
 
 ## 5. Results
 
-### 5.1 Measured so far (2026-10-17, release build, AC power)
+### 5.1 Official runs (2026-10-17, M4, release build, AC power, RemoraDev.app)
 
-| ID | p50 | p95 | p99 | max | Other | Verdict |
+Motion test, 3 × 60 s, motion pattern full screen in Safari, 1920×1248, frame
+cap 60 (implemented as a 1/61 s minimum interval — see 5.5). Every run valid
+(60.0 fps; accounting line shows no frame dropped from C1). Logs:
+`target/phase2-results/motion-{1,2,3}.log`.
+
+| ID | Run 1 | Run 2 | Run 3 | **Worst** | Threshold | Verdict |
 |---|---|---|---|---|---|---|
-| C1 capture delivery | — | — | — | — | needs Screen Recording permission | pending |
-| C2 encode — **encoder-only reference** (`--synthetic`, 1920×1248, 30 s) | **6.38** | **6.76** | 7.00 | 26.96 | 1801 frames | FAIL vs original 6 ms; **PASS vs revised ≤ 7 ms p95** |
-| C2 encode — official motion-capture run | — | — | — | — | | pending |
-| C3 static CPU | — | | | | | pending |
-| C4 memory growth | — | | | | | pending |
-| C5 keeps up — encoder-only reference | | | | | 1801/1801 encoded, 0 dropped, 0 errors, 60.0 fps | PASS (reference) |
+| C1 capture delivery p50 / p95 (ms, signed) | 0.45 / 0.52 | 0.44 / 0.49 | 0.43 / 0.73 | **0.45 / 0.73** | ≤ 4 / ≤ 4 | **PASS** |
+| C2 encode p95 (p50) (ms) | 7.27 (7.06) | 7.16 (7.06) | 7.45 (7.07) | **7.45 (7.07)** | p95 ≤ 7 | **FAIL** (+0.45 ms) |
+| C5 keeps up | 3599 / 3599, 0 dropped, 0 errors | same | same | **3599 ≥ 3528** | | **PASS** |
+| display → encoded p95 (p50) (ms) — *info, not a criterion* | 7.77 (7.51) | 7.62 (7.51) | 8.14 (7.51) | **8.14 (7.51)** | — | — |
+| C3 static CPU | — | — | — | — | < 2 % | not run (stopped on C2) |
+| C4 memory growth | — | — | — | — | ≤ 2 MB, ≤ 0.1 MB/min | not run (stopped on C2) |
 
-Output validity: `ffprobe` decodes all 1801 frames — H.264 Constrained Baseline,
-1920×1248, yuv420p.
+Output validity: `ffprobe` decodes all frames of the encoder-only runs (H.264
+Constrained Baseline, 1920×1248, yuv420p).
+
+Superseded: a first official block ran with the frame cap as an exact 1/60 s
+interval (`target/phase2-results/superseded-cap60/`): 57.2 fps (C5 FAIL from a
+capture-side shortfall) and C2 p95 9.52–9.55 ms. Two earlier blocks were
+INVALID (the motion pattern was not on screen; `invalid/`) and are not counted.
 
 ### 5.2 C2 investigation (encoder-only, `--synthetic`, 15–20 s each, p50 / p95 ms)
 
@@ -119,7 +129,21 @@ undocumented setting found lowers it. Owner decision: §6.
 | Q1 4:4:4 encode | **Yes in hardware, but NOT in low-latency mode.** Normal rate control: H.264 High 4:4:4 Predictive and HEVC Range Extensions produce real 4:4:4 (`chroma_format_idc = 3`). Low-latency rate control: 4:4:4 input is **silently subsampled** to 4:2:0 (H.264 High, `chroma_format_idc = 1`); no 4:4:4/4:2:2 profile is offered in that mode. | `docs/evidence/phase2-probe-encoder-m4.txt` (SPS parsed by `remora_codec::bitstream`, unit-tested) |
 | Q2 intra-refresh / LTR | **Documented API: long-term reference only** (`EnableLTR` + `AcknowledgedLTRTokens` + `ForceLTRRefresh`; no refresh key in SDK 27 headers). The low-latency H.264 encoder **additionally exposes undocumented** `PeriodicRefreshMode` and `MaxRefreshFrameIntervalDuration` (likely gradual refresh). Not yet exercised: an LTR acknowledge/refresh round trip. | Same evidence file (supported-property dump); SDK header grep |
 | Q3 SCK API path | **Header part answered:** in SDK 27 the only deprecated ScreenCaptureKit items are `SCStreamType`/`streamType` (unused by us); `SCShareableContent` → `SCContentFilter(display:)` → `SCStreamConfiguration` → `SCStream` + `SCStreamOutput` is current. **Runtime "frames only on change": pending** (needs permission). | `ScreenCaptureKit.framework/Headers` in SDK 27.0 |
+| Q3 runtime "frames only on change" | not run (stopped on C2) | — |
 | Q4 res change / sleep / unplug | Physical display unplug: **not tested — no external display available** (known gap). Single-display subset: pending (§5.4). | — |
+
+### 5.4 Single-display hotplug subset
+
+Not run yet (stopped on C2).
+
+### 5.5 C2 / C5 diagnosis with real captured frames
+
+| Finding | Evidence |
+|---|---|
+| **C5 shortfall was our configuration.** `minimumFrameInterval` = exactly 1/60 s made ScreenCaptureKit skip frames arriving a hair early (57.2 fps, zero `idle` callbacks). 1/61 s → 59.9–60.0 fps. Fixed in `remora-capture`. | cap 61 / 120 → 1198–1199 frames per 20 s |
+| **Not GPU contention.** Synthetic frames encode at 6.10 / 6.69 ms (p50 / p95) even while Safari animates full screen. | encoder-only run with motion on screen |
+| **≈ 1.15 ms of "encode" is the encoder waiting for the GPU to finish the captured surface.** Encoding each frame ~16 ms later (when the next one arrives) gives 5.92 / 6.1–6.4 ms vs 7.07 / 7.4–7.7 ms when encoded immediately — consistent over 4 alternated rounds. That time is really capture (compositing/scaling) cost showing up on the encoder's clock. | `--diag-encode-previous`, 4 × 2 alternated 20 s runs |
+| **Unexplained drift.** The same configuration measured C2 p50 ≈ 9.0 ms at 02:56–02:59 and ≈ 7.05 ms from 03:05 on, with no thermal/performance warning recorded. Cause unknown; reported, not hidden. Worst-of-3 judging on the corrected configuration is in 5.1. | `superseded-cap60/` vs later runs; `pmset -g therm` |
 
 ## 6. Changes to criteria
 

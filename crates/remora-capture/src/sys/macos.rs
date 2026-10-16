@@ -45,6 +45,8 @@ const OS_TIMEOUT: Duration = Duration::from_secs(10);
 const SC_ERROR_USER_DECLINED: i64 = -3801;
 
 /// A retained, IOSurface-backed `CVPixelBuffer` holding one captured frame (NV12).
+/// Cloning adds a reference; it never copies pixels.
+#[derive(Clone)]
 pub struct PixelBufferRef(CFRetained<CVPixelBuffer>);
 
 // SAFETY: CVPixelBuffer is a CoreFoundation object: retain/release are atomic, and
@@ -473,7 +475,11 @@ impl MacScreenCapture {
             c.setWidth(self.size.0 as usize);
             c.setHeight(self.size.1 as usize);
             c.setPixelFormat(kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange);
-            c.setMinimumFrameInterval(CMTime::new(1, fps));
+            // Interval of 1/(fps+1), not 1/fps: with exactly 1/fps, display timing
+            // jitter makes ScreenCaptureKit skip frames that arrive a hair early
+            // (measured: 57.2 instead of 60 fps). The display's own refresh rate still
+            // caps delivery, and on faster displays every other frame still fits.
+            c.setMinimumFrameInterval(CMTime::new(1, fps + 1));
             c.setQueueDepth(self.cfg.queue_depth.clamp(3, 8) as isize);
             c.setShowsCursor(self.cfg.show_cursor);
             // Capture at full pixel resolution, then scale (sharper text).
