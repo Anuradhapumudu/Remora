@@ -295,6 +295,8 @@ jobs:
       - uses: taiki-e/install-action@861a07ce7084f55488e375df125cdc99bba60eb7 # v2.87.23
         with:
           tool: cargo-deb,cargo-generate-rpm
+      - name: Install rpm (dependency generator for the .rpm)
+        run: sudo apt-get update -q && sudo apt-get install -y -q --no-install-recommends rpm
       - name: Package (.deb, .rpm, AppImage, .tar.gz)
         env:
           VERSION: ${{ needs.version.outputs.version }}

@@ -4,7 +4,7 @@
 #
 # Usage: scripts/linux/package.sh --version X.Y.Z[-suffix] [--out dist]
 #
-# Requires: cargo-deb, cargo-generate-rpm (CI installs them), curl, sha256sum.
+# Requires: cargo-deb, cargo-generate-rpm, rpm (for find-requires), curl, sha256sum.
 set -euo pipefail
 
 VERSION="" OUT="dist"
@@ -45,7 +45,10 @@ fi
 cargo deb -p remora-viewer --no-build --deb-version "$DEB_VERSION" -o "$OUT/"
 
 # 2. .rpm (cargo-generate-rpm). RPM versions cannot contain '-', so the suffix goes in Release.
-cargo generate-rpm -p crates/remora-viewer -o "$OUT/" \
+#    Dependencies come from RPM's own generator (elfdeps, in the `rpm` package): the builtin
+#    ldd-based scanner emits unsatisfiable "libc.so.6(GLIBC_x)[WEAK]" requirements.
+[[ -x /usr/lib/rpm/find-requires ]] || { echo "install the 'rpm' package (provides find-requires)" >&2; exit 1; }
+cargo generate-rpm -p crates/remora-viewer -o "$OUT/" --auto-req find-requires \
   -s "release = \"$RPM_RELEASE\"" -s "vendor = \"$MAINTAINER\""
 
 # 3. AppImage — tools pinned by version AND sha256 (supply chain, threat model §7.8).
