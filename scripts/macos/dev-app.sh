@@ -33,6 +33,8 @@ build() {
       -e "s|<string>remora-viewer</string>|<string>remora-host</string>|" \
       -e "s|<string>Remora</string>|<string>RemoraDev</string>|g" \
       "$ROOT/packaging/macos/Info.plist.in" > "$APP/Contents/Info.plist"
+  # Background-only agent app: no Dock icon, never takes focus.
+  plutil -insert LSUIElement -bool true "$APP/Contents/Info.plist"
   plutil -lint "$APP/Contents/Info.plist" >/dev/null
   codesign --force --sign "$IDENTITY" --identifier "$BUNDLE_ID" "$APP/Contents/MacOS/remora-host"
   codesign --force --sign "$IDENTITY" --identifier "$BUNDLE_ID" "$APP"
@@ -43,8 +45,9 @@ build() {
 run() {
   [[ -d "$APP" ]] || build
   LOG="$(mktemp -t remora-dev)"
-  # -W wait for exit, -n new instance; stdout/stderr go to $LOG.
-  open -W -n --stdout "$LOG" --stderr "$LOG" "$APP" --args "$@" || true
+  # -W wait for exit, -n new instance, -g don't bring to the foreground (activating
+  # an app would switch away from a full-screen Space, e.g. the motion pattern).
+  open -W -n -g --stdout "$LOG" --stderr "$LOG" "$APP" --args "$@" || true
   cat "$LOG"; rm -f "$LOG"
 }
 

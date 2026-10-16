@@ -69,6 +69,10 @@ pub(crate) struct BenchArgs {
     /// Report CPU time of this process and capture/encode helpers (criterion C3).
     #[arg(long)]
     measure_cpu: bool,
+    /// Diagnostic only: encode each captured frame when the NEXT one arrives, to
+    /// test whether the encoder waits for the GPU to finish writing the surface.
+    #[arg(long, hide = true)]
+    diag_encode_previous: bool,
     /// Capture this display (CGDirectDisplayID; see `remora-host list-displays`).
     #[arg(long)]
     display_id: Option<u32>,
@@ -89,6 +93,8 @@ enum Msg {
     Capture {
         status: FrameStatus,
         image_size: Option<(u32, u32)>,
+        /// Encoder sequence number and the frame's display time (for display → encoded).
+        encoded_as: Option<(u64, Instant)>,
         delivery_ns: Option<i64>,
         dirty_rects: usize,
         submitted: bool,
@@ -118,6 +124,18 @@ struct Tally {
     dirty_rects: u64,
     events: Vec<String>,
     last_size: Option<(u32, u32)>,
+    /// Display time → encoded frame ready (the capture + encode segment as a whole).
+    display_to_encoded: Samples,
+    display_by_seq: std::collections::HashMap<u64, Instant>,
+    completed_by_seq: std::collections::HashMap<u64, Instant>,
+}
+
+/// `a − b` in signed nanoseconds.
+fn signed_ns(a: Instant, b: Instant) -> i64 {
+    match a.checked_duration_since(b) {
+        Some(d) => i64::try_from(d.as_nanos()).unwrap_or(i64::MAX),
+        None => -i64::try_from(b.duration_since(a).as_nanos()).unwrap_or(i64::MAX),
+    }
 }
 
 pub(crate) fn run(a: BenchArgs) -> Result<()> {
@@ -214,19 +232,33 @@ pub(crate) fn run(a: BenchArgs) -> Result<()> {
     let mut synthetic_thread = None;
     if let (Some(c), Some(enc)) = (capture.as_mut(), &encoder) {
         let (enc, ctx) = (Arc::clone(enc), tx.clone());
+        let delay = a.diag_encode_previous;
+        let mut held = None;
         c.start(Box::new(move |ev| match ev {
             CaptureEvent::Frame(f) => {
-                let (mut submitted, mut encode_error) = (false, false);
-                if let Some(img) = &f.image {
+                let (mut submitted, mut encode_error, mut enc_seq) = (false, false, None);
+                if let Some(img) = f.image.as_ref() {
                     let ts = f.display_time().saturating_duration_since(start);
-                    match enc.lock().map(|mut e| e.encode(img, ts, false)) {
-                        Ok(Ok(_)) => submitted = true,
-                        _ => encode_error = true,
+                    // Diagnostic: encode the PREVIOUS frame (~16 ms after it arrived).
+                    let job = if delay {
+                        held.replace((img.clone(), ts))
+                    } else {
+                        Some((img.clone(), ts))
+                    };
+                    if let Some((image, ts)) = job {
+                        match enc.lock().map(|mut e| e.encode(&image, ts, false)) {
+                            Ok(Ok(seq)) => {
+                                submitted = true;
+                                enc_seq = (!delay).then_some(seq);
+                            }
+                            _ => encode_error = true,
+                        }
                     }
                 }
                 let _ = ctx.send(Msg::Capture {
                     status: f.status,
                     image_size: f.image.as_ref().map(|i| (i.width(), i.height())),
+                    encoded_as: enc_seq.map(|s| (s, f.display_time())),
                     delivery_ns: f.delivery_ns,
                     dirty_rects: f.dirty_rects.len(),
                     submitted,
@@ -252,6 +284,7 @@ pub(crate) fn run(a: BenchArgs) -> Result<()> {
                 let _ = stx.send(Msg::Capture {
                     status: FrameStatus::Complete,
                     image_size: None,
+                    encoded_as: None,
                     delivery_ns: None,
                     dirty_rects: 0,
                     submitted: matches!(ok, Ok(Ok(_))),
@@ -342,6 +375,7 @@ fn handle(
         Msg::Capture {
             status,
             image_size,
+            encoded_as,
             delivery_ns,
             dirty_rects,
             submitted,
@@ -386,6 +420,14 @@ fn handle(
                 }
                 t.last_size = Some(size);
             }
+            if let Some((seq, display)) = encoded_as {
+                match t.completed_by_seq.remove(&seq) {
+                    Some(done) => t.display_to_encoded.push_ns(signed_ns(done, display)),
+                    None => {
+                        t.display_by_seq.insert(seq, display);
+                    }
+                }
+            }
             t.dirty_rects += dirty_rects as u64;
             t.submitted += u64::from(submitted);
             t.submit_errors += u64::from(encode_error);
@@ -395,6 +437,15 @@ fn handle(
             t.keyframes += u64::from(f.keyframe);
             t.bytes += f.data.len() as u64;
             t.encode.push(f.latency());
+            // The capture message may arrive after the encoded frame; keep both orders.
+            match t.display_by_seq.remove(&f.seq) {
+                Some(display) => t
+                    .display_to_encoded
+                    .push_ns(signed_ns(f.completed, display)),
+                None => {
+                    t.completed_by_seq.insert(f.seq, f.completed);
+                }
+            }
             if let Some(o) = out.as_mut() {
                 o.write_all(&f.data)?;
             }
@@ -484,6 +535,9 @@ fn report(
             );
         }
         let enc = row("C2 encode", &t.encode);
+        if !a.synthetic {
+            row("display → encoded (info)", &t.display_to_encoded);
+        }
 
         println!(
             "\nencoder: submitted {}  encoded {}  dropped {}  errors {} (+{} submit errors)  keyframes {}  avg bitrate {:.2} Mbit/s",
