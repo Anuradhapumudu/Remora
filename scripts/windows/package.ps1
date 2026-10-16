@@ -46,5 +46,7 @@ wix build (Join-Path $Root "packaging\windows\remora.wxs") -arch x64 `
   -d "Version=$MsiVersion" -d "BinDir=$BinDir" -d "LicenseFile=$(Join-Path $Root 'LICENSE-GPL')" `
   -o $Msi
 if ($LASTEXITCODE -ne 0) { throw "wix build failed" }
+# wix also writes a .wixpdb (debug database for the MSI build); it is not for users.
+Remove-Item -Force -ErrorAction SilentlyContinue (Join-Path $Out "*.wixpdb")
 
 Get-ChildItem $Out
