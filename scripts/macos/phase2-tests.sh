@@ -3,7 +3,7 @@
 # RemoraDev.app and saves every raw log under target/phase2-results/.
 #
 #   scripts/macos/phase2-tests.sh motion   # C1, C2, C5: 3 × 60 s  (motion pattern full screen)
-#   scripts/macos/phase2-tests.sh soak     # C4: 3 × 10 min        (motion pattern full screen)
+#   scripts/macos/phase2-tests.sh soak [N] # C4: 3 × 10 min, from run N (motion pattern full screen)
 #   scripts/macos/phase2-tests.sh static   # C3 + Q3: 3 × (60 s baseline + 60 s capture), hands off
 #
 # Every test is run 3 times; the WORST run is the one judged.
@@ -35,7 +35,8 @@ check_valid() { # <log>
 }
 
 # p50 (first number) of a latency row, e.g. "C12 screen → encoded" or "C2 encode".
-p50_of() { grep -E "^$2 " "$1" 2>/dev/null | awk '{for (i = 1; i <= NF; i++) if ($i ~ /^-?[0-9]+[.][0-9]+$/) { print $i; exit }}'; }
+# Never fails: a missing row yields an empty string (set -e must not end the block).
+p50_of() { { grep -E "^$2 " "$1" 2>/dev/null || true; } | awk '{for (i = 1; i <= NF; i++) if ($i ~ /^-?[0-9]+[.][0-9]+$/) { print $i; exit }}'; }
 
 # Criteria §6b: flag (never average away) a > 1 ms p50 disagreement with the previous
 # motion/soak run of ANY block (last-run.log is updated after every run).
@@ -44,7 +45,10 @@ compare_prev() { # <log> <previous log>
   local row a b
   for row in "C12 screen" "C2 encode"; do
     a="$(p50_of "$1" "$row")"; b="$(p50_of "$2" "$row")"
-    [[ -n "$a" && -n "$b" ]] || continue
+    if [[ -z "$a" || -z "$b" ]]; then
+      echo "    (drift check: no '$row' row in $(basename "$1") or $(basename "$2") — not compared)"
+      continue
+    fi
     if awk -v a="$a" -v b="$b" 'BEGIN { d = a - b; if (d < 0) d = -d; exit !(d > 1.0) }'; then
       echo "    ⚠ DRIFT FLAG: $row p50 $a ms vs $b ms in $(basename "$2") (> 1 ms) — investigate, do not average"
     fi
@@ -64,7 +68,7 @@ case "${1:-}" in
     done
     ;;
   soak)
-    for i in 1 2 3; do
+    for i in $(seq "${2:-1}" 3); do   # optional 2nd arg: first run number
       echo "[$(stamp)] soak run $i/3 (10 min, memory every 10 s)"
       front_safari
       "$APP" run bench-capture --seconds 600 --sample-memory 10 > "$OUT/soak-$i.log" 2>&1

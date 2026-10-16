@@ -17,6 +17,7 @@ clap = { workspace = true }
 [target.'cfg(target_os = "macos")'.dependencies]
 remora-capture = { workspace = true }
 remora-codec = { workspace = true }
+objc2-foundation = { workspace = true, features = ["NSProcessInfo"] }
 
 [lints]
 workspace = true

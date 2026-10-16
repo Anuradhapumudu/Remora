@@ -340,6 +340,7 @@ version = "0.0.1"
 dependencies = [
  "anyhow",
  "clap",
+ "objc2-foundation",
  "remora-capture",
  "remora-codec",
 ]
