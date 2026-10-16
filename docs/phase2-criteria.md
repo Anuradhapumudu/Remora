@@ -36,7 +36,7 @@ reported at exactly 1920 × 1080 (letterboxed).
 
 | ID | Metric | PASS if | How it is measured |
 |---|---|---|---|
-| C1 | **Capture delivery** latency | p50 **≤ 4 ms** and p95 **≤ 4 ms** | Per frame: `mach_absolute_time()` at entry of our ScreenCaptureKit output handler − the frame's display time from `SCStreamFrameInfo.displayTime` (same clock). Motion test, 60 s, all `complete` frames. |
+| C1 | **Capture delivery** latency | p50 **≤ 4 ms** and p95 **≤ 4 ms** | Per frame: `mach_absolute_time()` at entry of our ScreenCaptureKit output handler − the frame's display time from `SCStreamFrameInfo.displayTime` (same clock). Motion test, 60 s, **all** `complete` frames, **signed** (a frame delivered before its display time counts as a negative value; none are excluded — see §6 clarification). |
 | C2 | **Encode** latency | p95 **≤ 7 ms** (p50 reported) — *revised 2026-10-17, §6* | Per frame: time of VideoToolbox output callback − time of the `VTCompressionSessionEncodeFrame` call for the same frame (matched by presentation timestamp). Motion test, 60 s. |
 | C3 | **Host CPU, static screen** | **< 2 %** of one core, averaged over 60 s | CPU time (user + system) consumed during the 60 s by our process **plus** every helper process whose CPU time grows because of the capture (expected: `VTEncoderXPCService`; any other found is listed), ÷ 60 s. Measured with `ps -o cputime` / `proc_pid_rusage` before and after. Cross-checked by a system-wide A/B (60 s idle vs 60 s capturing). "One core" is Activity Monitor's convention — stricter than "% of all 10 cores". |
 | C4 | **No memory growth** | footprint(min 10) − footprint(min 1) **≤ 2 MB** and least-squares slope over minutes 1–10 **≤ 0.1 MB/min** | `phys_footprint` (Activity Monitor's "Memory" column) of our process sampled every 10 s during a 10-minute motion capture + encode. Minute 0 excluded (pools warming up). |
@@ -139,6 +139,19 @@ undocumented setting found lowers it. Owner decision: §6.
   (Phase 4) exceeds 20 ms, work **STOPS** and is reported; the 20 ms total is
   never raised to absorb it.
 * **Scope:** Apple M4 only (see the per-chip note at the top).
+
+### 2026-10-17 — C1 clarification (no threshold change)
+
+The first capture runs showed that **most frames reach our handler *before* the
+`displayTime` ScreenCaptureKit attaches** (in one 5 s run: 203 of 245 frames,
+typically 5.8 ms early) — `displayTime` is the vsync at which the content goes
+to the screen, not the moment it was composited. An early version of the bench
+silently discarded those frames, which biased C1. The definition is applied
+literally instead: the signed difference for **every** complete frame, ranked
+by nearest-rank percentiles; the bench prints an accounting line proving no
+frame was dropped. Negative C1 values mean capture delivery is not adding
+latency on top of display timing; true glass-to-glass latency is measured with
+the test pattern in Phase 4.
 
 ## 7. Phase 2 completion checklist
 

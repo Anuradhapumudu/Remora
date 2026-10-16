@@ -99,10 +99,12 @@ pub struct CapturedFrame {
     pub seq: u64,
     /// Why this callback happened.
     pub status: FrameStatus,
-    /// When the OS compositor presented this content on the display.
-    pub display_time: Instant,
     /// When our handler received it.
     pub arrival: Instant,
+    /// `arrival − display time` in nanoseconds, where the display time is the OS
+    /// compositor's timestamp for this content. **Negative** if the frame reached
+    /// us before that time; `None` if the OS gave no timestamp.
+    pub delivery_ns: Option<i64>,
     /// Regions that changed since the previous frame (empty if unknown).
     pub dirty_rects: Vec<Rect>,
     /// The image, present for [`FrameStatus::Complete`] frames.
@@ -111,9 +113,17 @@ pub struct CapturedFrame {
 }
 
 impl CapturedFrame {
-    /// Capture delivery latency: compositor present → our handler (criterion C1).
-    pub fn delivery_latency(&self) -> Duration {
-        self.arrival.saturating_duration_since(self.display_time)
+    /// The compositor's display time as an `Instant` (falls back to `arrival`).
+    /// Use it as the frame's presentation timestamp.
+    pub fn display_time(&self) -> Instant {
+        match self.delivery_ns {
+            Some(ns) if ns >= 0 => self
+                .arrival
+                .checked_sub(Duration::from_nanos(ns.unsigned_abs()))
+                .unwrap_or(self.arrival),
+            Some(ns) => self.arrival + Duration::from_nanos(ns.unsigned_abs()),
+            None => self.arrival,
+        }
     }
 }
 
@@ -123,7 +133,7 @@ impl std::fmt::Debug for CapturedFrame {
         f.debug_struct("CapturedFrame")
             .field("seq", &self.seq)
             .field("status", &self.status)
-            .field("delivery_latency", &self.delivery_latency())
+            .field("delivery_ns", &self.delivery_ns)
             .field("dirty_rects", &self.dirty_rects.len())
             .finish_non_exhaustive()
     }

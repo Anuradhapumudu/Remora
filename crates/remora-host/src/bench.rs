@@ -89,7 +89,7 @@ enum Msg {
     Capture {
         status: FrameStatus,
         image_size: Option<(u32, u32)>,
-        delivery: Duration,
+        delivery_ns: Option<i64>,
         dirty_rects: usize,
         submitted: bool,
         encode_error: bool,
@@ -103,6 +103,10 @@ struct Tally {
     statuses: BTreeMap<String, u64>,
     per_second: Vec<(u64, u64)>, // (complete, idle) per elapsed second
     delivery: Samples,
+    /// Complete frames that arrived BEFORE their display time.
+    early: u64,
+    /// Complete frames without a display timestamp.
+    no_display_time: u64,
     encode: Samples,
     submitted: u64,
     submit_errors: u64,
@@ -214,7 +218,7 @@ pub(crate) fn run(a: BenchArgs) -> Result<()> {
             CaptureEvent::Frame(f) => {
                 let (mut submitted, mut encode_error) = (false, false);
                 if let Some(img) = &f.image {
-                    let ts = f.display_time.saturating_duration_since(start);
+                    let ts = f.display_time().saturating_duration_since(start);
                     match enc.lock().map(|mut e| e.encode(img, ts, false)) {
                         Ok(Ok(_)) => submitted = true,
                         _ => encode_error = true,
@@ -223,7 +227,7 @@ pub(crate) fn run(a: BenchArgs) -> Result<()> {
                 let _ = ctx.send(Msg::Capture {
                     status: f.status,
                     image_size: f.image.as_ref().map(|i| (i.width(), i.height())),
-                    delivery: f.delivery_latency(),
+                    delivery_ns: f.delivery_ns,
                     dirty_rects: f.dirty_rects.len(),
                     submitted,
                     encode_error,
@@ -248,7 +252,7 @@ pub(crate) fn run(a: BenchArgs) -> Result<()> {
                 let _ = stx.send(Msg::Capture {
                     status: FrameStatus::Complete,
                     image_size: None,
-                    delivery: Duration::ZERO,
+                    delivery_ns: None,
                     dirty_rects: 0,
                     submitted: matches!(ok, Ok(Ok(_))),
                     encode_error: !matches!(ok, Ok(Ok(_))),
@@ -338,7 +342,7 @@ fn handle(
         Msg::Capture {
             status,
             image_size,
-            delivery,
+            delivery_ns,
             dirty_rects,
             submitted,
             encode_error,
@@ -351,8 +355,14 @@ fn handle(
             match status {
                 FrameStatus::Complete => {
                     t.per_second[sec].0 += 1;
-                    if !delivery.is_zero() {
-                        t.delivery.push(delivery);
+                    // C1 uses EVERY complete frame's signed value (criteria §2):
+                    // negative = delivered before the display time. Nothing is dropped.
+                    match delivery_ns {
+                        Some(ns) => {
+                            t.delivery.push_ns(ns);
+                            t.early += u64::from(ns < 0);
+                        }
+                        None => t.no_display_time += 1,
                     }
                 }
                 FrameStatus::Idle => t.per_second[sec].1 += 1,
@@ -460,6 +470,19 @@ fn report(
         } else {
             row("C1 capture delivery", &t.delivery)
         };
+        if !a.synthetic {
+            let n = t.delivery.summary().map_or(0, |m| m.count);
+            println!(
+                "  C1 = handler − display time, signed (negative = arrived before display time; min {:.2} ms)",
+                t.delivery.summary().map_or(0.0, |m| m.min)
+            );
+            println!(
+                "  C1 accounting: {n} frames with display time ({} early, {} on time/late) + {} without = {complete} complete",
+                t.early,
+                n as u64 - t.early,
+                t.no_display_time,
+            );
+        }
         let enc = row("C2 encode", &t.encode);
 
         println!(
