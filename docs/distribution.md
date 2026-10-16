@@ -41,10 +41,16 @@ or `Get-FileHash <file> -Algorithm SHA256` (Windows) and compare.
   GitHub retires it, switch the x86_64 slice to cross-compiling on arm64
   (`rustup target add x86_64-apple-darwin` works fine on Apple Silicon) and drop
   the native smoke test for that slice.
-* **Not yet exercised on GitHub.** The workflows pass `actionlint` and `zizmor`
-  (0 findings, auditor persona), and the macOS DMG, .deb and .rpm steps were
-  run locally — but the Windows MSI (WiX) and AppImage steps have only run
-  once the repository is pushed. Expect small fixes on the first run.
+* **Verification status (2026-10-17, before the first GitHub run):**
+  * macOS universal DMG: built and inspected locally (both slices, Info.plist, ad-hoc signature).
+  * Linux job: rehearsed end-to-end in a clean `ubuntu:22.04` x86_64 container. The
+    `.deb` installs/runs/uninstalls on Ubuntu 24.04, the `.rpm` on Fedora 42, the
+    AppImage runs on Debian 12, the musl `remora-signal` runs on Alpine (no glibc).
+    This found and fixed one real bug: unsatisfiable `[WEAK]` glibc requirements in
+    the `.rpm`.
+  * **Not yet run anywhere:** the Windows job (MSI via WiX, zip, signing), macOS
+    Developer ID signing/notarization (no certificate yet), and the GitHub-only
+    parts (artifact hand-off, SHA256SUMS job, release publishing).
 
 ## 2. macOS: signing, notarization and the Screen Recording permission
 
