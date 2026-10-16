@@ -11,3 +11,33 @@ license = "GPL-3.0-or-later"
 
 [lints]
 workspace = true
+
+# Linux packages bundle the whole app (host + viewer) under the name "remora".
+# Asset paths starting with target/release are rewritten by the tools to the real target dir.
+[package.metadata.deb]
+name = "remora"
+copyright = "2026, The Remora contributors"
+license-file = ["../../LICENSE-GPL", "0"]
+extended-description = """\
+Remora is an open-source, end-to-end encrypted, peer-to-peer remote desktop \
+application. Pre-alpha: not yet functional."""
+section = "net"
+priority = "optional"
+depends = "$auto"
+assets = [
+    ["target/release/remora-host", "usr/bin/", "755"],
+    ["target/release/remora-viewer", "usr/bin/", "755"],
+    ["../../packaging/linux/remora.desktop", "usr/share/applications/", "644"],
+    ["../../packaging/icons/remora-256.png", "usr/share/icons/hicolor/256x256/apps/remora.png", "644"],
+]
+
+[package.metadata.generate-rpm]
+name = "remora"
+summary = "End-to-end encrypted peer-to-peer remote desktop"
+license = "GPL-3.0-or-later"
+assets = [
+    { source = "target/release/remora-host", dest = "/usr/bin/remora-host", mode = "755" },
+    { source = "target/release/remora-viewer", dest = "/usr/bin/remora-viewer", mode = "755" },
+    { source = "../../packaging/linux/remora.desktop", dest = "/usr/share/applications/remora.desktop", mode = "644" },
+    { source = "../../packaging/icons/remora-256.png", dest = "/usr/share/icons/hicolor/256x256/apps/remora.png", mode = "644" },
+]

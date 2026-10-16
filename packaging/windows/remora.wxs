@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Remora MSI (WiX Toolset v5 schema). Built by scripts/windows/package.ps1:
+    wix build remora.wxs -arch x64 -d Version=X.Y.Z -d BinDir=... -d LicenseFile=... -o out.msi
+  UpgradeCode must NEVER change: Windows uses it to recognise newer Remora versions
+  and upgrade in place instead of installing side by side.
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package Name="Remora"
+           Manufacturer="The Remora contributors"
+           Version="$(var.Version)"
+           UpgradeCode="8DE1ED9A-5BCB-4BE4-A56F-978A35650D44"
+           Scope="perMachine"
+           Compressed="yes">
+
+    <!-- Same-version upgrades let nightly builds (same X.Y.Z) replace each other. -->
+    <MajorUpgrade AllowSameVersionUpgrades="yes"
+                  DowngradeErrorMessage="A newer version of Remora is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="Remora">
+        <Component Id="HostExe">
+          <File Id="HostExe" Source="$(var.BinDir)\remora-host.exe" KeyPath="yes" />
+        </Component>
+        <Component Id="ViewerExe">
+          <File Id="ViewerExe" Source="$(var.BinDir)\remora-viewer.exe" KeyPath="yes" />
+        </Component>
+        <Component Id="LicenseFile">
+          <File Id="LicenseFile" Source="$(var.LicenseFile)" Name="LICENSE.txt" KeyPath="yes" />
+        </Component>
+      </Directory>
+    </StandardDirectory>
+
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Component Id="StartMenuShortcut">
+        <Shortcut Id="ViewerShortcut" Name="Remora"
+                  Description="End-to-end encrypted remote desktop"
+                  Target="[INSTALLFOLDER]remora-viewer.exe"
+                  WorkingDirectory="INSTALLFOLDER" />
+        <!-- A shortcut can't be a component's key path; this registry value is. -->
+        <RegistryValue Root="HKMU" Key="Software\Remora" Name="StartMenuShortcut"
+                       Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </StandardDirectory>
+
+    <Feature Id="Main" Title="Remora">
+      <ComponentRef Id="HostExe" />
+      <ComponentRef Id="ViewerExe" />
+      <ComponentRef Id="LicenseFile" />
+      <ComponentRef Id="StartMenuShortcut" />
+    </Feature>
+  </Package>
+</Wix>

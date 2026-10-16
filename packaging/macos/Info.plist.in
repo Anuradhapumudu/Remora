@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Template: scripts/macos/bundle.sh replaces @BUNDLE_ID@, @SHORT_VERSION@, @BUILD_VERSION@. -->
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key>
+    <string>Remora</string>
+    <key>CFBundleDisplayName</key>
+    <string>Remora</string>
+    <key>CFBundleIdentifier</key>
+    <string>@BUNDLE_ID@</string>
+    <key>CFBundleShortVersionString</key>
+    <string>@SHORT_VERSION@</string>
+    <key>CFBundleVersion</key>
+    <string>@BUILD_VERSION@</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <!-- Both remora-host and remora-viewer live in Contents/MacOS. The viewer is
+         the launch target until a unified launcher UI exists. -->
+    <key>CFBundleExecutable</key>
+    <string>remora-viewer</string>
+    <key>CFBundleIconFile</key>
+    <string>Remora</string>
+    <key>LSApplicationCategoryType</key>
+    <string>public.app-category.utilities</string>
+    <!-- ScreenCaptureKit is solid from macOS 13; VideoToolbox low-latency mode needs 11.3+. -->
+    <key>LSMinimumSystemVersion</key>
+    <string>13.0</string>
+    <key>NSHighResolutionCapable</key>
+    <true/>
+    <key>NSSupportsAutomaticGraphicsSwitching</key>
+    <true/>
+    <!-- Shown by macOS where it supports a custom reason for Screen Recording.
+         The system prompt itself is not customisable on all macOS versions. -->
+    <key>NSScreenCaptureUsageDescription</key>
+    <string>Remora shares your screen only with a viewer you approve, end-to-end encrypted.</string>
+    <key>NSHumanReadableCopyright</key>
+    <string>© 2026 The Remora contributors. GPL-3.0-or-later.</string>
+</dict>
+</plist>

@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Remora
+GenericName=Remote Desktop
+Comment=End-to-end encrypted peer-to-peer remote desktop
+Exec=remora-viewer
+Icon=remora
+Terminal=false
+Categories=Network;RemoteAccess;
+Keywords=remote;desktop;screen;share;vnc;
