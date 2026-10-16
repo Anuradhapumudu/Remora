@@ -1,0 +1,408 @@
+# Builds installable Remora packages on native runners (no cross-compilation).
+#
+#   push tag vX.Y.Z      → build, checksum, publish a GitHub Release (notes auto-generated)
+#   workflow_dispatch    → "nightly": build from any commit; artifacts are attached to the
+#                          run. Tick `publish_nightly` to also refresh the rolling
+#                          "nightly" pre-release.
+#
+# Signing is OPTIONAL and driven by repository secrets (docs/distribution.md). Missing
+# secrets → unsigned build + a warning, never a failure.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      publish_nightly:
+        description: "Also publish to the rolling 'nightly' pre-release"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  version:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      kind: ${{ steps.v.outputs.kind }}
+      build_number: ${{ steps.v.outputs.build_number }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: rustup toolchain install
+      - id: v
+        run: scripts/ci/version.sh
+
+  # ── macOS: one native build per architecture, merged with lipo afterwards ─────────
+  macos-build:
+    needs: version
+    strategy:
+      matrix:
+        include:
+          - runner: macos-15          # Apple Silicon
+            target: aarch64-apple-darwin
+          - runner: macos-15-intel    # Intel
+            target: x86_64-apple-darwin
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: |
+          rustup toolchain install
+          rustup target add "$TARGET"
+        env:
+          TARGET: ${{ matrix.target }}
+      # Tagged releases build from scratch (no cache → nothing to poison). Nightlies use
+      # the cache for speed; that risk is accepted (threat model §7.8).
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # zizmor: ignore[cache-poisoning] (v2.9.2)
+        if: github.ref_type != 'tag'
+        with:
+          key: release-${{ matrix.target }}
+      - name: Build
+        run: cargo build --release --locked --target "$TARGET" -p remora-host -p remora-viewer
+        env:
+          TARGET: ${{ matrix.target }}
+      - name: Smoke test (native architecture)
+        run: |
+          "target/$TARGET/release/remora-host"
+          "target/$TARGET/release/remora-viewer"
+        env:
+          TARGET: ${{ matrix.target }}
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: macos-bin-${{ matrix.target }}
+          path: |
+            target/${{ matrix.target }}/release/remora-host
+            target/${{ matrix.target }}/release/remora-viewer
+          if-no-files-found: error
+          retention-days: 3
+
+  macos-package:
+    needs: [version, macos-build]
+    runs-on: macos-15
+    # Signing secrets live in the "release" environment, which can be limited to v* tags
+    # and/or require approval (docs/distribution.md). Repo-level secrets also work.
+    environment: release
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: macos-bin-*
+          path: bin
+      # Artifacts don't preserve the executable bit.
+      - run: chmod +x bin/*/remora-*
+
+      - name: Import signing certificate (optional)
+        env:
+          MACOS_CERTIFICATE_P12_BASE64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          MACOS_SIGNING_IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY }}
+        run: |
+          if [[ -z "$MACOS_CERTIFICATE_P12_BASE64" || -z "$MACOS_SIGNING_IDENTITY" ]]; then
+            echo "::warning::macOS signing secrets not set — building an UNSIGNED (ad-hoc) app. See docs/distribution.md."
+            exit 0
+          fi
+          scripts/macos/import-signing-cert.sh
+          echo "MACOS_SIGNING_IDENTITY=$MACOS_SIGNING_IDENTITY" >> "$GITHUB_ENV"
+
+      - name: Bundle Remora.app and .dmg
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+          BUILD_NUMBER: ${{ needs.version.outputs.build_number }}
+        run: |
+          scripts/macos/bundle.sh \
+            --arm64-dir bin/macos-bin-aarch64-apple-darwin \
+            --x86_64-dir bin/macos-bin-x86_64-apple-darwin \
+            --version "$VERSION" --build-number "$BUILD_NUMBER" --out dist
+
+      - name: Notarize and staple (optional)
+        env:
+          APPLE_API_KEY_P8_BASE64: ${{ secrets.APPLE_API_KEY_P8_BASE64 }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          if [[ -z "${MACOS_SIGNING_IDENTITY:-}" ]]; then
+            echo "::warning::Skipping notarization: the app is not signed with a Developer ID."
+            exit 0
+          fi
+          if [[ -z "$APPLE_API_KEY_P8_BASE64" || -z "$APPLE_API_KEY_ID" || -z "$APPLE_API_ISSUER_ID" ]]; then
+            echo "::warning::Notarization secrets not set — the signed app will still warn on first launch."
+            exit 0
+          fi
+          umask 077
+          export APPLE_API_KEY_PATH="$RUNNER_TEMP/AuthKey.p8"
+          printf '%s' "$APPLE_API_KEY_P8_BASE64" | base64 --decode > "$APPLE_API_KEY_PATH"
+          scripts/macos/notarize.sh "dist/Remora-$VERSION-macos-universal.dmg"
+          rm -f "$APPLE_API_KEY_PATH"
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: dist-macos
+          path: dist/*
+          if-no-files-found: error
+
+  # ── Windows ─────────────────────────────────────────────────────────────────────
+  windows:
+    needs: version
+    runs-on: windows-2025
+    environment: release
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: rustup toolchain install
+      # Tagged releases build from scratch (no cache → nothing to poison). Nightlies use
+      # the cache for speed; that risk is accepted (threat model §7.8).
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # zizmor: ignore[cache-poisoning] (v2.9.2)
+        if: github.ref_type != 'tag'
+        with:
+          key: release-windows
+      - name: Build
+        run: cargo build --release --locked -p remora-host -p remora-viewer
+      - name: Smoke test
+        run: |
+          target/release/remora-host.exe
+          target/release/remora-viewer.exe
+
+      - name: Detect signing method
+        id: signing
+        env:
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          WINDOWS_CERTIFICATE_PFX_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_PFX_BASE64 }}
+        run: |
+          if [[ -n "$AZURE_CLIENT_ID" ]]; then
+            echo "method=azure" >> "$GITHUB_OUTPUT"
+          elif [[ -n "$WINDOWS_CERTIFICATE_PFX_BASE64" ]]; then
+            echo "method=pfx" >> "$GITHUB_OUTPUT"
+          else
+            echo "method=none" >> "$GITHUB_OUTPUT"
+            echo "::warning::Windows signing secrets not set — building UNSIGNED executables and MSI. Expect SmartScreen and antivirus warnings. See docs/distribution.md."
+          fi
+
+      # Sign the .exe files BEFORE packaging so the MSI and zip contain signed binaries.
+      - name: Sign executables (Azure Artifact Signing)
+        if: steps.signing.outputs.method == 'azure'
+        uses: Azure/artifact-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82 # v2.0.0
+        with:
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          endpoint: ${{ secrets.AZURE_SIGNING_ENDPOINT }}
+          signing-account-name: ${{ secrets.AZURE_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ secrets.AZURE_CERTIFICATE_PROFILE }}
+          files: |
+            ${{ github.workspace }}\target\release\remora-host.exe
+            ${{ github.workspace }}\target\release\remora-viewer.exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+
+      - name: Sign executables (PFX certificate)
+        if: steps.signing.outputs.method == 'pfx'
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE_PFX_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_PFX_BASE64 }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: scripts/windows/sign-pfx.ps1 target/release/remora-host.exe, target/release/remora-viewer.exe
+
+      - name: Install WiX Toolset
+        run: dotnet tool install --global wix --version 5.0.2
+
+      - name: Package (.zip + .msi)
+        shell: pwsh
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: scripts/windows/package.ps1 -Version $env:VERSION -Out dist
+
+      - name: Sign MSI (Azure Artifact Signing)
+        if: steps.signing.outputs.method == 'azure'
+        uses: Azure/artifact-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82 # v2.0.0
+        with:
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          endpoint: ${{ secrets.AZURE_SIGNING_ENDPOINT }}
+          signing-account-name: ${{ secrets.AZURE_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ secrets.AZURE_CERTIFICATE_PROFILE }}
+          files-folder: ${{ github.workspace }}\dist
+          files-folder-filter: msi
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+
+      - name: Sign MSI (PFX certificate)
+        if: steps.signing.outputs.method == 'pfx'
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE_PFX_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_PFX_BASE64 }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: scripts/windows/sign-pfx.ps1 (Get-ChildItem dist/*.msi).FullName
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: dist-windows
+          path: dist/*
+          if-no-files-found: error
+
+  # ── Linux (glibc): built on the OLDEST supported Ubuntu so the binaries run on
+  #    every newer distro (glibc is forward- but not backward-compatible). ─────────
+  linux:
+    needs: version
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: rustup toolchain install
+      # Tagged releases build from scratch (no cache → nothing to poison). Nightlies use
+      # the cache for speed; that risk is accepted (threat model §7.8).
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # zizmor: ignore[cache-poisoning] (v2.9.2)
+        if: github.ref_type != 'tag'
+        with:
+          key: release-linux-gnu
+      - name: Build
+        run: cargo build --release --locked -p remora-host -p remora-viewer
+      - name: Smoke test
+        run: |
+          target/release/remora-host
+          target/release/remora-viewer
+          echo "glibc symbols required:"; objdump -T target/release/remora-viewer | grep -o 'GLIBC_[0-9.]*' | sort -Vu | tail -1
+      - uses: taiki-e/install-action@861a07ce7084f55488e375df125cdc99bba60eb7 # v2.87.23
+        with:
+          tool: cargo-deb,cargo-generate-rpm
+      - name: Package (.deb, .rpm, AppImage, .tar.gz)
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: scripts/linux/package.sh --version "$VERSION" --out dist
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: dist-linux
+          path: dist/*
+          if-no-files-found: error
+
+  # ── Linux (musl, fully static) — remora-signal only. A static musl binary cannot
+  #    dlopen GPU drivers (Vulkan/VAAPI), so it can't be the GUI apps
+  #    (architecture.md D10); for a server it is ideal (Docker FROM scratch). ──────
+  linux-musl:
+    needs: version
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install musl toolchain
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q musl-tools
+          rustup toolchain install
+          rustup target add x86_64-unknown-linux-musl
+      # Tagged releases build from scratch (no cache → nothing to poison). Nightlies use
+      # the cache for speed; that risk is accepted (threat model §7.8).
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # zizmor: ignore[cache-poisoning] (v2.9.2)
+        if: github.ref_type != 'tag'
+        with:
+          key: release-linux-musl
+      - name: Build
+        run: cargo build --release --locked --target x86_64-unknown-linux-musl -p remora-signal
+      - name: Verify static + smoke test
+        run: |
+          BIN=target/x86_64-unknown-linux-musl/release/remora-signal
+          file "$BIN"
+          file "$BIN" | grep -Eq 'static(-pie)? linked' || { echo "::error::not statically linked"; exit 1; }
+          "$BIN"
+      - name: Package
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          NAME="remora-signal-$VERSION-linux-x86_64-musl"
+          mkdir -p "stage/$NAME" dist
+          cp target/x86_64-unknown-linux-musl/release/remora-signal "stage/$NAME/"
+          cp LICENSE-GPL "stage/$NAME/LICENSE"
+          tar -C stage -czf "dist/$NAME.tar.gz" "$NAME"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: dist-linux-musl
+          path: dist/*
+          if-no-files-found: error
+
+  # ── Collect everything + SHA256SUMS (always, also for unpublished nightlies) ───
+  assemble:
+    needs: [version, macos-package, windows, linux, linux-musl]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: dist-*
+          path: dist
+          merge-multiple: true
+      - name: Checksums
+        run: |
+          cd dist
+          sha256sum -- * > SHA256SUMS
+          cat SHA256SUMS
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: remora-${{ needs.version.outputs.version }}
+          path: dist/*
+          if-no-files-found: error
+
+  publish:
+    needs: [version, assemble]
+    if: github.ref_type == 'tag' || inputs.publish_nightly
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    # The only job allowed to write to the repository.
+    permissions:
+      contents: write # create the GitHub Release and (for nightlies) move the tag
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: remora-${{ needs.version.outputs.version }}
+          path: dist
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          KIND: ${{ needs.version.outputs.kind }}
+          VERSION: ${{ needs.version.outputs.version }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          if [[ "$KIND" == "release" ]]; then
+            flags=(--verify-tag --generate-notes --title "Remora $VERSION")
+            [[ "$VERSION" == *-* ]] && flags+=(--prerelease)
+            gh release create "$TAG" "${flags[@]}" dist/*
+          else
+            # Rolling pre-release: replace the previous nightly and move its tag.
+            gh release delete nightly --yes --cleanup-tag || true
+            gh release create nightly --prerelease --target "$GITHUB_SHA" \
+              --title "Nightly $VERSION" \
+              --notes "Automated build of $GITHUB_SHA. Unstable; may be unsigned. Verify downloads with SHA256SUMS." \
+              dist/*
+          fi

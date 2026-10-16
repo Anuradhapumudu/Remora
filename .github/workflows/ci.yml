@@ -1,0 +1,67 @@
+# Runs on every push and pull request: formatting, lints, tests and supply-chain
+# checks on all three desktop OSes.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# Least privilege: CI only needs to read the repository.
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+
+jobs:
+  check:
+    name: check (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        # Linux uses the oldest Ubuntu we support, same as the release build.
+        os: [ubuntu-22.04, macos-15, windows-2025]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # rust-toolchain.toml pins the compiler; this installs exactly that version.
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install
+          rustup show active-toolchain
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+
+      - name: Format
+        run: cargo fmt --all --check
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+      - name: Test
+        run: cargo test --workspace --locked
+
+      - name: Install cargo-deny and cargo-audit
+        uses: taiki-e/install-action@861a07ce7084f55488e375df125cdc99bba60eb7 # v2.87.23
+        with:
+          tool: cargo-deny,cargo-audit
+
+      - name: cargo deny
+        run: cargo deny --locked check
+
+      - name: cargo audit
+        run: cargo audit
