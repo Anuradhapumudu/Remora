@@ -44,8 +44,9 @@ once a workspace member actually uses it.
 | protox | 0.9.1 | 0.9.1 (0.10.0 < 14 days) | proto (build) | Pure-Rust `.proto` compiler, so contributors don't need `protoc` |
 | reed-solomon-simd | 3.1.0 | 3.1.0 | net | FEC for video datagrams |
 | bytes | 1 | — | proto, net | Zero-copy buffers (quinn's buffer type) |
-| objc2 | 0.6.5 | — | capture, codec, input (macOS) | Safe-ish Objective-C runtime bindings |
-| objc2-foundation, -screen-capture-kit, -video-toolbox, -core-media, -core-video | 0.3.2 | — | capture, codec (macOS) | Generated Apple framework bindings |
+| objc2 | 0.6.4 | 0.6.4 (0.6.5 < 14 days) | capture, codec, input (macOS) | Objective-C runtime bindings; `define_class!` implements `SCStreamOutput` |
+| objc2-foundation, -core-foundation, -core-graphics, -screen-capture-kit, -video-toolbox, -core-media, -core-video | 0.3.2, default features **off** | 0.3.2 | capture, codec (macOS) | Generated Apple framework bindings; only the features we call (defaults pull in AVFoundation, Metal, OpenGL) |
+| block2 / dispatch2 | 0.6.2 / 0.3.1 | — | capture (macOS) | Objective-C completion blocks; ScreenCaptureKit's dispatch queue |
 | windows | 0.62.2 | — | capture, codec, input (Windows) | Official Microsoft bindings |
 | x11rb | 0.14.0 | — | capture, input (Linux) | Pure-Rust X11 protocol |
 | openh264 | 0.9.8 | 0.9.8 (0.9.9 < 14 days) | codec | Software H.264 fallback |

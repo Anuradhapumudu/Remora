@@ -11,6 +11,12 @@ publish.workspace = true
 license = "GPL-3.0-or-later"
 
 [dependencies]
+anyhow = { workspace = true }
+clap = { workspace = true }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+remora-capture = { workspace = true }
+remora-codec = { workspace = true }
 
 [lints]
 workspace = true
