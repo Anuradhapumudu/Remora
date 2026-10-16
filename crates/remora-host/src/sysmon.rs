@@ -64,6 +64,43 @@ pub(crate) fn cpu_deltas(
     v
 }
 
+/// Prints machine state that can skew benchmarks (criteria §6b): thermal and
+/// performance warnings, power source, Low Power Mode, uptime, load averages.
+#[cfg(target_os = "macos")]
+pub(crate) fn print_machine_state(when: &str) {
+    let run = |cmd: &str, args: &[&str]| {
+        Command::new(cmd)
+            .args(args)
+            .output()
+            .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+            .unwrap_or_default()
+    };
+    let therm = run("/usr/bin/pmset", &["-g", "therm"]);
+    let warnings: Vec<&str> = therm
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .collect();
+    let batt = run("/usr/bin/pmset", &["-g", "batt"]);
+    let power = batt.lines().next().unwrap_or("").trim().to_owned();
+    let charge = batt.lines().nth(1).unwrap_or("").trim().to_owned();
+    let low_power = run("/usr/bin/pmset", &["-g"])
+        .lines()
+        .find(|l| l.trim_start().starts_with("lowpowermode"))
+        .map(|l| l.split_whitespace().last().unwrap_or("?").to_owned())
+        .unwrap_or_else(|| "?".to_owned());
+    let load = run("/usr/sbin/sysctl", &["-n", "vm.loadavg"]);
+    let uptime = run("/usr/bin/uptime", &[]);
+    println!("machine state ({when}):");
+    println!("  power: {power} | {charge} | low power mode: {low_power}");
+    println!("  thermal/performance: {}", warnings.join(" / "));
+    println!(
+        "  load averages: {} | uptime: {}",
+        load.trim(),
+        uptime.trim()
+    );
+}
+
 /// Parses the "Footprint: N KB|MB|GB" header line of `footprint -p <pid>`, in bytes.
 pub(crate) fn parse_footprint(output: &str) -> Option<u64> {
     let after = output.split("Footprint:").nth(1)?;
