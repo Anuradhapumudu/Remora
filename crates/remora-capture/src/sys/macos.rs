@@ -88,8 +88,9 @@ impl HostClock {
         };
         Self { nanos_per_tick }
     }
-    fn ticks_to_duration(self, ticks: u64) -> Duration {
-        Duration::from_nanos((ticks as f64 * self.nanos_per_tick) as u64)
+    fn signed_nanos(self, ticks: i128) -> i64 {
+        // `as` saturates for out-of-range floats, so absurd inputs can't wrap.
+        (ticks as f64 * self.nanos_per_tick) as i64
     }
 }
 
@@ -170,12 +171,12 @@ impl StreamHandler {
         let seq = ivars.seq.fetch_add(1, Ordering::Relaxed);
         let info = read_frame_info(sample_buffer);
 
-        let display_time = match info.display_ticks {
-            Some(t) if t <= arrival_ticks => {
-                arrival - ivars.clock.ticks_to_duration(arrival_ticks - t)
-            }
-            _ => arrival,
-        };
+        // Signed: the display time can be later than our arrival.
+        let delivery_ns = info.display_ticks.map(|t| {
+            ivars
+                .clock
+                .signed_nanos(i128::from(arrival_ticks) - i128::from(t))
+        });
         let image = if info.status == FrameStatus::Complete {
             // SAFETY: `sample_buffer` is a valid CMSampleBuffer for the duration of
             // this callback; `image_buffer` returns a +1 retained reference.
@@ -186,8 +187,8 @@ impl StreamHandler {
         self.emit(CaptureEvent::Frame(CapturedFrame {
             seq,
             status: info.status,
-            display_time,
             arrival,
+            delivery_ns,
             dirty_rects: info.dirty_rects,
             image,
         }));
@@ -508,9 +509,15 @@ impl ScreenCapture for MacScreenCapture {
                 Some(delegate),
             )
         };
-        let queue = DispatchQueue::new("dev.remora.capture", DispatchQueueAttr::SERIAL);
-        // Frames are latency-critical: run the handler at user-interactive QoS.
-        let _ = queue.set_qos_class_floor(DispatchQoS::UserInteractive, 0);
+        // Frames are latency-critical: user-interactive QoS. The QoS must be part of
+        // the queue's attributes at creation — libdispatch traps if a queue's
+        // properties are changed after it is active.
+        let attr = DispatchQueueAttr::with_qos_class(
+            DispatchQueueAttr::SERIAL,
+            DispatchQoS::UserInteractive,
+            0,
+        );
+        let queue = DispatchQueue::new("dev.remora.capture", Some(&attr));
         let output = ProtocolObject::<dyn SCStreamOutput>::from_ref(&*handler);
         // SAFETY: valid stream, output and queue; all retained in `Running`.
         unsafe {
