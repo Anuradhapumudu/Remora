@@ -355,6 +355,19 @@ fn wait_completion(
     }
 }
 
+/// All displays ScreenCaptureKit can capture. Requests permission (system
+/// prompt, once) and fails with `PermissionDenied` if it isn't granted.
+fn shareable_displays() -> Result<Retained<NSArray<SCDisplay>>, CaptureError> {
+    if !CGPreflightScreenCaptureAccess() {
+        // Shows the system prompt (once) and adds this app to the Screen
+        // Recording list; the grant only takes effect for a new process.
+        CGRequestScreenCaptureAccess();
+        return Err(CaptureError::PermissionDenied);
+    }
+    // SAFETY: property getter on a valid object.
+    Ok(unsafe { shareable_content()?.displays() })
+}
+
 /// Pixel size of a display's current mode (not its size in points).
 fn display_pixel_size(display: &SCDisplay) -> (u32, u32) {
     // SAFETY: plain property getters on a valid SCDisplay.
@@ -403,21 +416,25 @@ unsafe impl Send for MacScreenCapture {}
 impl MacScreenCapture {
     /// Prepares capture of the main display. Fails fast if permission is missing.
     pub fn main_display(cfg: CaptureConfig) -> Result<Self, CaptureError> {
-        if !CGPreflightScreenCaptureAccess() {
-            // Shows the system prompt (once) and adds this app to the Screen
-            // Recording list; the grant only takes effect for a new process.
-            CGRequestScreenCaptureAccess();
-            return Err(CaptureError::PermissionDenied);
-        }
-        let content = shareable_content()?;
-        // SAFETY: property getter on a valid object.
-        let displays = unsafe { content.displays() };
-        let main_id = CGMainDisplayID();
+        Self::display(cfg, None)
+    }
+
+    /// Prepares capture of display `id` (a `CGDirectDisplayID`), or the main
+    /// display when `None`.
+    pub fn display(cfg: CaptureConfig, id: Option<u32>) -> Result<Self, CaptureError> {
+        let displays = shareable_displays()?;
+        let wanted = id.unwrap_or_else(|| CGMainDisplayID());
         let display = displays
             .iter()
             // SAFETY: property getter on a valid SCDisplay.
-            .find(|d| unsafe { d.displayID() } == main_id)
-            .or_else(|| displays.firstObject())
+            .find(|d| unsafe { d.displayID() } == wanted)
+            .or_else(|| {
+                if id.is_none() {
+                    displays.firstObject()
+                } else {
+                    None
+                }
+            })
             .ok_or(CaptureError::NoDisplay)?;
         let (pw, ph) = display_pixel_size(&display);
         Ok(Self {
@@ -426,6 +443,20 @@ impl MacScreenCapture {
             display,
             running: None,
         })
+    }
+
+    /// Lists capturable displays: `(id, width_px, height_px, is_main)`.
+    pub fn list_displays() -> Result<Vec<(u32, u32, u32, bool)>, CaptureError> {
+        let main_id = CGMainDisplayID();
+        Ok(shareable_displays()?
+            .iter()
+            .map(|d| {
+                // SAFETY: property getter on a valid SCDisplay.
+                let id = unsafe { d.displayID() };
+                let (w, h) = display_pixel_size(&d);
+                (id, w, h, id == main_id)
+            })
+            .collect())
     }
 
     /// The display's native size in pixels.

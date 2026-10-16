@@ -28,6 +28,9 @@ enum Command {
     /// Phase 2: capture the screen, hardware-encode to .h264, print measured stats.
     #[cfg(target_os = "macos")]
     BenchCapture(bench::BenchArgs),
+    /// List capturable displays and their IDs.
+    #[cfg(target_os = "macos")]
+    ListDisplays,
     /// Phase 2: report encoder capabilities (4:4:4, LTR, intra-refresh) as evidence.
     #[cfg(target_os = "macos")]
     ProbeEncoder,
@@ -48,6 +51,8 @@ fn main() -> ExitCode {
         Some(Command::BenchCapture(args)) => bench::run(args),
         #[cfg(target_os = "macos")]
         Some(Command::ProbeEncoder) => bench::probe(),
+        #[cfg(target_os = "macos")]
+        Some(Command::ListDisplays) => bench::list_displays(),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,

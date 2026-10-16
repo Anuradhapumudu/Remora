@@ -18,12 +18,12 @@ in §6 explaining why, approved by the owner.
 | Item | Value |
 |---|---|
 | Machine | Apple M4 (10 cores), 16 GB RAM |
-| Display | Built-in Liquid Retina, 2560 × 1664 px, 60 Hz (the only display) |
+| Display | Built-in Liquid Retina, panel 2560 × 1664 px, 60 Hz (the only display). **Running in a scaled mode: 1470 × 956 pt rendered at 2940 × 1912 px** — capture scales down from 2940 × 1912 |
 | OS / SDK | macOS 27.0.1, Xcode 27.1, macOS SDK 27.0 |
 | Build | `cargo build --release` (the pinned toolchain, LTO thin) |
 | Power | On AC power, Low Power Mode off |
 | Load | Only Terminal, the test tool, and (for motion tests) the motion pattern page open |
-| Permission | Screen Recording granted to **Terminal.app** (tool runs from Terminal) |
+| Permission | Screen Recording granted to **RemoraDev.app** only (`io.github.anuradhapumudu.Remora.dev`, signed with the local dev identity; launched via `scripts/macos/dev-app.sh run …`). Terminal has no access. |
 
 **"1080p60" on this display.** The panel is 16:10.4, not 16:9. We capture the
 whole display scaled to **1920 px wide at native aspect = 1920 × 1248**
@@ -50,7 +50,7 @@ p99 and max are reported for information.
 All runs use the Phase 2 CLI (deliverable):
 
 ```sh
-cargo run --release -p remora-host -- bench-capture --seconds 60 --out /tmp/remora.h264
+scripts/macos/dev-app.sh run bench-capture --seconds 60 --out /tmp/remora.h264
 ```
 
 1. **Motion test (C1, C2, C5):** open `scripts/macos/motion-pattern.html` in Safari,
@@ -119,7 +119,7 @@ undocumented setting found lowers it. Owner decision: §6.
 | Q1 4:4:4 encode | **Yes in hardware, but NOT in low-latency mode.** Normal rate control: H.264 High 4:4:4 Predictive and HEVC Range Extensions produce real 4:4:4 (`chroma_format_idc = 3`). Low-latency rate control: 4:4:4 input is **silently subsampled** to 4:2:0 (H.264 High, `chroma_format_idc = 1`); no 4:4:4/4:2:2 profile is offered in that mode. | `docs/evidence/phase2-probe-encoder-m4.txt` (SPS parsed by `remora_codec::bitstream`, unit-tested) |
 | Q2 intra-refresh / LTR | **Documented API: long-term reference only** (`EnableLTR` + `AcknowledgedLTRTokens` + `ForceLTRRefresh`; no refresh key in SDK 27 headers). The low-latency H.264 encoder **additionally exposes undocumented** `PeriodicRefreshMode` and `MaxRefreshFrameIntervalDuration` (likely gradual refresh). Not yet exercised: an LTR acknowledge/refresh round trip. | Same evidence file (supported-property dump); SDK header grep |
 | Q3 SCK API path | **Header part answered:** in SDK 27 the only deprecated ScreenCaptureKit items are `SCStreamType`/`streamType` (unused by us); `SCShareableContent` → `SCContentFilter(display:)` → `SCStreamConfiguration` → `SCStream` + `SCStreamOutput` is current. **Runtime "frames only on change": pending** (needs permission). | `ScreenCaptureKit.framework/Headers` in SDK 27.0 |
-| Q4 res change / sleep / unplug | pending (needs permission; unplug needs an external display) | — |
+| Q4 res change / sleep / unplug | Physical display unplug: **not tested — no external display available** (known gap). Single-display subset: pending (§5.4). | — |
 
 ## 6. Changes to criteria
 
@@ -144,8 +144,12 @@ undocumented setting found lowers it. Owner decision: §6.
 
 - [ ] C1, C3, C4, C5 measured on the M4 (worst of 3 runs) and recorded in §5
 - [ ] Q3 runtime "frames only on change" measured; Q4 events observed
-- [ ] Revoke whatever Screen Recording permission was granted for testing
-      (System Settings → Privacy & Security → Screen & System Audio Recording),
-      unless the owner decides to keep it
+- [ ] **Cleanup (unless the owner decides to keep any of it):**
+  - [ ] `tccutil reset ScreenCapture io.github.anuradhapumudu.Remora.dev` (dev app)
+  - [ ] `tccutil reset ScreenCapture io.github.anuradhapumudu.Remora` (release app, if it was ever granted)
+  - [ ] `scripts/macos/dev-identity.sh remove` (deletes the dev certificate **and** its private key),
+        then `scripts/macos/dev-identity.sh status` shows "not present"
+  - [ ] Confirm **Terminal** is not in System Settings → Privacy & Security →
+        Screen & System Audio Recording (it was never granted; verify it stayed that way)
 - [ ] Known gaps carried into docs/roadmap.md ("Known gaps before v0.1")
 - [ ] Phase 2 report: commands, numbers vs criteria, limitations
