@@ -1,0 +1,78 @@
+# Remora — developer guide
+
+Remora: open-source, E2E-encrypted, P2P remote desktop in Rust.
+Priorities: **SECURITY > CORRECTNESS > LOW LATENCY > IMAGE CLARITY > RESOURCE EFFICIENCY > FEATURES.**
+The owner is a CS undergrad new to Rust: explain non-obvious decisions in
+commit messages, docs and reports.
+
+## Read before changing things
+
+- `docs/threat-model.md` — normative. Security invariants INV1–INV14 must keep their tests.
+- `docs/protocol.md` — byte layouts, key schedule, limits.
+- `docs/architecture.md` — crate layering, unsafe policy, decision log (append, don't rewrite).
+- `docs/dependencies.md` — dependency policy and the verified version table.
+- `docs/roadmap.md` — phases, v0.1 definition, progress log (update after every phase).
+
+## Commands
+
+```sh
+cargo build --workspace                                  # build everything
+cargo test --workspace                                   # all tests
+cargo fmt --all --check                                  # formatting (CI)
+cargo clippy --workspace --all-targets -- -D warnings    # lints (CI)
+cargo deny check                                         # licenses, bans, sources, advisories
+cargo audit                                              # RustSec advisories
+actionlint && zizmor .github/workflows                   # lint GitHub workflows
+scripts/macos/bundle.sh --help                           # build Remora.app + .dmg locally
+```
+
+Toolchain is pinned in `rust-toolchain.toml` (rustup installs it automatically).
+Local tools: `brew install cargo-deny cargo-audit actionlint zizmor`;
+`cargo install --locked cargo-deb cargo-generate-rpm` for Linux packaging.
+
+## Rules (non-negotiable)
+
+- **No plaintext mode**, flag, feature or debug path that skips encryption.
+- **No `unsafe`** outside `src/sys/` FFI modules of remora-capture/-codec/-input.
+  Pure crates keep `#![forbid(unsafe_code)]`. Every unsafe block gets `// SAFETY:`.
+- **No `unwrap()`/`expect()`** on anything that can come from the network or the OS
+  (clippy denies them; tests are exempt).
+- **Never log secrets or screen content.** Secret types implement `Debug` as `[redacted]`
+  and derive `Zeroize`/`ZeroizeOnDrop`.
+- Every parser: check size limits **before** allocating; add a cargo-fuzz target.
+- Treat STUN, signaling server, network and connection codes as untrusted.
+- Write security tests for every new attack surface (wrong password, replay, tamper, MITM).
+- If something can't work reliably (e.g. P2P through symmetric NAT), say so plainly
+  in docs and reports; never fake or silently skip it.
+
+## Dependencies
+
+- Verify versions against the registry (`cargo info <crate>`), never from memory.
+- Releases must be ≥ 14 days old; otherwise lock the previous one with
+  `cargo update -p <crate> --precise <ver>`.
+- Stay on one RustCrypto generation (D3); `cargo deny check` enforces it.
+- Add to `[workspace.dependencies]` in the root `Cargo.toml`, use `{ workspace = true }`
+  in crates, and update `docs/dependencies.md` in the same commit.
+- GitHub Actions: pin third-party actions by full commit SHA with a `# vX.Y.Z` comment.
+
+## Conventions
+
+- Edition 2024, MSRV 1.92. Libraries: `thiserror` errors; binaries: `anyhow`.
+- Doc comments on every public item (`missing_docs` lint).
+- OS-specific code lives in `src/sys/<os>.rs` behind a trait; nothing above the
+  trait knows which OS it runs on.
+- `remora-session` has no I/O: events in, actions out.
+- Library crates: MIT OR Apache-2.0. Apps (host/viewer/signal): GPL-3.0-or-later.
+  Each crate directory carries its license file(s).
+- Small, focused commits; imperative subject ≤ 72 chars; body explains *why*.
+- After each phase: update `docs/roadmap.md` (status + progress log), give exact
+  manual test steps, measured numbers vs targets, and known limitations.
+
+## macOS development notes
+
+- When a binary runs from Terminal, macOS attributes Screen Recording /
+  Accessibility permission to **Terminal** (the "responsible process"), so
+  `cargo run` doesn't re-prompt after every rebuild.
+- The bundled `Remora.app` is attributed to its own code signature: unsigned or
+  ad-hoc-signed rebuilds re-prompt. Phase 2 adds a stable self-signed dev identity
+  script for this (see docs/distribution.md).
