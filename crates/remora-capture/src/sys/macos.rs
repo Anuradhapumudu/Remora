@@ -20,7 +20,7 @@ use objc2::{AllocAnyThread, DefinedClass, define_class, msg_send};
 use objc2_core_foundation::{CFArray, CFDictionary, CFNumber, CFRetained, CFType, CGRect};
 use objc2_core_graphics::{
     CGDisplayCopyDisplayMode, CGDisplayMode, CGMainDisplayID, CGPreflightScreenCaptureAccess,
-    CGRectMakeWithDictionaryRepresentation,
+    CGRectMakeWithDictionaryRepresentation, CGRequestScreenCaptureAccess,
 };
 use objc2_core_media::{CMSampleBuffer, CMTime};
 use objc2_core_video::{
@@ -404,6 +404,9 @@ impl MacScreenCapture {
     /// Prepares capture of the main display. Fails fast if permission is missing.
     pub fn main_display(cfg: CaptureConfig) -> Result<Self, CaptureError> {
         if !CGPreflightScreenCaptureAccess() {
+            // Shows the system prompt (once) and adds this app to the Screen
+            // Recording list; the grant only takes effect for a new process.
+            CGRequestScreenCaptureAccess();
             return Err(CaptureError::PermissionDenied);
         }
         let content = shareable_content()?;
