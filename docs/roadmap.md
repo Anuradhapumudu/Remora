@@ -12,7 +12,7 @@
 - [ ] **Auto** quality mode (rate controller adapting bitrate → fps → resolution)
 - [ ] Stats overlay
 - [ ] **macOS + Windows**, both as host and viewer
-- [ ] Installable builds (.dmg, .msi/.zip) from the release pipeline
+- [x] Installable builds (.dmg, .msi/.zip) from the release pipeline — proven by `v0.0.1` (2026-10-17); must stay green as features land
 - [ ] Every threat-model invariant (INV1–INV14) has its test; fuzz targets for all parsers
 - [ ] Real-world test across two home networks in different countries passed
 
@@ -34,7 +34,7 @@ Each phase ends **runnable**, with tests and exact manual test steps.
 | Phase | Content | Status |
 |---|---|---|
 | 1 | Plan, docs, threat model, workspace skeleton | ✅ done 2026-10-17 |
-| 1.5 | Release pipeline (unsigned), CI | ✅ done 2026-10-17 (first real run needs a GitHub remote) |
+| 1.5 | Release pipeline (unsigned), CI | ✅ done 2026-10-17 — `v0.0.1` built all artifacts on GitHub; all verified |
 | 2 | macOS ScreenCaptureKit capture + VideoToolbox encode → file; benchmark; verify 4:4:4 / LTR / intra-refresh support | next |
 | 2.5 | **Windows spike** (throwaway): capture one DXGI frame, inject one SendInput click; report trait changes | |
 | 3 | Noise + SPAKE2 handshake over QUIC on localhost; safety code; CLI accept prompt; security tests; fuzz targets | |
@@ -52,4 +52,4 @@ v0.1 is reached at the end of **Phase 8** (Linux X11 in Phase 9 is post-v0.1).
 
 | Date | Phase | v0.1 items open | Notes |
 |---|---|---|---|
-| 2026-10-17 | 1 + 1.5 | 10 / 10 (only the release-pipeline item partly in place) | Docs, threat model, skeleton, CI and release workflows. |
+| 2026-10-17 | 1 + 1.5 | 9 / 10 | Docs, threat model, skeleton, CI and release workflows. `v0.0.1` pipeline release verified (MSI install on real Windows still to do). |

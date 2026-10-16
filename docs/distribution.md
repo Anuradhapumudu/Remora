@@ -41,16 +41,19 @@ or `Get-FileHash <file> -Algorithm SHA256` (Windows) and compare.
   GitHub retires it, switch the x86_64 slice to cross-compiling on arm64
   (`rustup target add x86_64-apple-darwin` works fine on Apple Silicon) and drop
   the native smoke test for that slice.
-* **Verification status (2026-10-17, before the first GitHub run):**
-  * macOS universal DMG: built and inspected locally (both slices, Info.plist, ad-hoc signature).
-  * Linux job: rehearsed end-to-end in a clean `ubuntu:22.04` x86_64 container. The
-    `.deb` installs/runs/uninstalls on Ubuntu 24.04, the `.rpm` on Fedora 42, the
-    AppImage runs on Debian 12, the musl `remora-signal` runs on Alpine (no glibc).
-    This found and fixed one real bug: unsatisfiable `[WEAK]` glibc requirements in
-    the `.rpm`.
-  * **Not yet run anywhere:** the Windows job (MSI via WiX, zip, signing), macOS
-    Developer ID signing/notarization (no certificate yet), and the GitHub-only
-    parts (artifact hand-off, SHA256SUMS job, release publishing).
+* **Verification status:** the full pipeline ran green on GitHub for `v0.0.1`
+  (2026-10-17), and every published artifact was downloaded and checked:
+  SHA256SUMS match; DMG contains universal (x86_64 + arm64) binaries with bundle ID
+  `io.github.anuradhapumudu.Remora`; MSI tables (x64, per-machine, UpgradeCode,
+  files, Start-menu shortcut, major-upgrade rows) inspected with `msitools`; `.deb`
+  (Ubuntu 24.04) and `.rpm` (Fedora 42) install, run and uninstall; AppImage runs
+  (Debian 12); tarball runs (Ubuntu 22.04); musl `remora-signal` runs (Alpine).
+  **Not verified (needs a real Windows machine):** actually installing/uninstalling
+  the MSI, the Start-menu shortcut, and upgrade-in-place. Signing paths are
+  untested until certificates exist.
+* **Known:** the `.exe` files are console-subsystem programs, so a console window
+  opens with them. The GUI viewer/host must set `#![windows_subsystem = "windows"]`
+  in release builds (Phase 4 / 6.5).
 
 ## 2. macOS: signing, notarization and the Screen Recording permission
 
@@ -111,6 +114,11 @@ scroll down, click **Open Anyway**. (Terminal alternative:
 8. Run the Release workflow. The log should say "Signing with identity…",
    then notarytool "Accepted", then stapler "The staple and validate action worked!".
    Then delete the local `.p12` and `.p8` copies you no longer need.
+
+### Linux AppImage
+
+Downloaded files lose their executable bit, so once: `chmod +x Remora-*.AppImage`,
+then run it. (If it complains about FUSE: `./Remora-*.AppImage --appimage-extract-and-run`.)
 
 ## 3. Windows: signing, SmartScreen and antivirus
 
