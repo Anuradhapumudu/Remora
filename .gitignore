@@ -1,0 +1,14 @@
+/target/
+/dist/
+/fuzz/target/
+/fuzz/corpus/
+/fuzz/artifacts/
+**/*.rs.bk
+.DS_Store
+# Local signing material must never be committed.
+*.p12
+*.pfx
+*.p8
+*.cer
+*.mobileprovision
+.env
