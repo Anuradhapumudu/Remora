@@ -2,6 +2,9 @@
 name = "remora-capture"
 description = "Remora screen capture: a ScreenCapture trait with per-OS backends."
 version.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true

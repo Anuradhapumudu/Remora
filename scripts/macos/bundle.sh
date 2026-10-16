@@ -12,7 +12,7 @@
 #   MACOS_SIGNING_IDENTITY  codesign identity (e.g. "Developer ID Application: Name (TEAMID)"
 #                           or a local self-signed dev identity). Unset → ad-hoc signature
 #                           ("-"), which Apple Silicon requires at minimum.
-#   REMORA_BUNDLE_ID        defaults to io.github.remora.Remora
+#   REMORA_BUNDLE_ID        defaults to io.github.anuradhapumudu.Remora
 #
 # Notarization is a separate step: scripts/macos/notarize.sh <dmg>.
 set -euo pipefail
@@ -35,7 +35,7 @@ done
 [[ "$BUILD_NUMBER" =~ ^[0-9]+$ ]] || { echo "--build-number must be numeric" >&2; exit 1; }
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-BUNDLE_ID="${REMORA_BUNDLE_ID:-io.github.remora.Remora}"
+BUNDLE_ID="${REMORA_BUNDLE_ID:-io.github.anuradhapumudu.Remora}"
 IDENTITY="${MACOS_SIGNING_IDENTITY:-}"
 SHORT_VERSION="${VERSION%%-*}"            # CFBundleShortVersionString must be X.Y.Z
 [[ "$SHORT_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "bad version: $VERSION" >&2; exit 1; }

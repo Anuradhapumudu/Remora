@@ -25,6 +25,11 @@ for b in remora-host remora-viewer; do
   [[ -x "$BIN_DIR/$b" ]] || { echo "missing $BIN_DIR/$b — run cargo build --release first" >&2; exit 1; }
 done
 
+# The maintainer string has exactly one source: `authors` in the workspace Cargo.toml.
+MAINTAINER="$(cargo metadata --no-deps --format-version 1 \
+  | python3 -I -c 'import json,sys; print(json.load(sys.stdin)["packages"][0]["authors"][0])')"
+[[ "$MAINTAINER" == *"<"*"@"*">" ]] || { echo "bad maintainer string: $MAINTAINER" >&2; exit 1; }
+
 # Package managers order "0.1.0-nightly.x" *after* 0.1.0; "~" sorts before, which is what we want.
 BASE="${VERSION%%-*}"
 if [[ "$VERSION" == *-* ]]; then
@@ -40,7 +45,8 @@ fi
 cargo deb -p remora-viewer --no-build --deb-version "$DEB_VERSION" -o "$OUT/"
 
 # 2. .rpm (cargo-generate-rpm). RPM versions cannot contain '-', so the suffix goes in Release.
-cargo generate-rpm -p crates/remora-viewer -o "$OUT/" -s "release = \"$RPM_RELEASE\""
+cargo generate-rpm -p crates/remora-viewer -o "$OUT/" \
+  -s "release = \"$RPM_RELEASE\"" -s "vendor = \"$MAINTAINER\""
 
 # 3. AppImage — tools pinned by version AND sha256 (supply chain, threat model §7.8).
 APPIMAGETOOL_URL="https://github.com/AppImage/appimagetool/releases/download/1.9.1/appimagetool-x86_64.AppImage"

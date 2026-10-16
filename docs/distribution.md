@@ -88,9 +88,9 @@ scroll down, click **Open Anyway**. (Terminal alternative:
    *App Store Connect API* → *Team Keys* → **+** (access: *Developer*).
    Download `AuthKey_XXXXXXXXXX.p8` — **it can be downloaded only once**.
    Note the **Key ID** and the **Issuer ID** shown on that page.
-6. **Pick the final bundle ID** before the first signed release (TCC grants
-   are tied to it). Today: `io.github.remora.Remora`; change via the
-   `REMORA_BUNDLE_ID` env var in `release.yml` / `scripts/macos/bundle.sh`.
+6. **Bundle ID** is `io.github.anuradhapumudu.Remora` (architecture.md D14).
+   Don't change it after a release: macOS ties Screen Recording and
+   Accessibility grants to it.
 7. **Add the secrets** (see §4 for where):
 
 | Secret | Value |

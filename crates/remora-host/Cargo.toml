@@ -2,6 +2,9 @@
 name = "remora-host"
 description = "Remora host: shares this computer's screen with an approved viewer."
 version.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true

@@ -2,6 +2,9 @@
 name = "remora-codec"
 description = "Remora video codecs: hardware-first encoder and decoder backends with a software fallback."
 version.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true

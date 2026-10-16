@@ -167,3 +167,5 @@ pub trait InputInjector: Send {
 | D11 | 2026-10-17 | Licensing as in §6 | Owner decision. |
 | D12 | 2026-10-17 | 6-digit attended OTP; ≥ 12-char unattended password enforced in code | Owner decision; reasoning in threat-model.md §6. |
 | D13 | 2026-10-17 | Workspace MSRV = Rust 1.92; toolchain pinned via `rust-toolchain.toml` | Slint 1.18 requires 1.92. Pinning makes local and CI builds identical. |
+| D14 | 2026-10-17 | macOS bundle ID **`io.github.anuradhapumudu.Remora`** (default in `scripts/macos/bundle.sh`) | The GitHub org `remora` is taken (organization since 2014, 16 public repos) and can't be claimed, so we use the owner's GitHub namespace, lowercase. **Changing the bundle ID after a release resets every user's Screen Recording and Accessibility permission** (TCC keys grants to bundle ID + signature) and breaks in-place updates, so treat it as permanent. |
+| D15 | 2026-10-17 | Maintainer string has one source: `authors` in `[workspace.package]` = "Remora Maintainers <GitHub noreply address>" | .deb takes it via cargo-deb's `authors` fallback, .rpm `vendor` via `scripts/linux/package.sh`. No personal email in any published artifact. |

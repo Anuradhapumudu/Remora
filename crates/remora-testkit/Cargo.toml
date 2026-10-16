@@ -2,6 +2,9 @@
 name = "remora-testkit"
 description = "Remora test utilities: test pattern, in-memory network, malicious signaling server, network simulation."
 version.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true

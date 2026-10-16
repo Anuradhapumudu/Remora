@@ -2,6 +2,9 @@
 name = "remora-viewer"
 description = "Remora viewer: views and controls a remote Remora host."
 version.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
@@ -16,6 +19,7 @@ workspace = true
 # Asset paths starting with target/release are rewritten by the tools to the real target dir.
 [package.metadata.deb]
 name = "remora"
+# maintainer: taken from workspace `authors` (single constant).
 copyright = "2026, The Remora contributors"
 license-file = ["../../LICENSE-GPL", "0"]
 extended-description = """\
