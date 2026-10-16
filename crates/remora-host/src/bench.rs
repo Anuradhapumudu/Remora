@@ -20,6 +20,9 @@ use crate::sysmon;
 
 // Thresholds — copied from docs/phase2-criteria.md §2. Do not edit without §6.
 // PER-CHIP: measured for the Apple M4; other hardware gets its own numbers.
+// C12 (2026-10-17, criteria §6): screen change → encoded, p95 ≤ C1 + C2 budgets.
+const C12_P95_MS: f64 = C1_CAPTURE_MS + C2_ENCODE_P95_MS;
+// C1 and C2 below are reported for information only.
 const C1_CAPTURE_MS: f64 = 4.0;
 // C2 revised 2026-10-17 (criteria §6): p95 ≤ 7 ms; was an unmeasured 6 ms estimate.
 const C2_ENCODE_P95_MS: f64 = 7.0;
@@ -297,6 +300,7 @@ pub(crate) fn run(a: BenchArgs) -> Result<()> {
         }));
     }
     drop(tx);
+    sysmon::print_machine_state("start");
     println!("running for {} s …", a.seconds);
 
     // ── Collect ─────────────────────────────────────────────────────────────────
@@ -343,6 +347,7 @@ pub(crate) fn run(a: BenchArgs) -> Result<()> {
             .flush()?;
     }
     let wall = start.elapsed();
+    sysmon::print_machine_state("end");
     let cpu_after = a.measure_cpu.then(sysmon::all_cputimes);
     while let Ok(msg) = rx.recv_timeout(Duration::from_millis(300)) {
         handle(msg, &mut t, &mut out, start, &mut last_status)?;
@@ -535,9 +540,11 @@ fn report(
             );
         }
         let enc = row("C2 encode", &t.encode);
-        if !a.synthetic {
-            row("display → encoded (info)", &t.display_to_encoded);
-        }
+        let c12 = if a.synthetic {
+            None
+        } else {
+            row("C12 screen → encoded", &t.display_to_encoded)
+        };
 
         println!(
             "\nencoder: submitted {}  encoded {}  dropped {}  errors {} (+{} submit errors)  keyframes {}  avg bitrate {:.2} Mbit/s",
@@ -551,15 +558,23 @@ fn report(
         );
 
         println!("\nverdicts (thresholds from docs/phase2-criteria.md):");
+        if let Some(m) = c12 {
+            println!(
+                "  C12 screen → encoded ≤ {C12_P95_MS} ms p95 → {}",
+                verdict(m.p95 <= C12_P95_MS)
+            );
+        }
+        // C1/C2 are information only since 2026-10-17 (criteria §6): the boundary
+        // between them doesn't match where the GPU work happens.
         if let Some(m) = cap {
             println!(
-                "  C1 capture ≤ {C1_CAPTURE_MS} ms p50 & p95 → {}",
+                "  (info) C1 capture vs former {C1_CAPTURE_MS} ms p50 & p95: {}",
                 verdict(m.p50 <= C1_CAPTURE_MS && m.p95 <= C1_CAPTURE_MS)
             );
         }
         if let Some(m) = enc {
             println!(
-                "  C2 encode  ≤ {C2_ENCODE_P95_MS} ms p95 → {}",
+                "  (info) C2 encode vs former {C2_ENCODE_P95_MS} ms p95: {}",
                 verdict(m.p95 <= C2_ENCODE_P95_MS)
             );
         }

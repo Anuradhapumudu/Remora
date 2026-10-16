@@ -8,7 +8,7 @@ Status: design v1 (Phase 1). Implemented in Phases 2, 4 and 7. Numbers marked
 | Metric | Target | Measured |
 |---|---|---|
 | Remora-added latency (capture → encode → net stack → decode → render submit), 1080p60 | < 20 ms (**never raised**; if exceeded, stop and report) | — (Phase 4) |
-| Encode, Apple M4 hardware H.264 low-latency | ≤ 7 ms p95 (revised from an unmeasured 6 ms estimate — phase2-criteria.md §6) | 6.38 p50 / 6.76 p95 (encoder-only) |
+| Capture + encode (screen change → encoded frame ready), Apple M4, 1920×1248 | ≤ 11 ms p95 (phase2-criteria.md C12; replaces the separate C1/C2 gates) | **8.14 p95** / 7.51 p50 → leaves ≈ 11.9 ms for send + decode + render |
 | Total glass-to-glass latency | ≈ one-way network delay + 20 ms + display refresh wait | — |
 | Host CPU, static screen | < 2 % | — (Phase 2) |
 | Viewer memory | < 150 MB | — (Phase 4) |
