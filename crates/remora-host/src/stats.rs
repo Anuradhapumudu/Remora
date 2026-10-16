@@ -1,17 +1,35 @@
 //! Latency statistics for the Phase 2 benchmark.
+//!
+//! A fixed-size histogram, not a growing list of samples: the benchmark runs for
+//! 10+ minutes while measuring its own memory (criterion C4), so the instrument
+//! must not grow with run length. Percentiles are exact to one bucket (10 µs);
+//! min, max and mean are exact.
 
 use std::time::Duration;
 
-/// A set of (possibly negative) nanosecond samples with percentile summaries.
-#[derive(Debug, Default)]
+/// Bucket width in nanoseconds (10 µs).
+const BUCKET_NS: i64 = 10_000;
+/// Lowest value with its own bucket: −100 ms (frames can arrive before their timestamp).
+const MIN_NS: i64 = -100_000_000;
+/// Number of buckets: covers −100 ms … +200 ms.
+const BUCKETS: usize = 30_000;
+
+/// Signed nanosecond samples summarized by a fixed histogram.
+#[derive(Debug)]
 pub(crate) struct Samples {
-    nanos: Vec<i64>,
+    counts: Box<[u32]>,
+    below: u64,
+    above: u64,
+    count: u64,
+    sum: i128,
+    min: i64,
+    max: i64,
 }
 
 /// Percentile summary in milliseconds.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct Summary {
-    pub(crate) count: usize,
+    pub(crate) count: u64,
     pub(crate) min: f64,
     pub(crate) p50: f64,
     pub(crate) p95: f64,
@@ -20,45 +38,73 @@ pub(crate) struct Summary {
     pub(crate) mean: f64,
 }
 
-impl Samples {
-    /// Pre-allocates for `capacity` samples so recording never reallocates mid-run.
-    pub(crate) fn with_capacity(capacity: usize) -> Self {
+impl Default for Samples {
+    fn default() -> Self {
         Self {
-            nanos: Vec::with_capacity(capacity),
+            // Allocated once (~120 KB of zeroed memory); never grows.
+            counts: vec![0u32; BUCKETS].into_boxed_slice(),
+            below: 0,
+            above: 0,
+            count: 0,
+            sum: 0,
+            min: i64::MAX,
+            max: i64::MIN,
         }
     }
+}
 
+impl Samples {
     pub(crate) fn push(&mut self, d: Duration) {
         self.push_ns(i64::try_from(d.as_nanos()).unwrap_or(i64::MAX));
     }
 
     /// Signed sample (e.g. a frame delivered *before* its timestamp is negative).
     pub(crate) fn push_ns(&mut self, ns: i64) {
-        self.nanos.push(ns);
+        self.count += 1;
+        self.sum += i128::from(ns);
+        self.min = self.min.min(ns);
+        self.max = self.max.max(ns);
+        if ns < MIN_NS {
+            self.below += 1;
+            return;
+        }
+        match usize::try_from((ns - MIN_NS) / BUCKET_NS) {
+            Ok(i) if i < BUCKETS => self.counts[i] = self.counts[i].saturating_add(1),
+            _ => self.above += 1,
+        }
     }
 
-    /// Nearest-rank percentiles (no interpolation): p95 is a real observed sample.
-    /// Works on signed values, so negative samples are ranked, not dropped.
+    /// Nearest-rank percentile, reported as the upper edge of its bucket (so it
+    /// never understates by more than one 10 µs bucket), clamped to [min, max].
+    fn percentile_ns(&self, p: f64) -> i64 {
+        let rank = ((p / 100.0) * self.count as f64).ceil().max(1.0) as u64;
+        let mut seen = self.below;
+        if rank <= seen {
+            return self.min;
+        }
+        for (i, &c) in self.counts.iter().enumerate() {
+            seen += u64::from(c);
+            if rank <= seen {
+                let upper = MIN_NS + (i as i64 + 1) * BUCKET_NS;
+                return upper.clamp(self.min, self.max);
+            }
+        }
+        self.max
+    }
+
     pub(crate) fn summary(&self) -> Option<Summary> {
-        if self.nanos.is_empty() {
+        if self.count == 0 {
             return None;
         }
-        let mut sorted = self.nanos.clone();
-        sorted.sort_unstable();
-        let n = sorted.len();
-        let rank = |p: f64| {
-            let idx = ((p / 100.0) * n as f64).ceil() as usize;
-            sorted[idx.clamp(1, n) - 1] as f64 / 1e6
-        };
-        let mean = sorted.iter().map(|&v| v as f64).sum::<f64>() / n as f64 / 1e6;
+        let ms = |ns: i64| ns as f64 / 1e6;
         Some(Summary {
-            count: n,
-            min: sorted[0] as f64 / 1e6,
-            p50: rank(50.0),
-            p95: rank(95.0),
-            p99: rank(99.0),
-            max: sorted[n - 1] as f64 / 1e6,
-            mean,
+            count: self.count,
+            min: ms(self.min),
+            p50: ms(self.percentile_ns(50.0)),
+            p95: ms(self.percentile_ns(95.0)),
+            p99: ms(self.percentile_ns(99.0)),
+            max: ms(self.max),
+            mean: (self.sum as f64 / self.count as f64) / 1e6,
         })
     }
 }
@@ -83,22 +129,23 @@ pub(crate) fn slope(points: &[(f64, f64)]) -> Option<f64> {
 mod tests {
     use super::*;
 
-    fn ms(v: u64) -> Duration {
-        Duration::from_millis(v)
+    fn close(a: f64, b: f64) -> bool {
+        (a - b).abs() <= 0.010_001 // within one bucket (10 µs = 0.01 ms)
     }
 
     #[test]
-    fn nearest_rank_percentiles() {
-        let mut s = Samples::with_capacity(100);
+    fn nearest_rank_percentiles_within_one_bucket() {
+        let mut s = Samples::default();
         for v in 1..=100 {
-            s.push(ms(v));
+            s.push(Duration::from_millis(v));
         }
         let sum = s.summary().unwrap();
         assert_eq!(sum.count, 100);
-        assert_eq!(sum.p50, 50.0);
-        assert_eq!(sum.p95, 95.0);
-        assert_eq!(sum.p99, 99.0);
+        assert!(close(sum.p50, 50.0), "{}", sum.p50);
+        assert!(close(sum.p95, 95.0), "{}", sum.p95);
+        assert!(close(sum.p99, 99.0), "{}", sum.p99);
         assert_eq!(sum.max, 100.0);
+        assert_eq!(sum.min, 1.0);
         assert!((sum.mean - 50.5).abs() < 1e-9);
     }
 
@@ -111,16 +158,30 @@ mod tests {
         let sum = s.summary().unwrap();
         assert_eq!(sum.count, 5);
         assert_eq!(sum.min, -6.0);
-        assert_eq!(sum.p50, -1.0);
-        assert_eq!(sum.p95, 2.0);
+        assert!(close(sum.p50, -1.0), "{}", sum.p50);
+        assert_eq!(sum.p95, 2.0); // clamped to the exact max
         assert_eq!(sum.max, 2.0);
+    }
+
+    #[test]
+    fn out_of_range_values_are_counted_not_lost() {
+        let mut s = Samples::default();
+        s.push_ns(-500_000_000); // below range
+        s.push_ns(1_000_000);
+        s.push_ns(900_000_000); // above range
+        let sum = s.summary().unwrap();
+        assert_eq!(sum.count, 3);
+        assert_eq!(sum.min, -500.0);
+        assert_eq!(sum.max, 900.0);
+        assert!(close(sum.p50, 1.0));
+        assert_eq!(sum.p99, 900.0);
     }
 
     #[test]
     fn single_sample_and_empty() {
         let mut s = Samples::default();
         assert!(s.summary().is_none());
-        s.push(ms(7));
+        s.push(Duration::from_millis(7));
         let sum = s.summary().unwrap();
         assert_eq!((sum.p50, sum.p95, sum.max), (7.0, 7.0, 7.0));
     }

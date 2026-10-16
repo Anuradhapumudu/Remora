@@ -146,12 +146,7 @@ pub(crate) fn run(a: BenchArgs) -> Result<()> {
         bail!("--seconds must be > 0");
     }
     let pid = std::process::id();
-    let expected = (a.seconds * u64::from(a.fps)) as usize;
-    let mut t = Tally {
-        delivery: Samples::with_capacity(expected),
-        encode: Samples::with_capacity(expected),
-        ..Tally::default()
-    };
+    let mut t = Tally::default();
     let (tx, rx) = mpsc::channel::<Msg>();
     let cfg = CaptureConfig {
         width: a.width,
@@ -535,7 +530,7 @@ fn report(
             println!(
                 "  C1 accounting: {n} frames with display time ({} early, {} on time/late) + {} without = {complete} complete",
                 t.early,
-                n as u64 - t.early,
+                n - t.early,
                 t.no_display_time,
             );
         }

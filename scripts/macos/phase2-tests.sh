@@ -9,6 +9,12 @@
 # Every test is run 3 times; the WORST run is the one judged.
 set -euo pipefail
 
+# Keep the display and system awake for the whole block (a 10-minute display-sleep
+# setting once stopped the capture mid-soak; criteria §6a).
+if [[ -z "${REMORA_CAFFEINATED:-}" ]]; then
+  exec env REMORA_CAFFEINATED=1 caffeinate -di "$0" "$@"
+fi
+
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 OUT="$ROOT/target/phase2-results"
 APP="$ROOT/scripts/macos/dev-app.sh"
@@ -31,7 +37,8 @@ check_valid() { # <log>
 # p50 (first number) of a latency row, e.g. "C12 screen → encoded" or "C2 encode".
 p50_of() { grep -E "^$2 " "$1" 2>/dev/null | awk '{for (i = 1; i <= NF; i++) if ($i ~ /^-?[0-9]+[.][0-9]+$/) { print $i; exit }}'; }
 
-# Criteria §6b: flag (never average away) a > 1 ms p50 disagreement with the previous run.
+# Criteria §6b: flag (never average away) a > 1 ms p50 disagreement with the previous
+# motion/soak run of ANY block (last-run.log is updated after every run).
 compare_prev() { # <log> <previous log>
   [[ -f "$2" ]] || return 0
   local row a b
@@ -52,7 +59,8 @@ case "${1:-}" in
       "$APP" run bench-capture --seconds 60 --out "$OUT/motion-$i.h264" > "$OUT/motion-$i.log" 2>&1
       grep -E "C12|C1 capture|C2 encode|C5 keeps|complete frames:" "$OUT/motion-$i.log" | sed 's/^/    /'
       check_valid "$OUT/motion-$i.log"
-      compare_prev "$OUT/motion-$i.log" "$OUT/motion-$((i - 1)).log"
+      compare_prev "$OUT/motion-$i.log" "$OUT/last-run.log"
+      cp "$OUT/motion-$i.log" "$OUT/last-run.log"
     done
     ;;
   soak)
@@ -62,7 +70,8 @@ case "${1:-}" in
       "$APP" run bench-capture --seconds 600 --sample-memory 10 > "$OUT/soak-$i.log" 2>&1
       grep -E "C4 growth|C12|complete frames:" "$OUT/soak-$i.log" | sed 's/^/    /'
       check_valid "$OUT/soak-$i.log"
-      compare_prev "$OUT/soak-$i.log" "$OUT/soak-$((i - 1)).log"
+      compare_prev "$OUT/soak-$i.log" "$OUT/last-run.log"
+      cp "$OUT/soak-$i.log" "$OUT/last-run.log"
     done
     ;;
   static)
