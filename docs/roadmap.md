@@ -58,6 +58,7 @@ accepted by the owner) before v0.1:
 | MSI install / uninstall / upgrade-in-place on real Windows | No Windows machine yet | Phase 6.5 |
 | macOS signing + notarization path | No Apple Developer ID yet | Before first public release |
 | Per-chip encoder floors for Intel Mac, NVENC, QuickSync, AMF | Only measured on Apple M4 | Phases 6.5 / 9 |
+| Physical display hotplug (unplug/replug external monitor) during capture — Phase 2 Q4 | No external display available | Phase 9 (or earlier if a monitor is available) |
 
 ## Progress log
 

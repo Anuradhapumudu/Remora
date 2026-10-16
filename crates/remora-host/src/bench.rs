@@ -69,6 +69,9 @@ pub(crate) struct BenchArgs {
     /// Report CPU time of this process and capture/encode helpers (criterion C3).
     #[arg(long)]
     measure_cpu: bool,
+    /// Capture this display (CGDirectDisplayID; see `remora-host list-displays`).
+    #[arg(long)]
+    display_id: Option<u32>,
     /// Developer experiment: set a VideoToolbox property, e.g. `--vt-prop NumberOfSlices=4`.
     #[arg(long = "vt-prop", value_name = "KEY=VALUE", value_parser = parse_prop)]
     vt_props: Vec<(String, TuneValue)>,
@@ -85,6 +88,7 @@ fn parse_prop(s: &str) -> Result<(String, TuneValue), String> {
 enum Msg {
     Capture {
         status: FrameStatus,
+        image_size: Option<(u32, u32)>,
         delivery: Duration,
         dirty_rects: usize,
         submitted: bool,
@@ -109,6 +113,7 @@ struct Tally {
     bytes: u64,
     dirty_rects: u64,
     events: Vec<String>,
+    last_size: Option<(u32, u32)>,
 }
 
 pub(crate) fn run(a: BenchArgs) -> Result<()> {
@@ -143,7 +148,7 @@ pub(crate) fn run(a: BenchArgs) -> Result<()> {
         };
         (a.width & !1, h)
     } else {
-        let c = MacScreenCapture::main_display(cfg).context("screen capture")?;
+        let c = MacScreenCapture::display(cfg, a.display_id).context("screen capture")?;
         let (dw, dh) = c.display_pixel_size();
         let size = c.output_size();
         println!("display: {dw}×{dh} px → capturing at {}×{}", size.0, size.1);
@@ -217,6 +222,7 @@ pub(crate) fn run(a: BenchArgs) -> Result<()> {
                 }
                 let _ = ctx.send(Msg::Capture {
                     status: f.status,
+                    image_size: f.image.as_ref().map(|i| (i.width(), i.height())),
                     delivery: f.delivery_latency(),
                     dirty_rects: f.dirty_rects.len(),
                     submitted,
@@ -241,6 +247,7 @@ pub(crate) fn run(a: BenchArgs) -> Result<()> {
                     .map(|mut e| e.encode(&img, next.saturating_duration_since(start), false));
                 let _ = stx.send(Msg::Capture {
                     status: FrameStatus::Complete,
+                    image_size: None,
                     delivery: Duration::ZERO,
                     dirty_rects: 0,
                     submitted: matches!(ok, Ok(Ok(_))),
@@ -330,6 +337,7 @@ fn handle(
     match msg {
         Msg::Capture {
             status,
+            image_size,
             delivery,
             dirty_rects,
             submitted,
@@ -358,6 +366,16 @@ fn handle(
                 t.events.push(line);
             }
             *last_status = Some(status);
+            if let Some(size) = image_size
+                && t.last_size != Some(size)
+            {
+                if t.last_size.is_some() {
+                    let line = format!("[{secs:8.3}s] frame size changed → {}×{}", size.0, size.1);
+                    println!("{line}");
+                    t.events.push(line);
+                }
+                t.last_size = Some(size);
+            }
             t.dirty_rects += dirty_rects as u64;
             t.submitted += u64::from(submitted);
             t.submit_errors += u64::from(encode_error);
@@ -543,6 +561,17 @@ fn report(
     if let Some(p) = &a.out {
         println!("\nwrote {} ({:.1} MB)", p.display(), t.bytes as f64 / 1e6);
     }
+}
+
+/// `remora-host list-displays`.
+pub(crate) fn list_displays() -> Result<()> {
+    for (id, w, h, main) in MacScreenCapture::list_displays()? {
+        println!(
+            "display {id}: {w}×{h} px{}",
+            if main { "  (main)" } else { "" }
+        );
+    }
+    Ok(())
 }
 
 /// `remora-host probe-encoder`: evidence for Q1 (4:4:4) and Q2 (intra-refresh / LTR).
