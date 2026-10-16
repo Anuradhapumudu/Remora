@@ -64,6 +64,20 @@ pub(crate) fn cpu_deltas(
     v
 }
 
+/// macOS thermal pressure (`ProcessInfo.thermalState`): nominal / fair / serious /
+/// critical. Unlike `pmset -g therm` it reports pressure before any warning level.
+#[cfg(target_os = "macos")]
+pub(crate) fn thermal_state() -> &'static str {
+    use objc2_foundation::{NSProcessInfo, NSProcessInfoThermalState as T};
+    match NSProcessInfo::processInfo().thermalState() {
+        T::Nominal => "nominal",
+        T::Fair => "fair",
+        T::Serious => "serious",
+        T::Critical => "critical",
+        _ => "unknown",
+    }
+}
+
 /// Prints machine state that can skew benchmarks (criteria §6b): thermal and
 /// performance warnings, power source, Low Power Mode, uptime, load averages.
 #[cfg(target_os = "macos")]
@@ -91,7 +105,7 @@ pub(crate) fn print_machine_state(when: &str) {
         .unwrap_or_else(|| "?".to_owned());
     let load = run("/usr/sbin/sysctl", &["-n", "vm.loadavg"]);
     let uptime = run("/usr/bin/uptime", &[]);
-    println!("machine state ({when}):");
+    println!("machine state ({when}): thermal state {}", thermal_state());
     println!("  power: {power} | {charge} | low power mode: {low_power}");
     println!("  thermal/performance: {}", warnings.join(" / "));
     println!(

@@ -92,7 +92,8 @@ cap 60 (implemented as a 1/61 s minimum interval — see 5.5). Every run valid
 | C5 keeps up | 3599 / 3599, 0 dropped, 0 errors | same | same | **3599 ≥ 3528** | | **PASS** |
 | **C12** screen change → encoded p95 (p50) (ms) | 7.77 (7.51) | 7.62 (7.51) | 8.14 (7.51) | **8.14 (7.51)** | p95 ≤ 11 | **PASS** |
 | C3 static CPU | — | — | — | — | < 2 % | not run (stopped on C2) |
-| C4 memory growth | — | — | — | — | ≤ 2 MB, ≤ 0.1 MB/min | not run (stopped on C2) |
+| C4 memory growth / slope (3 × 10 min soak, corrected bench) | +0.14 MB / +0.015 MB/min | +0.08 MB / +0.005 MB/min | +0.14 MB / +0.008 MB/min | **+0.14 MB / +0.015 MB/min** | ≤ 2 MB, ≤ 0.1 MB/min | **PASS** |
+| C12 during the soak, p95 (p50) (ms) | 10.01 (9.80) | 9.98 (9.77) | 10.01 (9.80) | **10.01 (9.80)** | p95 ≤ 11 | **PASS** — see drift note |
 
 Output validity: `ffprobe` decodes all frames of the encoder-only runs (H.264
 Constrained Baseline, 1920×1248, yuv420p).
@@ -135,7 +136,10 @@ undocumented setting found lowers it. Owner decision: §6.
 
 ### 5.4 Single-display hotplug subset
 
-Not run yet (stopped on C2).
+| Event | What the capture stream did | Evidence |
+|---|---|---|
+| **Display sleep** (idle timer, observed by accident in a soak run) | The stream **stops for good**: `stream(_:didStopWithError:)` with **SCStreamError −3815 "Failed to find any displays or windows to capture"**, status `Stopped`. It does not pause and resume. **Design consequence:** the host must treat −3815 as "display went away", restart capture when a display is available again, and tell the viewer meanwhile — otherwise a session freezes silently. | `superseded-vec-stats/soak-2.log` |
+| Resolution change, deliberate display sleep/wake, lid close/open, virtual display add/remove | pending | — |
 
 ### 5.5 C2 / C5 diagnosis with real captured frames
 
@@ -222,7 +226,17 @@ render**. If the full pipeline exceeds 20 ms, work stops and is reported; the
    1/60 s made ScreenCaptureKit skip frames that arrived a hair early (57.2
    instead of 60 fps), which looked like an encoder/capture shortfall. Fix: the
    interval is 1/(fps+1); the display's refresh still caps the rate.
-3. **Never drop samples that don't fit expectations.** An early C1 discarded
+3. **The instrument must not change what it measures.** C4 measures the bench's
+   own memory, but the bench stored every latency sample (3 lists × ~36 000
+   frames), so a 10-minute soak "grew" ~0.1 MB/min and failed C4 at
+   0.106 MB/min. A/B on the same screen, 4 min each: old bench +0.230 MB/min
+   (FAIL), new bench with a fixed 10 µs histogram −0.037 MB/min (PASS).
+   Percentiles are now exact to one 10 µs bucket; min/max/mean stay exact.
+   Logs: `c4ab-old.log`, `c4ab-new.log`; superseded soak: `superseded-vec-stats/`.
+4. **Long tests must keep the display awake.** A 10-minute display-sleep setting
+   stopped the capture mid-soak (see §5.4). Test blocks now run under
+   `caffeinate -di`.
+5. **Never drop samples that don't fit expectations.** An early C1 discarded
    frames delivered before their display time (most of them at the time). C1
    is signed over every frame, with an accounting line proving none are lost.
 
@@ -235,6 +249,19 @@ render**. If the full pipeline exceeds 20 ms, work stops and is reported; the
   **flags** any disagreement > 1 ms in p50 — it never averages it away.
 * The drift itself is an open question in docs/roadmap.md "Known gaps"; Phase 4
   checks whether it reappears.
+* **Flagged 2026-10-17:** it reappeared within the session — C12 p50 9.83 ms
+  (first soak run, 03:37) vs 7.51 ms (motion block, 03:10); C2 p50 9.37 vs 7.07.
+  Machine state was identical (AC power, no thermal/performance warning, Low
+  Power Mode off). Still unexplained.
+* **Pattern across all runs so far** (C2 / C12 p50): fast ≈ 7.07 / 7.51 ms in runs
+  that followed idle gaps (03:11, 03:13, 04:26); slow ≈ 9.4–9.6 / 9.8 ms in runs
+  that followed sustained capture (02:57 after ~3 min of capture, the 10-minute
+  soaks, and 04:31 — the second of two back-to-back 4-minute runs). **Hypothesis,
+  not a finding:** this MacBook Air's M4 is fanless, and sustained load may lower
+  GPU/media-engine clocks before macOS records any thermal *warning*. The bench now
+  records `ProcessInfo.thermalState` and a per-10-second C12 timeline to test it.
+  Even the slow state passes C12 (p95 ≤ 10.06 ms), but it leaves only ≈ 1 ms of
+  margin and eats ≈ 2.3 ms of the 20 ms end-to-end budget.
 
 ## 7. Phase 2 completion checklist
 

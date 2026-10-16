@@ -130,7 +130,20 @@ struct Tally {
     /// Display time → encoded frame ready (the capture + encode segment as a whole).
     display_to_encoded: Samples,
     display_by_seq: std::collections::HashMap<u64, Instant>,
+    /// Drift investigation: (elapsed s, mean C12 ms in the window, thermal state).
+    timeline: Vec<(u64, f64, &'static str)>,
+    window_sum_ns: i128,
+    window_n: u64,
     completed_by_seq: std::collections::HashMap<u64, Instant>,
+}
+
+impl Tally {
+    /// Records one C12 sample in the run histogram and the current 10 s window.
+    fn push_c12(&mut self, ns: i64) {
+        self.display_to_encoded.push_ns(ns);
+        self.window_sum_ns += i128::from(ns);
+        self.window_n += 1;
+    }
 }
 
 /// `a − b` in signed nanoseconds.
@@ -302,11 +315,22 @@ pub(crate) fn run(a: BenchArgs) -> Result<()> {
     let deadline = start + Duration::from_secs(a.seconds);
     let mut memory: Vec<(f64, f64)> = Vec::new();
     let mut next_mem = start;
+    let mut next_window = start + Duration::from_secs(10);
     let mut last_status = None;
     loop {
         let now = Instant::now();
         if now >= deadline {
             break;
+        }
+        if now >= next_window {
+            let mean = (t.window_n > 0).then(|| t.window_sum_ns as f64 / t.window_n as f64 / 1e6);
+            t.timeline.push((
+                now.duration_since(start).as_secs(),
+                mean.unwrap_or(f64::NAN),
+                sysmon::thermal_state(),
+            ));
+            (t.window_sum_ns, t.window_n) = (0, 0);
+            next_window += Duration::from_secs(10);
         }
         if a.sample_memory > 0 && now >= next_mem {
             if let Some(bytes) = sysmon::footprint(pid) {
@@ -422,7 +446,7 @@ fn handle(
             }
             if let Some((seq, display)) = encoded_as {
                 match t.completed_by_seq.remove(&seq) {
-                    Some(done) => t.display_to_encoded.push_ns(signed_ns(done, display)),
+                    Some(done) => t.push_c12(signed_ns(done, display)),
                     None => {
                         t.display_by_seq.insert(seq, display);
                     }
@@ -439,9 +463,7 @@ fn handle(
             t.encode.push(f.latency());
             // The capture message may arrive after the encoded frame; keep both orders.
             match t.display_by_seq.remove(&f.seq) {
-                Some(display) => t
-                    .display_to_encoded
-                    .push_ns(signed_ns(f.completed, display)),
+                Some(display) => t.push_c12(signed_ns(f.completed, display)),
                 None => {
                     t.completed_by_seq.insert(f.seq, f.completed);
                 }
@@ -638,6 +660,18 @@ fn report(
         } else {
             println!("  C4 needs samples after minute 1 (run ≥ 2 min with --sample-memory)");
         }
+    }
+    if t.timeline.iter().any(|w| !w.1.is_nan()) {
+        // Drift investigation (roadmap known gaps): does C12 rise with sustained load?
+        let line: Vec<String> = t
+            .timeline
+            .iter()
+            .map(|(s, ms, th)| format!("{s}s:{ms:.2}{}", if *th == "nominal" { "" } else { th }))
+            .collect();
+        println!(
+            "\nC12 mean per 10 s (ms; thermal state shown when not nominal): {}",
+            line.join(" ")
+        );
     }
     if !t.events.is_empty() {
         println!("\nevents:");
