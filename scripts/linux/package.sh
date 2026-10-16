@@ -61,6 +61,10 @@ curl -sSfL -o "$TOOLS/runtime" "$RUNTIME_URL"
 echo "$APPIMAGETOOL_SHA256  $TOOLS/appimagetool" | sha256sum -c -
 echo "$RUNTIME_SHA256  $TOOLS/runtime" | sha256sum -c -
 chmod +x "$TOOLS/appimagetool"
+# Blank the AppImage magic ("AI\x02" at ELF offset 8) in our verified copy so it also runs
+# under binfmt emulation (e.g. Docker on Apple Silicon), which rejects that header.
+# Native x86_64 runners don't need this; it changes nothing about what the tool does.
+printf '\0\0\0' | dd of="$TOOLS/appimagetool" bs=1 seek=8 count=3 conv=notrunc status=none
 
 APPDIR="$TOOLS/Remora.AppDir"
 mkdir -p "$APPDIR/usr/bin" "$APPDIR/usr/share/applications" "$APPDIR/usr/share/icons/hicolor/256x256/apps"
