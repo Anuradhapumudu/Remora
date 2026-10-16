@@ -1,6 +1,7 @@
 # Phase 2 acceptance criteria — macOS capture + hardware encode
 
-Status: **criteria fixed before any capture code (2026-10-17). Results: not yet measured.**
+Status: criteria fixed before any capture code (2026-10-17). **Results: partial —
+C2 FAILS on encoder-only evidence (§5); capture tests wait for Screen Recording permission.**
 
 Rule: thresholds in §2 are not changed after measuring. If one FAILS, work stops
 and the failure is reported with the numbers and a proposed design change
@@ -71,22 +72,50 @@ cargo run --release -p remora-host -- bench-capture --seconds 60 --out /tmp/remo
 
 ## 5. Results
 
-*To be filled with measured numbers. Each FAIL stops the phase (see top).*
+### 5.1 Measured so far (2026-10-17, release build, AC power)
 
 | ID | p50 | p95 | p99 | max | Other | Verdict |
 |---|---|---|---|---|---|---|
-| C1 capture delivery | — | — | — | — | — | — |
-| C2 encode | — | — | — | — | — | — |
-| C3 static CPU | — | | | | | — |
-| C4 memory growth | — | | | | | — |
-| C5 keeps up | — | | | | | — |
+| C1 capture delivery | — | — | — | — | needs Screen Recording permission | pending |
+| C2 encode — **encoder-only reference** (`--synthetic`, 1920×1248, 30 s) | **6.38** | **6.76** | 7.00 | 26.96 | 1801 frames | **FAIL** (> 6 ms) |
+| C2 encode — official motion-capture run | — | — | — | — | | pending (expected FAIL: encode time doesn't depend on the frame source) |
+| C3 static CPU | — | | | | | pending |
+| C4 memory growth | — | | | | | pending |
+| C5 keeps up — encoder-only reference | | | | | 1801/1801 encoded, 0 dropped, 0 errors, 60.0 fps | PASS (reference) |
+
+Output validity: `ffprobe` decodes all 1801 frames — H.264 Constrained Baseline,
+1920×1248, yuv420p.
+
+### 5.2 C2 investigation (encoder-only, `--synthetic`, 15–20 s each, p50 / p95 ms)
+
+| Variant | p50 | p95 | Note |
+|---|---|---|---|
+| default (Constrained Baseline, 1920×1248, 60 fps) | 6.13–6.40 | 6.51–6.82 | 5 runs |
+| `MaximizePowerEfficiency=false` | 6.20 | 6.64 | no real change |
+| Constrained High | 6.29 | 6.86 | no change |
+| 1920×1080 | 6.45 | 7.83 | not faster |
+| 1280×720 | 6.26 | 6.68 | ~same as 1248p → per-frame floor |
+| 640×360 | 3.76 | 4.31 | only tiny frames are faster |
+| 2560×1664 (native) | 9.92 | 10.47 | |
+| 30 / 120 fps | 6.34 / 6.06 | 6.82 / 6.58 | frame rate irrelevant |
+| HEVC (low-latency RC) | 6.66 | 7.20 | slower |
+| `NumberOfSlices=2` or `4` | — | — | accepted, then **every frame fails** (OSStatus −12910) |
+| `RequestedMaxEncoderLatency` (undocumented) | 6.12–6.41 | 6.72–6.92 | accepted, no effect |
+| `PrioritizeEncodingSpeedOverQuality` | — | — | **not supported** in low-latency mode on M4 (rejected) |
+
+Conclusion: the M4's H.264 low-latency hardware path has a floor of about
+**6.1–6.4 ms p50 / 6.5–6.9 ms p95 for any frame ≥ 720p**. No documented or
+undocumented setting found lowers it. Decision requested from the owner
+(see the Phase 2 report).
+
+### 5.3 Questions
 
 | ID | Answer | Evidence |
 |---|---|---|
-| Q1 4:4:4 encode | — | — |
-| Q2 intra-refresh / LTR | — | — |
-| Q3 SCK API path + on-change | — | — |
-| Q4 res change / sleep / unplug | — | — |
+| Q1 4:4:4 encode | **Yes in hardware, but NOT in low-latency mode.** Normal rate control: H.264 High 4:4:4 Predictive and HEVC Range Extensions produce real 4:4:4 (`chroma_format_idc = 3`). Low-latency rate control: 4:4:4 input is **silently subsampled** to 4:2:0 (H.264 High, `chroma_format_idc = 1`); no 4:4:4/4:2:2 profile is offered in that mode. | `docs/evidence/phase2-probe-encoder-m4.txt` (SPS parsed by `remora_codec::bitstream`, unit-tested) |
+| Q2 intra-refresh / LTR | **Documented API: long-term reference only** (`EnableLTR` + `AcknowledgedLTRTokens` + `ForceLTRRefresh`; no refresh key in SDK 27 headers). The low-latency H.264 encoder **additionally exposes undocumented** `PeriodicRefreshMode` and `MaxRefreshFrameIntervalDuration` (likely gradual refresh). Not yet exercised: an LTR acknowledge/refresh round trip. | Same evidence file (supported-property dump); SDK header grep |
+| Q3 SCK API path | **Header part answered:** in SDK 27 the only deprecated ScreenCaptureKit items are `SCStreamType`/`streamType` (unused by us); `SCShareableContent` → `SCContentFilter(display:)` → `SCStreamConfiguration` → `SCStream` + `SCStreamOutput` is current. **Runtime "frames only on change": pending** (needs permission). | `ScreenCaptureKit.framework/Headers` in SDK 27.0 |
+| Q4 res change / sleep / unplug | pending (needs permission; unplug needs an external display) | — |
 
 ## 6. Changes to criteria
 

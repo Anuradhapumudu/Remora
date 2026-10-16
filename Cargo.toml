@@ -54,13 +54,18 @@ prost = "0.14.4"
 prost-build = "0.14.4"
 protox = "0.9.1"
 
-# platform
-objc2 = "0.6.5"
-objc2-foundation = "0.3.2"
-objc2-screen-capture-kit = "0.3.2"
-objc2-video-toolbox = "0.3.2"
-objc2-core-media = "0.3.2"
-objc2-core-video = "0.3.2"
+# platform — Apple framework crates: defaults OFF (they enable AVFoundation, Metal,
+# OpenGL, …); each crate turns on only the features it calls.
+objc2 = "0.6.4" # locked to 0.6.4: 0.6.5 is < 14 days old
+block2 = "0.6.2"
+dispatch2 = { version = "0.3.1", default-features = false, features = ["std", "objc2"] }
+objc2-foundation = { version = "0.3.2", default-features = false, features = ["std"] }
+objc2-core-foundation = { version = "0.3.2", default-features = false, features = ["std"] }
+objc2-core-graphics = { version = "0.3.2", default-features = false, features = ["std"] }
+objc2-screen-capture-kit = { version = "0.3.2", default-features = false, features = ["std"] }
+objc2-video-toolbox = { version = "0.3.2", default-features = false, features = ["std"] }
+objc2-core-media = { version = "0.3.2", default-features = false, features = ["std"] }
+objc2-core-video = { version = "0.3.2", default-features = false, features = ["std"] }
 windows = "0.62.2"
 x11rb = "0.14.0"
 openh264 = "0.9.8"

@@ -11,6 +11,21 @@ publish.workspace = true
 license = "MIT OR Apache-2.0"
 
 [dependencies]
+thiserror = { workspace = true }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = { workspace = true }
+block2 = { workspace = true }
+dispatch2 = { workspace = true }
+objc2-foundation = { workspace = true, features = ["NSArray", "NSEnumerator", "NSError", "NSString", "NSObject"] }
+objc2-core-foundation = { workspace = true, features = ["CFArray", "CFDictionary", "CFNumber", "CFCGTypes"] }
+objc2-core-graphics = { workspace = true, features = ["CGGeometry", "CGDirectDisplay"] }
+objc2-screen-capture-kit = { workspace = true, features = [
+    "SCShareableContent", "SCStream", "SCError", "block2", "dispatch2",
+    "objc2-core-media", "objc2-core-foundation", "objc2-core-graphics",
+] }
+objc2-core-media = { workspace = true, features = ["CMSampleBuffer", "CMTime", "CMBase", "objc2-core-video"] }
+objc2-core-video = { workspace = true, features = ["CVBuffer", "CVImageBuffer", "CVPixelBuffer", "CVHostTime", "CVReturn", "CVBase"] }
 
 [lints]
 workspace = true
