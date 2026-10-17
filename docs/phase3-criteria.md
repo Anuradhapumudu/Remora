@@ -1,6 +1,6 @@
 # Phase 3 acceptance criteria — encrypted, authenticated handshake
 
-Status: **draft for owner approval (2026-10-17). No implementation code yet.**
+Status: **revision 2 for owner approval (2026-10-17)** — incorporates the owner's four required changes (A17 recalibration, SPAKE2 section + crypto-claims audit, A04 timing/logging/DoS, mutation-testing scope) and the test-first build order. No implementation code yet.
 
 Gate rule (as Phase 2): criteria are fixed before code. If a criterion fails,
 work stops and is reported with evidence and a proposed design change; a
@@ -31,7 +31,7 @@ still shows a safety code, and still streams video. So in Phase 3:
 | Crate | Phase 3 content |
 |---|---|
 | `remora-proto` | Envelope + framing (u16 length prefix), `ViewerHello`/`HostHello`, control messages needed for the handshake/approval, limits (protocol.md §7), connection-code encode/decode/validate, media-datagram header parse |
-| `remora-crypto` | Ed25519 identity + `IdentityCert`, device ID, SPAKE2 wrapper, Noise `XXpsk0`/`XX` wrapper with prologue binding, SAS commit-reveal, media AEAD (per-sender key, explicit counter, 4096-packet replay window), one-time-password generation, unattended-password policy, `Debug`-redacting + zeroizing secret types |
+| `remora-crypto` | Ed25519 identity + `IdentityCert` (`verify_strict` only), device ID, `Pake` trait + SPAKE2 implementation with input validation, Noise `XXpsk0`/`XX` wrapper with prologue binding, SAS commit-reveal, media AEAD (per-sender key, explicit counter, 4096-packet replay window), one-time-password generation, unattended-password policy, `Debug`-redacting + zeroizing secret types |
 | `remora-net` | QUIC over loopback (quinn), TLS exporter, stream-0 framing, connection close codes |
 | `remora-session` | Pure state machine: `Idle → Hello → Spake → Noise → SasReveal → PendingApproval → Active → Closed`, approval gate, attempt limiter, pending-handshake cap |
 | `remora-host` / `remora-viewer` | CLI: host shows OTP + SAS + accept/deny prompt; viewer connects by `IP:port` + expected device ID, shows SAS |
@@ -49,8 +49,8 @@ Unless a test says otherwise, a failed attack must produce **all** of:
 |---|---|
 | Session | Never reaches `Active`. No application message (input, cursor, media key, video) is processed — proven by mock injector/renderer call counts of **0**. |
 | Local error | The specific `remora_session::FailReason` named in the test (e.g. `AuthFailed`, `ProtocolViolation`, `IdentityMismatch`, `IdentityChanged`, `VersionUnsupported`, `Expired`, `NonceReused`, `RateLimited`, `Timeout`, `Rejected`). |
-| Wire (what the peer sees) | QUIC `CONNECTION_CLOSE` with an application code from a fixed table: `0x10 AUTH_FAILED`, `0x11 PROTOCOL_VIOLATION`, `0x12 VERSION_UNSUPPORTED`, `0x13 REJECTED`, `0x14 TIMEOUT`, `0x15 RATE_LIMITED`. **Empty reason phrase.** `AUTH_FAILED` is used for *every* authentication failure — wrong password, wrong key, failed decryption — so a remote attacker cannot tell which one happened (no oracle). |
-| Local log | Exactly one `WARN` event `handshake_failed` with fields `reason`, `peer_addr`, `attempt` (`n/3` where relevant) and `session_id` (random, non-secret). |
+| Wire (what the peer sees) — **generic** | QUIC `CONNECTION_CLOSE` with an application code from a fixed table: `0x10 AUTH_FAILED`, `0x11 PROTOCOL_VIOLATION`, `0x12 VERSION_UNSUPPORTED`, `0x13 REJECTED`, `0x14 TIMEOUT`, `0x15 RATE_LIMITED`. **Empty reason phrase.** `AUTH_FAILED` is used for *every* authentication failure, so a remote attacker cannot tell which check failed beyond what the protocol step itself reveals (A04). |
+| Local log on the host — **specific** | Exactly one `WARN` event `handshake_failed` with the **precise** `FailReason` (e.g. `WrongPsk`, `CertSignatureInvalid`, `CertKeyMismatch`, `DeviceIdMismatch`, `PinnedKeyChanged`, `CommitmentMismatch`, `ReplayNonce`, `FrameTooLarge`), the protocol step, `peer_addr`, `attempt` (`n/3`), `session_id` (random, non-secret) and elapsed time. Generic on the wire, specific locally, so failures stay debuggable; A28 guarantees no secret is in it. |
 | Never logged | OTP or unattended password; any private key, PSK, SPAKE2 key `K`, Noise transport keys, media keys; SPAKE2 messages; handshake hash; SAS nonces; raw frame bytes. Enforced by test A25 (canary scan). |
 | Resources | The connection's memory is released; pending-handshake count returns to its previous value. |
 
@@ -66,7 +66,48 @@ Each row: the attack, how the test stages it, and the **required** outcome.
 | **A01** | Viewer uses a **wrong 6-digit password** | Layer: host Noise msg1 decryption (psk0). `AuthFailed` both sides; wire `AUTH_FAILED`; host log `attempt 1/3`. Host sends **nothing** after `HostHello`/`SpakeB` (its identity is never revealed). |
 | **A02** | **Three** wrong passwords in a row | 3rd failure rotates the OTP (old one rejected even if now guessed right), host UI event "3 failed attempts — new password", cool-down starts at 30 s and doubles; a correct new-password attempt during cool-down → `RateLimited` / `RATE_LIMITED`. |
 | **A03** | **Parallel guessing**: 50 simultaneous connections with different guesses | At most 4 handshakes pending at once (others closed `RATE_LIMITED` before any crypto); attempts are counted **globally per OTP**, so the 3-attempt limit holds across connections; ≤ 10 attempts/min per source IP. |
-| **A04** | **Error oracle**: compare host replies for wrong password vs. unknown/forged identity vs. corrupted msg1 | Byte-identical wire behaviour (`AUTH_FAILED`, empty reason, same message count). |
+| **A04** | **Error oracle** (bytes and timing) | See §3.1a. |
+
+#### 3.1a A04 in detail — what may and may not be distinguishable
+
+**Correction to revision 1:** "wrong password vs unknown identity vs corrupted
+msg1 are byte-identical" was wrong as stated. A wrong password fails at Noise
+**message 1** (the host never sends message 2); a forged identity can only fail
+at **message 3**, after the host has sent message 2. Which *step* fails is
+inherent to the protocol and reveals only what the protocol already tells any
+participant (passing message 1 *is* the PAKE saying "the password was right").
+The requirement is therefore per step:
+
+* **Bytes:** all failures **at the same step** are byte-identical on the wire
+  (same close code `AUTH_FAILED`, empty reason, same messages sent before it).
+  Step 1 set: wrong password, corrupted msg1, replayed msg1, wrong PSK from a
+  tampered SPAKE2 message. Step 3 set: bad cert signature, cert/Noise key
+  mismatch, untrusted or changed pinned key, device-ID mismatch.
+* **Timing — approach: a fixed response-time floor.** Every `AUTH_FAILED` is
+  sent no earlier than **200 ms after the failing message arrived**, and every
+  check of that step runs to completion before the verdict (no early return).
+  The real work at a step takes ≈ 1–5 ms, so the floor dominates. If the work
+  ever exceeds 150 ms the host logs an anomaly (the floor would stop hiding it).
+  Chosen over "measure and prove overlap" because a floor removes the signal by
+  construction instead of hoping a measurement is sensitive enough.
+* **Test:** for each failure type of a step, 200 handshakes over loopback;
+  record time from sending the failing message to receiving the close.
+  **PASS** if every sample is ≥ 200 ms and ≤ 200 ms + 25 ms, and the medians of
+  any two failure types at the same step differ by < 1 ms. An A/A control (the
+  same failure type measured twice) is run first; if its medians differ by
+  ≥ 1 ms the test is reported as *too noisy to judge* rather than passed.
+* **Mutant check:** removing the floor or adding an early return must fail it.
+
+**DoS interaction (named, not hidden):** an attacker who can reach the host can
+fail three times on purpose, over and over, forcing the OTP to rotate so the
+legitimate viewer's code keeps going stale. Mitigations: exponential cool-down
+(30 s doubling to 1 h) limits the attacker to 3 attempts per window; per-source
+IP limits; the host sees "3 failed attempts from <IP> — new password", can
+read out the new code, and can disconnect/block. **Status: partially mitigated,
+accepted residual risk for v0.1** — a determined attacker with many IPs who
+knows the host's address can keep the code rotating. Revisit in Phase 8
+(signaling can rate-limit per device ID and hide the host's address until
+approval). Added to threat-model.md §9.
 
 ### 3.2 Replay, nonce reuse, expiry, downgrade
 
@@ -94,9 +135,53 @@ Each row: the attack, how the test stages it, and the **required** outcome.
 |---|---|---|
 | **A15** | **Swapped identity key**: `IdentityCert` signed by key A but containing Noise static key B; or a valid cert replayed from another session/device | `AuthFailed` (cert's Noise key ≠ authenticated Noise remote static, or bad signature). |
 | **A16** | **Malicious signaling (`EvilSignal`) substitutes its own key**: viewer asked for device ID X; attacker answers with key Y — *including when the attacker knows the password* | Viewer aborts with `IdentityMismatch` (`DeviceId(cert key) ≠ X`) **before** showing a SAS or reaching `PendingApproval`. |
-| **A17** | **MITM that knows the password** (two separate sessions: viewer↔MITM↔host) | Both handshakes complete, but the two SAS values differ. Over 10 000 runs, equal SAS ≤ 0.1 % (expected ≈ 10⁻⁶ per run). The host prompt shows the SAS that differs from the viewer's — the human comparison is the defence; documented as residual risk. |
-| **A18** | **SAS grinding** (commit-then-reveal): responder (attacker) reveals an `n_r` that doesn't match its commitment; responder tries 2¹⁶ choices of ephemeral key/nonce to steer the SAS to a target | Mismatch ⇒ `ProtocolViolation`, no SAS shown. Steering: hit rate statistically equal to 10⁻⁶ × tries' share (no advantage). **Mutant check:** removing the commitment verification or computing the SAS before the reveal must make this test fail. |
+| **A17** | **MITM that knows the password** (two sessions viewer↔MITM↔host); the MITM tries to make both sessions show the same SAS | See §3.4a — structural tests are primary, the statistical test is secondary. |
+| **A18** | **SAS grinding** via commit-then-reveal abuse | See §3.4a. |
 | **A19** | **Trusted device whose key changed** | `IdentityChanged` hard failure with a clear warning ("this device's identity changed") — never silently treated as a new device and never falling back to the password path. |
+
+#### 3.4a A17 / A18 in detail — structural proof first, statistics second
+
+**Why sampling alone cannot carry this.** With a fair 6-digit SAS the chance
+that two independent sessions show the same code is p = 10⁻⁶. Over N = 10 000
+MITM runs the number of matches X is Binomial(N, p) ≈ Poisson(λ = 0.01):
+
+| | P(X = 0) | P(X = 1) | P(X ≥ 2) |
+|---|---|---|---|
+| honest protocol (λ = 0.01) | 0.990 | 0.0099 | **5.0 × 10⁻⁵** |
+| attacker advantage ×10 (λ = 0.1) | | | 0.0047 |
+| attacker advantage ×100 (λ = 1) | | | 0.264 |
+| attacker advantage ×1000 (λ = 10) | | | 0.9995 |
+
+So the statistical test can only reliably catch advantages of roughly ×1000;
+a ×100 attack slips through three times out of four. (Revision 1's "≤ 0.1 %"
+threshold allowed 10 matches — 1000× the baseline — and was wrong.) The
+structural tests below are the real check.
+
+**Primary — structural tests (each must fail against a mutant that breaks it):**
+
+| ID | Property | Test |
+|---|---|---|
+| A17-S1 | The responder's contribution `n_r` is **committed before** it learns anything that determines the SAS | Type-state: the host state machine can emit Noise msg2 (carrying `C_r = BLAKE2s(… ‖ n_r)`) only after `n_r` is drawn, and has no API to change `n_r` afterwards. Test drives a scripted responder that tries to reveal `n_r' ≠ n_r` **after** receiving msg3 (which carries `n_i`) ⇒ viewer rejects with `CommitmentMismatch` / `ProtocolViolation`, no SAS shown. Every bit-position of `n_r` tried. |
+| A17-S2 | The initiator's `n_i` is revealed only **after** `C_r` is received | Type-state: the viewer cannot build msg3 before it has processed msg2; test feeds msg2 without a commitment (or with a malformed one) ⇒ `ProtocolViolation`, `n_i` never sent. |
+| A17-S3 | The SAS depends on **all** of `h`, `n_i`, `n_r` | Flipping any single bit of any input changes the SAS (checked for every bit position; a collision is allowed only at the 10⁻⁶ rate and the test fixes inputs where none occurs). |
+| A17-S4 | No SAS is computed or displayed before the reveal is verified | State machine exposes the SAS only in `PendingApproval`, reachable only through successful verification (also A23). |
+| A17-S5 | `n_i`, `n_r` are fresh 256-bit CSPRNG values per session | Injected-RNG test: the code draws exactly one fresh value per session; values never repeat across 10⁵ sessions. |
+
+**Secondary — statistical evidence:**
+
+* **A17-stat:** 10 000 in-process MITM runs (attacker knows the password).
+  **INVESTIGATE at 1 match** (expected in ≈ 1 % of honest runs), **FAIL at
+  ≥ 2 matches** (false-alarm rate 5 × 10⁻⁵ for an honest implementation).
+* **A18-stat:** fix every value the responder controls (ephemeral key, `n_r`) and
+  vary only the initiator's `n_i` over 10⁶ runs; bucket SAS values into 1000
+  bins (expected 1000 per bin). **FAIL if χ² (999 d.o.f.) > 1226.1** (the
+  p = 10⁻⁶ critical value, so an honest implementation fails about once in a
+  million runs). This shows the responder's fixed choices cannot pin the SAS;
+  it detects gross bias only.
+
+**Mutant checks:** removing the commitment check, computing the SAS before the
+reveal, or dropping `n_i` or `n_r` from the SAS input must each fail at least
+one A17-S test.
 
 ### 3.5 Approval gate and session state machine
 
@@ -121,9 +206,12 @@ Each row: the attack, how the test stages it, and the **required** outcome.
 | **A26** | **Oversized / malformed input** at every parser: frame length > limit, truncated frames, protobuf garbage, oversized repeated fields, oversized connection code, bad datagram header | Rejected **before allocating** proportional memory (test with a counting allocator: allocation ≤ fixed bound regardless of claimed length); `ProtocolViolation` (stream) or drop (datagram). |
 | **A27** | **Fuzzing**: `cargo-fuzz` targets for envelope decode, frame reader, hello/handshake messages, connection code, datagram header, SAS/commit parsing | ≥ 10 min per target locally per release of Phase 3 and 60 s per target in CI; **0 crashes, 0 panics, 0 timeouts**; corpus kept. |
 | **A28** | **Secret leakage**: run the whole suite with canary secrets (distinctive OTP, keys, unattended password) | No canary — raw, hex or base64 — in any log line, `Debug` output, error message or panic message; all secret types `ZeroizeOnDrop` (compile-time assertion). |
-| **A29** | **Weak OTP generation** | 10⁶ generated OTPs pass a χ² uniformity test over 000000–999999 (no modulo bias); source is the OS CSPRNG. |
+| **A29** | **Weak OTP generation** | **Structural (primary):** the generator uses rejection sampling — with an injected RNG that returns values ≥ 4 294 000 000 (the biased tail of `u32 % 10⁶`), the generator must draw again, never map them; the production RNG is the OS CSPRNG (type-checked). **Statistical (secondary):** 10⁶ OTPs in 1000 bins, FAIL if χ² (999 d.o.f.) > 1226.1. Note: the statistical test **cannot** detect the modulo bias it was originally meant for (a 2.3 × 10⁻⁴ relative effect ≈ 0.1 counts per bin against a standard deviation of 31.6) — that is why the structural test is primary. |
 | **A30** | **Short unattended password** | `validate_unattended_password` rejects < 12 characters after NFKC normalisation (incl. combining-character tricks), > 128, and the embedded common-password list; accepts valid ones. |
 | **A31** | **`unsafe` outside FFI modules** | CI check: `unsafe` appears only under `crates/*/src/sys/` (and the throwaway spike); every block has `// SAFETY:` (clippy `undocumented_unsafe_blocks` already denies). |
+| **A32** | **Small-order / torsion / identity SPAKE2 element** from the peer (crypto-claims-audit §1: the crate doesn't check) | Our `Pake` wrapper rejects it **before** the crate sees it: `ProtocolViolation`, wire `AUTH_FAILED`. All 8 small-order points of edwards25519, the identity, a valid point plus each torsion component, wrong side byte, wrong length and non-decompressible bytes are tested. |
+| **A33** | **Unverifiable SPAKE2 constants** | A test re-derives M and N from python-spake2's published seed procedure and compares them to the crate's constants. If they cannot be reproduced, Phase 3 reports the PAKE as resting on unverified constants (owner decision). |
+| **A34** | **Noise implementation correctness evidence** | snow's own Noise test-vector suite is run once in CI against the exact locked version, and the result recorded. |
 
 ## 4. Negative cases called out explicitly (where bugs hide)
 
@@ -151,7 +239,7 @@ Each row: the attack, how the test stages it, and the **required** outcome.
 | **INV8** no secrets in logs/Debug/panics; zeroized | A28 | **Full** for Phase 3 code | Crash reports / OS logs outside our process: not testable (§6) |
 | **INV9** no pixels logged / written to disk | — | **Gap** (no pixels flow in Phase 3) | Phase 4: test that the streaming path writes no file and logs no frame data; `bench-capture` stays the only writer (explicit `--out`) |
 | **INV10** keys/buttons released on session end | — | **Gap** (no input injection yet) | Phase 6: kill viewer / drop network / panic mid-keypress ⇒ mock-injector `release_all` called; then on a real OS |
-| **INV11** "session active" indicator + one-click end | Partial: state machine exposes `active` + `disconnect()` and a test that `disconnect()` from any state reaches `Closed` and stops all processing | **Partial** | Phase 4 (CLI/host indicator) + Phase 7 (GUI): manual checklist item; cannot be fully automated |
+| **INV11** "session active" indicator + one-click end | Partial: state machine exposes `active` + `disconnect()` and a test that `disconnect()` from any state reaches `Closed` and stops all processing | **Partial** | **Decay risk** (manual checks get skipped): Phase 4 adds an automated check that the host CLI prints the indicator whenever the session is `Active`; Phase 7 automates the GUI part with a UI test asserting the indicator is visible for the whole `Active` period and that its button reaches `Closed` within 1 s. Until then: release-checklist item. |
 | **INV12** 3 failures rotate OTP and notify | A02 | **Full** | — |
 | **INV13** unattended password ≥ 12 chars, NFKC | A30 (policy function) | **Full** for the policy | Unattended mode itself is post-v0.1; its use of the policy is tested then |
 | **INV14** no `unsafe` outside FFI; SAFETY comments | A31 + existing lints | **Full** | — |
@@ -159,27 +247,90 @@ Each row: the attack, how the test stages it, and the **required** outcome.
 **Gaps (not dropped, scheduled):** INV2 (real media path), INV9, INV10, INV11
 (automated part only partial). Added to docs/roadmap.md "Known gaps".
 
-## 6. What our own tests cannot prove — and what we rely on instead
+## 6. The SPAKE2 finding (elevated)
 
-| Cannot be proven by us | Why | What we rely on |
-|---|---|---|
-| **Correctness of the `spake2` crate** (unaudited; python-spake2 / magic-wormhole compatible, **not RFC 9382**) | Tests can show our usage is right (different passwords ⇒ unrelated keys; same password ⇒ same key; transcript binding), not that the math is free of subtle flaws | Small, readable code from RustCrypto; its known-answer tests against python-spake2; our property tests; wrapped behind `remora-crypto` so it can be swapped (RFC 9382 / CPace) with a protocol-version bump. **Recommend an external review before v1.0.** |
-| `snow` (Noise), `curve25519-dalek`, `ed25519-dalek`, `chacha20poly1305` | Same — math and implementation correctness | Noise spec test vectors that snow runs; public audits of the dalek crates (Quarkslab, 2019) and RustCrypto AEADs (NCC Group, 2020); our protocol-level tests |
-| **Constant-time behaviour** (no timing side channels) | Tests can't reliably measure it | Crates designed for constant time (`subtle`); we never compare secrets with `==` (lint + review) |
-| **Soundness of the protocol composition** (SPAKE2 → PSK → Noise XXpsk0 + exporter + SAS commit-reveal) | Tests check behaviour under attacks we thought of, not all attacks | Design reasoning in threat-model.md / protocol.md; **gap:** a formal model (ProVerif/Tamarin) is recommended before v1.0 |
-| **OS CSPRNG quality** | Statistical tests catch only gross failures (A29) | The OS RNG via `getrandom` |
-| **Human SAS comparison** | Users may click Accept without comparing | UI design (Phase 7): SAS large and side by side; residual risk in threat model §9 |
-| **QUIC / rustls** | Deliberately untrusted (D1) | Nothing — security doesn't depend on them (A14 proves a QUIC-layer MITM fails) |
-| **Secrets in OS crash reports, swap, hibernation files** | Outside our process | `zeroize` reduces the window; residual risk |
+The threat model asserted an "RFC 9382-style" SPAKE2. Reading the crate showed
+it is **a port of python-spake2 (magic-wormhole), not RFC 9382**, and it differs
+in ways that matter: **no cofactor multiplication or small-order check**,
+**different M/N constants** whose generation we have not verified, **no key
+confirmation**, no memory-hard password hashing, and no zeroizing of secrets.
+The published analysis of RFC 9382 therefore does **not** directly cover what
+we would ship. Full detail, evidence and every other cryptographic claim
+re-checked: **docs/crypto-claims-audit.md**.
+
+Consequences for Phase 3:
+
+* The PAKE sits behind a **real abstraction boundary** (`remora-crypto::Pake`
+  trait: own message/key/error types, input validation in our code, algorithm
+  named by the protocol version; no `spake2` type in any public signature; one
+  test suite run against every implementation).
+* Hardening in our wrapper: reject non-torsion-free and identity elements (A32).
+* Evidence tasks: re-derive the constants (A33).
+* **v1.0 review question:** move to CPace (IRTF CFRG draft) or an RFC 9382
+  implementation; external review of the composition. In docs/roadmap.md.
+
+## 6b. What our own tests cannot prove — and what we rely on instead
+
+| Cannot be proven by us | What we rely on |
+|---|---|
+| Correctness of the `spake2` construction and code | §6; property tests; wrapper hardening (A32); constant re-derivation (A33); replaceable behind the `Pake` trait; external review before v1.0 |
+| `snow`, `curve25519-dalek`, `ed25519-dalek`, `chacha20poly1305` correctness | snow's Noise vector tests run once in CI (A34); **chacha20poly1305's NCC Group audit (stated in its README)**; for the dalek crates no audit is claimed here (revision 1's "Quarkslab 2019" line was from memory and has been removed — crypto-claims-audit C14); our protocol-level tests |
+| Constant-time behaviour | Where *our* code compares secrets we use `subtle` (lint + review); library internals rely on their design |
+| Soundness of the composition (SPAKE2 → PSK → Noise XXpsk0 + exporter + SAS commit-reveal, with implicit instead of RFC key confirmation) | Design reasoning; **gap:** formal model (ProVerif/Tamarin) before v1.0 |
+| OS CSPRNG quality | `getrandom`/OS RNG; A29 only catches gross failures |
+| Human SAS comparison | UI design (Phase 7); residual risk in threat model §9 |
+| QUIC / rustls | Deliberately untrusted (D1); A14 proves a QUIC-layer MITM fails |
+| Secrets left in memory by third-party crates (SPAKE2 state, Noise keys are **not** zeroized — verified), OS crash reports, swap, hibernation | Short-lived handshake state; our own secret types zeroize; residual risk |
+
+## 6c. Statistical thresholds — re-checked against their baselines
+
+| Test | Revision 1 | Problem | Revision 2 |
+|---|---|---|---|
+| A17 | ≤ 0.1 % matches in 10 000 runs | Allowed 10 matches = 1000× the 10⁻⁶ baseline | Structural primary; FAIL ≥ 2, INVESTIGATE at 1 (§3.4a) |
+| A18 | "statistically equal to 10⁻⁶" (undefined) | No threshold, no stated power | Structural primary; χ² with 1000 bins, p = 10⁻⁶ critical value 1226.1 |
+| A29 | χ² over 10⁶ categories with 10⁶ samples | Invalid (≈ 1 expected per category) **and** blind to modulo bias, the bug it targeted | Structural rejection-sampling test primary; valid χ² secondary, with its blind spot stated |
+| A04 timing (new) | — | — | Fixed floor + bounded window + A/A noise control (§3.1a) |
+| Others (A02, A03, A09, A12, A13, A26, A27) | deterministic | — | unchanged — counts and exhaustive checks, not samples |
 
 ## 7. Mutation-testing gate
 
-`cargo-mutants` runs on the security-critical code: `remora-crypto` (all),
-`remora-session` (state machine, approval gate, attempt limiter), the handshake
-driver in `remora-net`, and the validators in `remora-proto`.
-**Pass:** every mutant in these is caught (`caught`/`timeout`), or listed in
-§10 with a written reason it cannot weaken security (e.g. it only changes a log
-message). Report: counts of caught / missed / unviable, and the list of missed.
+* **Scope — security crates only:** `remora-crypto` (all), `remora-session`
+  (state machine, approval gate, attempt limiter), the handshake driver in
+  `remora-net`, and the validators in `remora-proto`.
+* **When:** a scheduled nightly workflow, and on pull requests that change those
+  crates (path filter) — **not on every PR**.
+* **Pass: 100 % kill rate.** Every surviving mutant must be either killed by a
+  new test, or individually justified in **one line** in a committed survivors
+  file (`docs/mutants-justified.md`) — e.g. *equivalent mutant: replaces `<` with
+  `<=` on a value that can never equal the bound*, or *changes only a log
+  message*. Equivalent mutants are labelled as such. **A list of unexplained
+  survivors fails the gate.**
+* Report: caught / missed / unviable / timeout counts per crate and the
+  justified list.
+
+## 7b. Build order — tests written with each component, not at the end
+
+Tests written after a finished implementation tend to describe what the code
+does instead of what it must do — exactly what this criteria-first gate exists
+to prevent. So:
+
+1. **Test harness first** (`remora-testkit`): in-process transport, scriptable
+   MITM proxy (record / replay / flip / drop / reorder), `EvilSignal`, canary-secret
+   log scanner, counting allocator, mock injector/renderer, binomial/χ² helpers.
+2. For each component, **its attack tests are written first** (they fail —
+   "red"), then the component is implemented until they pass:
+   * `remora-proto` (framing, limits, connection code) → A07, A26, A27 targets;
+   * `remora-crypto` (`Pake` wrapper, identity/cert, Noise, SAS, media AEAD, OTP,
+     password policy) → A01 (crypto part), A13, A15, A17-S*, A18, A29, A30, A32–A34;
+   * `remora-session` (state machine, approval, limiter) → A02, A03, A20–A25-T;
+   * `remora-net` (QUIC loopback, exporter, close codes, timing floor) → A04,
+     A05, A06, A08, A09, A10, A14, A24;
+   * host/viewer CLI → F1, A16, A17-stat, A19, A22 end to end.
+3. Fuzz targets and the mutation gate run as each component lands; A28/A31 run
+   over everything at the end.
+
+The commit history must show each component's tests landing **before or with**
+its implementation, never after.
 
 ## 8. Functional criteria (not security, but Phase 3 must work)
 
