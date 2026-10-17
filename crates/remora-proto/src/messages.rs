@@ -207,21 +207,87 @@ pub enum MessageError {
     Invalid(&'static str),
 }
 
+fn check_len(bytes: &[u8], max: usize) -> Result<(), MessageError> {
+    if bytes.len() > max {
+        return Err(MessageError::TooLarge {
+            len: bytes.len(),
+            max,
+        });
+    }
+    Ok(())
+}
+
+fn decode<M: prost::Message + Default>(bytes: &[u8], max: usize) -> Result<M, MessageError> {
+    check_len(bytes, max)?;
+    M::decode(bytes).map_err(|_| MessageError::Decode)
+}
+
+fn require(ok: bool, what: &'static str) -> Result<(), MessageError> {
+    if ok {
+        Ok(())
+    } else {
+        Err(MessageError::Invalid(what))
+    }
+}
+
 /// Decodes and validates a [`ViewerHello`] (≤ [`crate::limits::HANDSHAKE_FRAME_MAX`] bytes).
 pub fn decode_viewer_hello(bytes: &[u8]) -> Result<ViewerHello, MessageError> {
-    let _ = bytes;
-    todo!("phase 3 step 2: implement after the tests")
+    use crate::limits::{HANDSHAKE_FRAME_MAX, MAX_VERSIONS};
+    let h: ViewerHello = decode(bytes, HANDSHAKE_FRAME_MAX)?;
+    require(
+        !h.versions.is_empty() && h.versions.len() <= MAX_VERSIONS,
+        "version list size",
+    )?;
+    require(h.versions.iter().all(|&v| v != 0), "version 0")?;
+    require(
+        matches!(Mode::try_from(h.mode), Ok(Mode::Password | Mode::Trusted)),
+        "mode",
+    )?;
+    require(h.nonce.len() == 16, "nonce length")?;
+    Ok(h)
 }
 
 /// Decodes and validates a [`HostHello`].
 pub fn decode_host_hello(bytes: &[u8]) -> Result<HostHello, MessageError> {
-    let _ = bytes;
-    todo!("phase 3 step 2: implement after the tests")
+    let h: HostHello = decode(bytes, crate::limits::HANDSHAKE_FRAME_MAX)?;
+    require(h.version != 0, "version 0")?;
+    require(h.host_device_id.len() == 10, "device id length")?;
+    Ok(h)
+}
+
+fn unit_interval(v: f32) -> bool {
+    v.is_finite() && (0.0..=1.0).contains(&v)
 }
 
 /// Decodes and validates an [`Envelope`] (≤ [`crate::limits::ENVELOPE_MAX`] bytes).
 /// An envelope with no known message is invalid.
 pub fn decode_envelope(bytes: &[u8]) -> Result<Envelope, MessageError> {
-    let _ = bytes;
-    todo!("phase 3 step 2: implement after the tests")
+    let e: Envelope = decode(bytes, crate::limits::ENVELOPE_MAX)?;
+    match &e.msg {
+        None => return Err(MessageError::Invalid("empty or unknown envelope")),
+        Some(envelope::Msg::Control(c)) => match &c.kind {
+            None => return Err(MessageError::Invalid("empty or unknown control message")),
+            Some(control::Kind::SasReveal(r)) => require(r.n_r.len() == 32, "SAS nonce length")?,
+            Some(control::Kind::Accept(a)) => require((1..=3).contains(&a.role), "role")?,
+            Some(control::Kind::Reject(r)) => {
+                require((1..=2).contains(&r.reason), "reject reason")?
+            }
+            Some(control::Kind::MediaKey(k)) => require(k.key.len() == 32, "media key length")?,
+            Some(control::Kind::Pending(_) | control::Kind::Bye(_)) => {}
+        },
+        Some(envelope::Msg::Input(i)) => match &i.kind {
+            None => return Err(MessageError::Invalid("empty or unknown input message")),
+            Some(input::Kind::Button(b)) => {
+                require((1..=3).contains(&b.button), "mouse button")?;
+                require(
+                    unit_interval(b.x) && unit_interval(b.y),
+                    "pointer coordinates",
+                )?;
+            }
+            Some(input::Kind::Key(k)) => {
+                require((1..=0xFFFF).contains(&k.usb_hid_usage), "HID usage")?
+            }
+        },
+    }
+    Ok(e)
 }

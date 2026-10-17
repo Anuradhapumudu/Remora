@@ -65,12 +65,82 @@ pub enum DatagramError {
 impl DatagramHeader {
     /// Parses a datagram; returns the header and the encrypted body (incl. tag).
     pub fn parse(datagram: &[u8]) -> Result<(Self, &[u8]), DatagramError> {
-        let _ = datagram;
-        todo!("phase 3 step 2: implement after the tests")
+        use crate::limits::{AEAD_TAG_LEN, DATAGRAM_HEADER_LEN, DATAGRAM_MAX};
+        if datagram.len() > DATAGRAM_MAX {
+            return Err(DatagramError::TooLong);
+        }
+        if datagram.len() < DATAGRAM_HEADER_LEN + AEAD_TAG_LEN {
+            return Err(DatagramError::TooShort);
+        }
+        let (head, body) = datagram.split_at(DATAGRAM_HEADER_LEN);
+        let [
+            kind,
+            flags,
+            k0,
+            k1,
+            c0,
+            c1,
+            c2,
+            c3,
+            c4,
+            c5,
+            c6,
+            c7,
+            s0,
+            s1,
+            layer_id,
+            reserved,
+        ] = <[u8; DATAGRAM_HEADER_LEN]>::try_from(head).map_err(|_| DatagramError::TooShort)?;
+        let kind = match kind {
+            1 => DatagramKind::VideoFragment,
+            2 => DatagramKind::FecRepair,
+            3 => DatagramKind::PointerMotion,
+            other => return Err(DatagramError::UnknownKind(other)),
+        };
+        if flags & !KNOWN_FLAGS != 0 {
+            return Err(DatagramError::UnknownFlags);
+        }
+        if reserved != 0 {
+            return Err(DatagramError::Reserved);
+        }
+        let header = Self {
+            kind,
+            flags,
+            key_id: u16::from_be_bytes([k0, k1]),
+            counter: u64::from_be_bytes([c0, c1, c2, c3, c4, c5, c6, c7]),
+            stream_id: u16::from_be_bytes([s0, s1]),
+            layer_id,
+        };
+        Ok((header, body))
     }
 
     /// The 16 header bytes (used as AEAD associated data).
     pub fn encode(&self) -> [u8; crate::limits::DATAGRAM_HEADER_LEN] {
-        todo!("phase 3 step 2: implement after the tests")
+        let kind = match self.kind {
+            DatagramKind::VideoFragment => 1,
+            DatagramKind::FecRepair => 2,
+            DatagramKind::PointerMotion => 3,
+        };
+        let [k0, k1] = self.key_id.to_be_bytes();
+        let [c0, c1, c2, c3, c4, c5, c6, c7] = self.counter.to_be_bytes();
+        let [s0, s1] = self.stream_id.to_be_bytes();
+        [
+            kind,
+            self.flags,
+            k0,
+            k1,
+            c0,
+            c1,
+            c2,
+            c3,
+            c4,
+            c5,
+            c6,
+            c7,
+            s0,
+            s1,
+            self.layer_id,
+            0,
+        ]
     }
 }

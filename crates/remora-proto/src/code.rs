@@ -4,7 +4,20 @@
 //! The code is **untrusted** (threat model §7.4): it only says where to connect
 //! and which key to expect; authentication happens in the handshake.
 
-use std::net::SocketAddr;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+
+use base64::Engine;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+
+use crate::crc32::crc32;
+use crate::limits::{CLOCK_SKEW_SECS, CODE_TEXT_MAX, CODE_VALIDITY_SECS, MAX_CANDIDATES};
+
+/// Fixed part of the binary layout: version, kind, expiry, nonce, identity
+/// key, ICE ufrag, ICE password, candidate count.
+const FIXED_LEN: usize = 1 + 1 + 4 + 16 + 32 + 4 + 16 + 1;
+const CRC_LEN: usize = 4;
+const MIN_LEN: usize = FIXED_LEN + CRC_LEN;
+const MAX_LEN: usize = FIXED_LEN + MAX_CANDIDATES * (1 + 16 + 2) + CRC_LEN;
 
 /// Text prefix of every code.
 pub const PREFIX: &str = "remora1:";
@@ -91,15 +104,157 @@ pub enum CodeError {
 }
 
 impl ConnectionCode {
-    /// Encodes to `remora1:…` text.
+    /// Encodes to `remora1:…` text. At most [`MAX_CANDIDATES`] candidates are
+    /// written (any beyond that are left out).
     pub fn encode(&self) -> String {
-        todo!("phase 3 step 2: implement after the tests")
+        let mut b = Vec::with_capacity(MAX_LEN);
+        b.push(FORMAT_VERSION);
+        b.push(match self.kind {
+            CodeKind::Offer => 0,
+            CodeKind::Answer => 1,
+        });
+        b.extend_from_slice(&self.expires_at.to_be_bytes());
+        b.extend_from_slice(&self.nonce);
+        b.extend_from_slice(&self.identity_key);
+        b.extend_from_slice(&self.ice_ufrag);
+        b.extend_from_slice(&self.ice_pwd);
+        let candidates = &self.candidates[..self.candidates.len().min(MAX_CANDIDATES)];
+        b.push(candidates.len() as u8);
+        for c in candidates {
+            let kind = match c.kind {
+                CandidateKind::Host => 0,
+                CandidateKind::ServerReflexive => 1,
+            };
+            match c.addr.ip() {
+                IpAddr::V4(ip) => {
+                    b.push(0x40 | kind);
+                    b.extend_from_slice(&ip.octets());
+                }
+                IpAddr::V6(ip) => {
+                    b.push(0x60 | kind);
+                    b.extend_from_slice(&ip.octets());
+                }
+            }
+            b.extend_from_slice(&c.addr.port().to_be_bytes());
+        }
+        let crc = crc32(&b);
+        b.extend_from_slice(&crc.to_be_bytes());
+        format!("{PREFIX}{}", URL_SAFE_NO_PAD.encode(&b))
     }
 
     /// Parses and validates `text` at time `now` (Unix seconds). Surrounding
     /// whitespace is ignored (pasted codes often carry a newline).
     pub fn parse(text: &str, now: u64) -> Result<Self, CodeError> {
-        let _ = (text, now);
-        todo!("phase 3 step 2: implement after the tests")
+        // Length first: nothing is decoded or allocated for oversized input.
+        if text.len() > CODE_TEXT_MAX {
+            return Err(CodeError::TooLong);
+        }
+        let body = text
+            .trim()
+            .strip_prefix(PREFIX)
+            .ok_or(CodeError::BadPrefix)?;
+        let raw = URL_SAFE_NO_PAD
+            .decode(body)
+            .map_err(|_| CodeError::BadEncoding)?;
+        if !(MIN_LEN..=MAX_LEN).contains(&raw.len()) {
+            return Err(CodeError::BadLength);
+        }
+        let (payload, crc) = raw.split_at(raw.len() - CRC_LEN);
+        let crc = u32::from_be_bytes([crc[0], crc[1], crc[2], crc[3]]);
+        if crc32(payload) != crc {
+            return Err(CodeError::Corrupted);
+        }
+        let mut r = Reader(payload);
+        let version = r.u8()?;
+        if version != FORMAT_VERSION {
+            return Err(CodeError::UnsupportedVersion(version));
+        }
+        let kind = match r.u8()? {
+            0 => CodeKind::Offer,
+            1 => CodeKind::Answer,
+            _ => return Err(CodeError::Malformed("kind")),
+        };
+        let expires_at = u32::from_be_bytes(r.array()?);
+        let nonce = r.array()?;
+        let identity_key = r.array()?;
+        let ice_ufrag = r.array()?;
+        let ice_pwd = r.array()?;
+        let count = usize::from(r.u8()?);
+        if count > MAX_CANDIDATES {
+            return Err(CodeError::Malformed("too many candidates"));
+        }
+        let mut candidates = Vec::with_capacity(count);
+        for _ in 0..count {
+            candidates.push(r.candidate()?);
+        }
+        if !r.0.is_empty() {
+            return Err(CodeError::Malformed("trailing bytes"));
+        }
+        let expires = u64::from(expires_at);
+        if expires < now {
+            return Err(CodeError::Expired);
+        }
+        if expires > now.saturating_add(CODE_VALIDITY_SECS + CLOCK_SKEW_SECS) {
+            return Err(CodeError::FutureDated);
+        }
+        Ok(Self {
+            kind,
+            expires_at,
+            nonce,
+            identity_key,
+            ice_ufrag,
+            ice_pwd,
+            candidates,
+        })
+    }
+}
+
+/// Bounds-checked reader over the decoded payload.
+struct Reader<'a>(&'a [u8]);
+
+impl Reader<'_> {
+    fn take(&mut self, n: usize) -> Result<&[u8], CodeError> {
+        let (head, tail) = self
+            .0
+            .split_at_checked(n)
+            .ok_or(CodeError::Malformed("truncated"))?;
+        self.0 = tail;
+        Ok(head)
+    }
+
+    fn u8(&mut self) -> Result<u8, CodeError> {
+        Ok(self.take(1)?[0])
+    }
+
+    fn array<const N: usize>(&mut self) -> Result<[u8; N], CodeError> {
+        <[u8; N]>::try_from(self.take(N)?).map_err(|_| CodeError::Malformed("truncated"))
+    }
+
+    fn candidate(&mut self) -> Result<Candidate, CodeError> {
+        let tag = self.u8()?;
+        let kind = match tag & 0x0F {
+            0 => CandidateKind::Host,
+            1 => CandidateKind::ServerReflexive,
+            _ => return Err(CodeError::Malformed("candidate type")),
+        };
+        let ip = match tag >> 4 {
+            4 => IpAddr::V4(Ipv4Addr::from(self.array::<4>()?)),
+            6 => IpAddr::V6(Ipv6Addr::from(self.array::<16>()?)),
+            _ => return Err(CodeError::Malformed("address family")),
+        };
+        let port = u16::from_be_bytes(self.array()?);
+        if port == 0 {
+            return Err(CodeError::Malformed("port 0"));
+        }
+        let unusable = ip.is_unspecified()
+            || ip.is_multicast()
+            || matches!(ip, IpAddr::V4(v4) if v4.is_broadcast());
+        if unusable {
+            return Err(CodeError::Malformed("unusable address"));
+        }
+        Ok(Candidate {
+            kind,
+            addr: SocketAddr::new(ip, port),
+        })
     }
 }
