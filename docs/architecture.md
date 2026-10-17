@@ -118,6 +118,14 @@ pub trait InputInjector: Send {
 * Every `unsafe` block needs a `// SAFETY:` comment explaining why it is sound
   (clippy `undocumented_unsafe_blocks` is an error).
 * FFI modules expose only safe functions; raw pointers never leave them.
+* **Exception — pending owner approval (Phase 3 harness):** `remora-testkit/src/sys/count_alloc.rs`
+  implements `GlobalAlloc` (unsafe by definition, not FFI) to prove inputs are
+  rejected before allocation (phase3-criteria A26). It delegates every call to
+  the system allocator, and `remora-testkit` may only be a dev-dependency.
+* **Enforced, not conventional:** `remora-testkit`'s policy test fails the build
+  if `unsafe` appears outside `src/sys/`, if `spake2`/`snow` are used outside
+  `remora-crypto`'s wrapper modules, or if `remora-testkit` is a non-dev
+  dependency.
 
 ## 5. Extension seams (post-v0.1 features without rewrites)
 
