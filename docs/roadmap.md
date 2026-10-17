@@ -61,6 +61,8 @@ accepted by the owner) before v0.1:
 | Per-chip encoder floors for Intel Mac, NVENC, QuickSync, AMF | Only measured on Apple M4 | Phases 6.5 / 9 |
 | **Open question: unexplained ~2 ms benchmark drift.** The same capture+encode configuration measured C2 p50 ≈ 9.0 ms at 02:56–02:59 and ≈ 7.05 ms from 03:05 on (2026-10-17, M4), no thermal/performance warning. ~2 ms is ~10 % of the 20 ms budget. | Not reproduced or explained yet; machine state is now recorded with every run and disagreements > 1 ms are flagged | Phase 4 checks whether it reappears |
 | Physical display hotplug and the other untested Q4 cases (external monitor unplug/replug, clamshell, mirroring, arrangement, aspect/refresh/HDR changes, lock screen, fast user switching) — list in phase2-criteria.md §5.4 | No external display available; single-display subset tested | Phase 9 (or earlier if a monitor is available) |
+| Threat-model invariants not testable in Phase 3: INV2 on the real media path, INV9 (no pixels logged/written), INV10 (keys/buttons released), INV11 (session indicator, partly manual) — phase3-criteria.md §5 | No media/input path yet | INV2/INV9/INV11 in Phase 4, INV10 in Phase 6 |
+| No formal model of the handshake composition; `spake2` crate unaudited (python-spake2 compatible, not RFC 9382) | Out of scope for tests (phase3-criteria.md §6) | External review / ProVerif-Tamarin model before v1.0 |
 | Remove the dev signing identity + RemoraDev screen-recording grant (phase2-criteria.md §7) — kept by owner decision while developing | Still needed for development | End of Phase 4 |
 | Host must restart capture after −3815 (display sleep, lid close, display removed) — measured in Phase 2, not implemented yet | Phase 2 only measured it | Phase 4 (streaming) / 6 |
 

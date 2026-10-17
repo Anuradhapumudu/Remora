@@ -300,10 +300,14 @@ Full table in [protocol.md](protocol.md#limits). Principles:
 
 ## 9. Residual risks (accepted, documented)
 
-1. **`spake2` crate (0.4.0) has not been independently audited.** It is a small,
-   RFC 9382-style implementation from the RustCrypto organisation. We wrap it
-   behind `remora-crypto` so it can be replaced (e.g. by CPace) without
-   protocol-wide changes; the protocol version would bump.
+1. **`spake2` crate (0.4.0) has not been independently audited.** It is a small
+   implementation from the RustCrypto organisation that is **compatible with
+   python-spake2 (magic-wormhole) — it is NOT an RFC 9382 implementation**
+   (corrected 2026-10-17; an earlier version of this document said
+   "RFC 9382-style"). It ships 13 tests. We wrap it behind `remora-crypto` so it
+   can be replaced (e.g. by an RFC 9382 or CPace implementation) without
+   protocol-wide changes; the protocol version would bump. What we rely on
+   instead of an audit: phase3-criteria.md §6.
 2. **Metadata** (IPs, timing, device IDs) is visible to STUN/signaling servers
    and to the peer.
 3. **Traffic analysis** of packet sizes/timing.
