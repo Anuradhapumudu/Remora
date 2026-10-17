@@ -48,6 +48,22 @@ Each phase ends **runnable**, with tests and exact manual test steps.
 
 v0.1 is reached at the end of **Phase 8** (Linux X11 in Phase 9 is post-v0.1).
 
+## v1.0 formal-modelling list (in priority order)
+
+Design-level assurance that tests cannot give (tests check the implementation
+against the design, not the design itself):
+
+1. **Remora safety-code commitment scheme** (commit-then-reveal SAS over the
+   Noise handshake hash, protocol.md §3.3) — Remora's own construction; no
+   published analysis covers it because the SPAKE2 crate provides no key
+   confirmation. Model in ProVerif/Tamarin: an active attacker who knows the
+   password cannot make the two sessions' codes collide with probability above
+   10⁻⁶ per attempt.
+2. **Handshake composition:** SPAKE2 (python-spake2 variant) → PSK → Noise
+   `XXpsk0` with exporter + hello binding, including implicit (instead of RFC
+   9382) key confirmation.
+3. Trusted-device (password-less) mode and identity pinning.
+
 ## Known gaps before v0.1
 
 Things that could not be verified yet and must be closed (or explicitly

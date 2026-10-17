@@ -183,6 +183,14 @@ structural tests below are the real check.
 reveal, or dropping `n_i` or `n_r` from the SAS input must each fail at least
 one A17-S test.
 
+> **S1–S5 test the IMPLEMENTATION, not the DESIGN.** Green tests show the code
+> does what the design says. They do not show the design is secure. Because the
+> SPAKE2 crate gives no key confirmation, the safety-code commitment scheme is
+> **Remora's own construction, covered by no published analysis**. Its design
+> assurance is item #1 on the v1.0 formal-modelling list (docs/roadmap.md):
+> **"Remora safety-code commitment scheme"**. Nobody may cite these tests as
+> evidence that the scheme is sound.
+
 ### 3.5 Approval gate and session state machine
 
 | ID | Attack | Required failure |
@@ -209,7 +217,8 @@ one A17-S test.
 | **A29** | **Weak OTP generation** | **Structural (primary):** the generator uses rejection sampling — with an injected RNG that returns values ≥ 4 294 000 000 (the biased tail of `u32 % 10⁶`), the generator must draw again, never map them; the production RNG is the OS CSPRNG (type-checked). **Statistical (secondary):** 10⁶ OTPs in 1000 bins, FAIL if χ² (999 d.o.f.) > 1226.1. Note: the statistical test **cannot** detect the modulo bias it was originally meant for (a 2.3 × 10⁻⁴ relative effect ≈ 0.1 counts per bin against a standard deviation of 31.6) — that is why the structural test is primary. |
 | **A30** | **Short unattended password** | `validate_unattended_password` rejects < 12 characters after NFKC normalisation (incl. combining-character tricks), > 128, and the embedded common-password list; accepts valid ones. |
 | **A31** | **`unsafe` outside FFI modules** | CI check: `unsafe` appears only under `crates/*/src/sys/` (and the throwaway spike); every block has `// SAFETY:` (clippy `undocumented_unsafe_blocks` already denies). |
-| **A32** | **Small-order / torsion / identity SPAKE2 element** from the peer (crypto-claims-audit §1: the crate doesn't check) | Our `Pake` wrapper rejects it **before** the crate sees it: `ProtocolViolation`, wire `AUTH_FAILED`. All 8 small-order points of edwards25519, the identity, a valid point plus each torsion component, wrong side byte, wrong length and non-decompressible bytes are tested. |
+| **A32** | **Small-order / torsion / identity SPAKE2 element** from the peer — **a first-class security control**: it compensates for a check the crate does not perform (crypto-claims-audit §1) | Our `Pake` wrapper rejects it **before** the crate sees it: `ProtocolViolation`, wire `AUTH_FAILED`. Tested with **known-bad vectors** — the actual encodings of all 8 small-order points of edwards25519 (including their non-canonical encodings), the identity, valid points with each torsion component added, wrong side byte, wrong length, non-decompressible bytes — not only a logic test. The validator is **inside the mutation-testing scope** (§7): every mutant of it must be killed. |
+| **A35** | **Abstraction boundary erosion**: a `spake2` or `snow` type used outside the wrapper modules | **Mechanical check that fails the build:** (1) only `remora-crypto` may depend on `spake2` or `snow`; (2) inside it, only the wrapper modules (`src/pake/`, `src/noise/`) may mention `spake2::` or `snow::` — this also forbids re-exporting their types in public signatures; (3) the scanner itself is unit-tested against violating samples so it can't silently pass. |
 | **A33** | **Unverifiable SPAKE2 constants** | A test re-derives M and N from python-spake2's published seed procedure and compares them to the crate's constants. If they cannot be reproduced, Phase 3 reports the PAKE as resting on unverified constants (owner decision). |
 | **A34** | **Noise implementation correctness evidence** | snow's own Noise test-vector suite is run once in CI against the exact locked version, and the result recorded. |
 
@@ -294,7 +303,7 @@ Consequences for Phase 3:
 
 ## 7. Mutation-testing gate
 
-* **Scope — security crates only:** `remora-crypto` (all), `remora-session`
+* **Scope — security crates only:** `remora-crypto` (all — **explicitly including the A32 element validator**), `remora-session`
   (state machine, approval gate, attempt limiter), the handshake driver in
   `remora-net`, and the validators in `remora-proto`.
 * **When:** a scheduled nightly workflow, and on pull requests that change those

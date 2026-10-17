@@ -45,6 +45,26 @@ Local tools: `brew install cargo-deny cargo-audit actionlint zizmor`;
 - If something can't work reliably (e.g. P2P through symmetric NAT), say so plainly
   in docs and reports; never fake or silently skip it.
 
+## Verified vs asserted (every security claim cites what was read)
+
+Every security or cryptographic claim in our docs must cite the source that
+was **actually read** — crate source at the locked version (file), RFC section,
+or README — or be explicitly marked **unverified**. Never write a claim from
+memory. Why (docs/crypto-claims-audit.md):
+- **C14:** an audit of the dalek crates ("Quarkslab, 2019") was written from
+  memory and turned out not to be stated anywhere we could check — removed.
+- **C11:** "all secrets are zeroized" was asserted; `spake2` and `snow` don't use
+  `zeroize` at all.
+- **C12:** "VideoToolbox decodes out of process" was asserted, never checked.
+- The SPAKE2 crate was called "RFC 9382-style"; it is a python-spake2 port.
+
+## Process evidence: don't rewrite phase-3 history
+
+Phase 3 is built test-first: each component's attack tests are committed
+before or with its implementation (phase3-criteria.md §7b). That commit order
+**is the evidence**. When the phase-3 PR merges, use a **merge commit** — never
+squash, rebase or reorder phase-3 commits into a tidier shape.
+
 ## Dependencies
 
 - Verify versions against the registry (`cargo info <crate>`), never from memory.
