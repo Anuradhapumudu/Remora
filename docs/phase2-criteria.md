@@ -297,7 +297,10 @@ render**. If the full pipeline exceeds 20 ms, work stops and is reported; the
 
 - [x] C12, C3, C4, C5 measured on the M4 (worst of 3 runs) and recorded in §5 (C1/C2 for information)
 - [x] Q3 runtime "frames only on change" measured; Q4 events observed (single-display subset)
-- [ ] **Cleanup (unless the owner decides to keep any of it):**
+- [x] **Cleanup decision (owner, 2026-10-17): KEEP** the dev identity and RemoraDev's
+  Screen Recording permission while development continues; **revisit at the end
+  of Phase 4.** Until then RemoraDev (`io.github.anuradhapumudu.Remora.dev`) can
+  record the screen, and Terminal still cannot. When cleaning up:
   - [ ] `tccutil reset ScreenCapture io.github.anuradhapumudu.Remora.dev` (dev app)
   - [ ] `tccutil reset ScreenCapture io.github.anuradhapumudu.Remora` (release app, if it was ever granted)
   - [ ] `scripts/macos/dev-identity.sh remove` (deletes the dev certificate **and** its private key),
