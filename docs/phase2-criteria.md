@@ -3,6 +3,8 @@
 Status: criteria fixed before any capture code (2026-10-17); **C2 revised by owner
 decision (§6)**. Results: partial (§5); capture tests wait for Screen Recording permission.
 
+**Outcome (2026-10-17): C12, C3, C4, C5 PASS; Q1–Q4 answered (Q4 partly — known gaps). Phase 2 gate passed.**
+
 > **These thresholds are PER-CHIP: they apply to the Apple M4 test machine only.**
 > Hardware encoders differ. Intel Macs, Windows (NVENC / QuickSync / AMF) and Linux
 > (VAAPI) are re-measured in their own phases and may have different floors.
@@ -91,9 +93,17 @@ cap 60 (implemented as a 1/61 s minimum interval — see 5.5). Every run valid
 | C2 encode p95 (p50) (ms) | 7.27 (7.06) | 7.16 (7.06) | 7.45 (7.07) | **7.45 (7.07)** | p95 ≤ 7 | **FAILED** (+0.45 ms) — gate replaced by C12, §6 |
 | C5 keeps up | 3599 / 3599, 0 dropped, 0 errors | same | same | **3599 ≥ 3528** | | **PASS** |
 | **C12** screen change → encoded p95 (p50) (ms) | 7.77 (7.51) | 7.62 (7.51) | 8.14 (7.51) | **8.14 (7.51)** | p95 ≤ 11 | **PASS** |
-| C3 static CPU | — | — | — | — | < 2 % | not run (stopped on C2) |
+| C3 static CPU, own + helpers (% of one core) | 1.00 | 0.37 | 0.35 | **1.00** | < 2 % | **PASS** |
 | C4 memory growth / slope (3 × 10 min soak, corrected bench) | +0.14 MB / +0.015 MB/min | +0.08 MB / +0.005 MB/min | +0.14 MB / +0.008 MB/min | **+0.14 MB / +0.015 MB/min** | ≤ 2 MB, ≤ 0.1 MB/min | **PASS** |
 | C12 during the soak, p95 (p50) (ms) | 10.01 (9.80) | 9.98 (9.77) | 10.01 (9.80) | **10.01 (9.80)** | p95 ≤ 11 | **PASS** — see drift note |
+
+C3 cross-check (clean no-capture baselines, 3 × 60 s): WindowServer used 3.3–3.5 %
+without capture vs 1.1–2.2 % with it, so capturing adds no hidden load in macOS's
+own processes. Background load present in **every** run, with and without
+capture: `appstoreagent` ≈ 97 % and `launchd` ≈ 29 % of one core (macOS's own
+work, not Remora). A first baseline set ended after 1–4 s because of a bench bug
+(fixed; `invalid/`); a second set was disturbed by the owner using the Mac
+(`invalid/disturbed/`).
 
 Output validity: `ffprobe` decodes all frames of the encoder-only runs (H.264
 Constrained Baseline, 1920×1248, yuv420p).
@@ -131,15 +141,35 @@ undocumented setting found lowers it. Owner decision: §6.
 | Q1 4:4:4 encode | **Yes in hardware, but NOT in low-latency mode.** Normal rate control: H.264 High 4:4:4 Predictive and HEVC Range Extensions produce real 4:4:4 (`chroma_format_idc = 3`). Low-latency rate control: 4:4:4 input is **silently subsampled** to 4:2:0 (H.264 High, `chroma_format_idc = 1`); no 4:4:4/4:2:2 profile is offered in that mode. | `docs/evidence/phase2-probe-encoder-m4.txt` (SPS parsed by `remora_codec::bitstream`, unit-tested) |
 | Q2 intra-refresh / LTR | **Documented API: long-term reference only** (`EnableLTR` + `AcknowledgedLTRTokens` + `ForceLTRRefresh`; no refresh key in SDK 27 headers). The low-latency H.264 encoder **additionally exposes undocumented** `PeriodicRefreshMode` and `MaxRefreshFrameIntervalDuration` (likely gradual refresh). Not yet exercised: an LTR acknowledge/refresh round trip. | Same evidence file (supported-property dump); SDK header grep |
 | Q3 SCK API path | **Header part answered:** in SDK 27 the only deprecated ScreenCaptureKit items are `SCStreamType`/`streamType` (unused by us); `SCShareableContent` → `SCContentFilter(display:)` → `SCStreamConfiguration` → `SCStream` + `SCStreamOutput` is current. **Runtime "frames only on change": pending** (needs permission). | `ScreenCaptureKit.framework/Headers` in SDK 27.0 |
-| Q3 runtime "frames only on change" | not run (stopped on C2) | — |
-| Q4 res change / sleep / unplug | Physical display unplug: **not tested — no external display available** (known gap). Single-display subset: pending (§5.4). | — |
+| Q3 runtime "frames only on change" | **Holds.** On a still screen, after a startup burst, **0 new frames per second**; ScreenCaptureKit keeps sending ~5–6 `idle` callbacks/s that carry no image (cheap: whole capture ≤ 1 % CPU). | `static-{1,2,3}.log`: e.g. 52 complete / 341 idle callbacks in 60 s |
+| Q4 res change / sleep / unplug | Resolution change: capture continues. Display sleep, lid close, captured display removed: **stream stops with −3815 and never resumes on its own** — the host must restart it (§5.4). Physical external-monitor unplug: **not tested — no external display available** (known gap). | §5.4 |
 
-### 5.4 Single-display hotplug subset
+### 5.4 Single-display hotplug subset (Q4)
 
-| Event | What the capture stream did | Evidence |
+| Event while capturing | What the stream did | Evidence |
 |---|---|---|
-| **Display sleep** (idle timer, observed by accident in a soak run) | The stream **stops for good**: `stream(_:didStopWithError:)` with **SCStreamError −3815 "Failed to find any displays or windows to capture"**, status `Stopped`. It does not pause and resume. **Design consequence:** the host must treat −3815 as "display went away", restart capture when a display is available again, and tell the viewer meanwhile — otherwise a session freezes silently. | `superseded-vec-stats/soak-2.log` |
-| Resolution change, deliberate display sleep/wake, lid close/open, virtual display add/remove | pending | — |
+| **Resolution / scaling change** 2940×1912 → 2560×1664 → back (same aspect) | **Kept running**; no stop, no error; output stayed 1920×1248 (ScreenCaptureKit scales to the configured size) | `hotplug-resolution.log` |
+| **Another display added and removed** (virtual display) while capturing the main one | **Kept running**; no stop, no error | `hotplug-virtual-main.log` |
+| **The captured display disappears** (virtual display removed ≈ unplug) | **Stopped** at 21.8 s: `didStopWithError` **−3815** "Failed to find any displays or windows to capture" | `hotplug-virtual-unplug.log` |
+| **Display sleep** (`pmset displaysleepnow`, woken by a key ~20 s later; also seen by accident on the idle timer) | **Stopped** at 14.8 s with **−3815**; **did not resume** after wake | `hotplug-display-sleep.log`, `superseded-vec-stats/soak-2.log` |
+| **Lid close → open** (Mac slept ≈ 29 s) | **Stopped** at 16.2 s with **−3815**; **did not resume** after opening | `hotplug-lid.log` |
+
+No crash, hang or leak in any case; every stop arrived as a clean delegate
+callback.
+
+**Design requirement (for the host, Phase 4/6):** treat −3815 as "the display
+went away". Tell the viewer immediately ("host display asleep / unavailable"),
+watch for displays becoming available again (wake, unlock, lid open, display
+reconfiguration notifications), re-query `SCShareableContent` and start a new
+stream, then force a keyframe. Never leave a session silently frozen.
+
+**Still untested, carried to Phase 9 (and docs/roadmap.md known gaps):**
+physical external-monitor unplug/replug; capturing an external display while
+the lid closes (clamshell mode); mirroring on/off; display arrangement changes
+with two real displays; resolution changes that change the aspect ratio; refresh
+rate changes (ProMotion/120 Hz panels); HDR on/off; lock screen and fast user
+switching while capturing; the virtual display was created with Apple's private
+`CGVirtualDisplay`, so real-hardware behaviour may differ.
 
 ### 5.5 C2 / C5 diagnosis with real captured frames
 
@@ -265,8 +295,8 @@ render**. If the full pipeline exceeds 20 ms, work stops and is reported; the
 
 ## 7. Phase 2 completion checklist
 
-- [ ] C1, C3, C4, C5 measured on the M4 (worst of 3 runs) and recorded in §5
-- [ ] Q3 runtime "frames only on change" measured; Q4 events observed
+- [x] C12, C3, C4, C5 measured on the M4 (worst of 3 runs) and recorded in §5 (C1/C2 for information)
+- [x] Q3 runtime "frames only on change" measured; Q4 events observed (single-display subset)
 - [ ] **Cleanup (unless the owner decides to keep any of it):**
   - [ ] `tccutil reset ScreenCapture io.github.anuradhapumudu.Remora.dev` (dev app)
   - [ ] `tccutil reset ScreenCapture io.github.anuradhapumudu.Remora` (release app, if it was ever granted)
@@ -274,5 +304,5 @@ render**. If the full pipeline exceeds 20 ms, work stops and is reported; the
         then `scripts/macos/dev-identity.sh status` shows "not present"
   - [ ] Confirm **Terminal** is not in System Settings → Privacy & Security →
         Screen & System Audio Recording (it was never granted; verify it stayed that way)
-- [ ] Known gaps carried into docs/roadmap.md ("Known gaps before v0.1")
+- [x] Known gaps carried into docs/roadmap.md ("Known gaps before v0.1")
 - [ ] Phase 2 report: commands, numbers vs criteria, limitations
