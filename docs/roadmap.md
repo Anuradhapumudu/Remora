@@ -36,7 +36,7 @@ Each phase ends **runnable**, with tests and exact manual test steps.
 | 1 | Plan, docs, threat model, workspace skeleton | ✅ done 2026-10-17 |
 | 1.5 | Release pipeline (unsigned), CI | ✅ done 2026-10-17 — `v0.0.1` built all artifacts on GitHub; all verified |
 | 2 | macOS ScreenCaptureKit capture + VideoToolbox encode → file; benchmark; verify 4:4:4 / LTR / intra-refresh support | ✅ gate passed 2026-10-17 (C12, C3, C4, C5; C2 failed as written → measurement redesigned, see phase2-criteria.md §6) |
-| 2.5 | **Windows spike** (throwaway): capture one DXGI frame, inject one SendInput click; report trait changes | |
+| 2.5 | **Windows spike** (throwaway): capture one DXGI frame, inject one SendInput click; report trait changes | ✅ done 2026-10-17 on GitHub's Windows runner — capture and input both work; 4 trait changes proposed (docs/phase2.5-windows-spike.md). Real-PC confirmation open. |
 | 3 | Noise + SPAKE2 handshake over QUIC on localhost; safety code; CLI accept prompt; security tests; fuzz targets | |
 | 4 | Encrypted loopback streaming; wgpu viewer; stats overlay | |
 | 5 | STUN + ICE (`is`) + hole punching with offer/answer codes; test across two home networks | |
@@ -56,6 +56,7 @@ accepted by the owner) before v0.1:
 | Gap | Why open | Close by |
 |---|---|---|
 | MSI install / uninstall / upgrade-in-place on real Windows | No Windows machine yet | Phase 6.5 |
+| Windows spike on real hardware: hardware encoders (NVENC/QuickSync/AMF), GPU-memory frames, multi-monitor, DPI/HDR, ACCESS_LOST recovery, UIPI | GitHub runner has only Microsoft's software display driver | Phase 6.5 (needs a real Windows PC) |
 | macOS signing + notarization path | No Apple Developer ID yet | Before first public release |
 | Per-chip encoder floors for Intel Mac, NVENC, QuickSync, AMF | Only measured on Apple M4 | Phases 6.5 / 9 |
 | **Open question: unexplained ~2 ms benchmark drift.** The same capture+encode configuration measured C2 p50 ≈ 9.0 ms at 02:56–02:59 and ≈ 7.05 ms from 03:05 on (2026-10-17, M4), no thermal/performance warning. ~2 ms is ~10 % of the 20 ms budget. | Not reproduced or explained yet; machine state is now recorded with every run and disagreements > 1 ms are flagged | Phase 4 checks whether it reappears |
