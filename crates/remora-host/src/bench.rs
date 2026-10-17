@@ -347,7 +347,9 @@ pub(crate) fn run(a: BenchArgs) -> Result<()> {
         match rx.recv_timeout(wait) {
             Ok(msg) => handle(msg, &mut t, &mut out, start, &mut last_status)?,
             Err(mpsc::RecvTimeoutError::Timeout) => {}
-            Err(mpsc::RecvTimeoutError::Disconnected) => break,
+            // No senders (e.g. --no-capture baseline): keep running until the
+            // deadline anyway — the run length must not depend on traffic.
+            Err(mpsc::RecvTimeoutError::Disconnected) => std::thread::sleep(wait),
         }
     }
 

@@ -10,6 +10,12 @@
 #   scripts/macos/phase2-hotplug.sh lid            # YOU close the lid ~10 s in, open it ~30 s later
 set -euo pipefail
 
+# Keep the display awake while a test runs (except where the test itself sleeps
+# it: `pmset displaysleepnow` overrides this, and closing the lid always sleeps).
+if [[ -z "${REMORA_CAFFEINATED:-}" ]]; then
+  exec env REMORA_CAFFEINATED=1 caffeinate -di "$0" "$@"
+fi
+
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 OUT="$ROOT/target/phase2-results"
 APP="$ROOT/scripts/macos/dev-app.sh"
