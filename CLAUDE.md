@@ -58,6 +58,21 @@ memory. Why (docs/crypto-claims-audit.md):
 - **C12:** "VideoToolbox decodes out of process" was asserted, never checked.
 - The SPAKE2 crate was called "RFC 9382-style"; it is a python-spake2 port.
 
+## Plant the real failure (test standard)
+
+When a test's job is to **catch** something, prove it can: plant the real
+failure (a real violation, a real bad input, a real bug), confirm the test
+fails and names it, then remove the plant. A test that has never been seen
+failing proves nothing — e.g. the first policy scanner "passed" while a
+mutation that made it scan nothing also passed. Back it with mutation testing
+for security controls (`.cargo/mutants.toml`).
+
+## Unsafe policy exceptions
+
+Only `src/sys/` FFI modules may use `unsafe`. The single exception is
+architecture.md **D19** (the test-only counting allocator). It is **not a
+precedent**: any other request makes its own case and needs its own approval.
+
 ## Process evidence: don't rewrite phase-3 history
 
 Phase 3 is built test-first: each component's attack tests are committed

@@ -1,7 +1,8 @@
 //! Counting global allocator for "rejected before allocating" tests
 //! (phase3-criteria A26, threat model INV7).
 //!
-//! POLICY EXCEPTION — PENDING OWNER APPROVAL (Phase 3 harness report): this is the only
+//! POLICY EXCEPTION — owner-approved as architecture.md decision D19 (NOT a
+//! general precedent): this is the only
 //! `unsafe` in the workspace that is not an OS FFI binding — Rust's
 //! `GlobalAlloc` trait is `unsafe` by definition. It is confined to this file,
 //! delegates every call unchanged to the system allocator, and lives in a

@@ -1,0 +1,12 @@
+# Mutation-testing gate (phase3-criteria §7). Scope = security controls only.
+# A file joins this list when it lands. Every mutant in scope must be killed;
+# a mutant may only be excluded below with a one-line justification, and
+# equivalent mutants must be labelled "EQUIVALENT:". Unexplained survivors fail.
+examine_globs = [
+    # Policy checker: SECURITY CONTROL backing decision D19 (testkit never a
+    # normal dependency) and A31/A35. Last run: 56 caught, 0 missed, 2 unviable.
+    "crates/remora-testkit/src/policy.rs",
+]
+
+# Justified exclusions (regex over mutant names) — none yet.
+exclude_re = []

@@ -1,0 +1,40 @@
+# Mutation-testing gate (phase3-criteria §7): nightly, and on PRs that touch the
+# security code in scope. Not on every PR. Scope lives in .cargo/mutants.toml.
+name: Mutants
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ".cargo/mutants.toml"
+      - "crates/remora-crypto/**"
+      - "crates/remora-session/**"
+      - "crates/remora-net/**"
+      - "crates/remora-proto/**"
+      - "crates/remora-testkit/src/policy.rs"
+      - "crates/remora-testkit/tests/policy.rs"
+
+permissions:
+  contents: read
+
+jobs:
+  mutants:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: rustup toolchain install
+      - name: Install cargo-mutants 27.1.0
+        run: cargo install --locked cargo-mutants@27.1.0
+      - name: Run (fails if any in-scope mutant survives)
+        run: cargo mutants --no-shuffle -o mutants-out
+      - name: Keep the report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: mutants-report
+          path: mutants-out/mutants.out

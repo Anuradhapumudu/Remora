@@ -303,14 +303,14 @@ Consequences for Phase 3:
 
 ## 7. Mutation-testing gate
 
-* **Scope — security crates only:** `remora-crypto` (all — **explicitly including the A32 element validator**), `remora-session`
+* **Scope — security controls only** (listed in `.cargo/mutants.toml`; a file joins when it lands): `remora-testkit/src/policy.rs` (**the policy check is a security control** — it backs decision D19's dependency guarantee and A31/A35; first run 56 caught, 0 missed), `remora-crypto` (all — **explicitly including the A32 element validator**), `remora-session`
   (state machine, approval gate, attempt limiter), the handshake driver in
   `remora-net`, and the validators in `remora-proto`.
 * **When:** a scheduled nightly workflow, and on pull requests that change those
   crates (path filter) — **not on every PR**.
 * **Pass: 100 % kill rate.** Every surviving mutant must be either killed by a
   new test, or individually justified in **one line** in a committed survivors
-  file (`docs/mutants-justified.md`) — e.g. *equivalent mutant: replaces `<` with
+  file (the `exclude_re` list in `.cargo/mutants.toml`, one comment per entry) — e.g. *equivalent mutant: replaces `<` with
   `<=` on a value that can never equal the bound*, or *changes only a log
   message*. Equivalent mutants are labelled as such. **A list of unexplained
   survivors fails the gate.**

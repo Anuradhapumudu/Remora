@@ -142,7 +142,16 @@ pub fn check_manifest(path: &str, content: &str) -> Vec<Violation> {
     v
 }
 
-fn walk(dir: &Path, root: &Path, out: &mut Vec<Violation>) {
+/// Result of scanning a workspace: the files checked and what was wrong.
+#[derive(Debug, Default)]
+pub struct Scan {
+    /// Workspace-relative paths of every file checked (`.rs` and `Cargo.toml`).
+    pub scanned: Vec<String>,
+    /// Every violation found.
+    pub violations: Vec<Violation>,
+}
+
+fn walk(dir: &Path, root: &Path, scan: &mut Scan) {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
     };
@@ -153,7 +162,7 @@ fn walk(dir: &Path, root: &Path, out: &mut Vec<Violation>) {
             continue;
         }
         if p.is_dir() {
-            walk(&p, root, out);
+            walk(&p, root, scan);
             continue;
         }
         let rel = p
@@ -165,20 +174,25 @@ fn walk(dir: &Path, root: &Path, out: &mut Vec<Violation>) {
             continue;
         };
         if name.ends_with(".rs") {
-            out.extend(check_rust(&rel, &content));
+            scan.violations.extend(check_rust(&rel, &content));
+            scan.scanned.push(rel);
         } else if name == "Cargo.toml" {
-            out.extend(check_manifest(&rel, &content));
+            scan.violations.extend(check_manifest(&rel, &content));
+            scan.scanned.push(rel);
         }
     }
 }
 
 /// Scans every crate under `crates/` and `spikes/` of the workspace at `root`.
-pub fn check_workspace(root: &Path) -> Vec<Violation> {
-    let mut v = Vec::new();
+/// Callers must check [`Scan::scanned`]: an empty violation list only means
+/// something if the files were actually read.
+pub fn check_workspace(root: &Path) -> Scan {
+    let mut scan = Scan::default();
     for top in ["crates", "spikes"] {
-        walk(&root.join(top), root, &mut v);
+        walk(&root.join(top), root, &mut scan);
     }
-    v
+    scan.scanned.sort();
+    scan
 }
 
 #[cfg(test)]
@@ -188,9 +202,36 @@ mod tests {
     #[test]
     fn flags_unsafe_outside_sys_but_not_inside() {
         let src = "fn f() { unsafe { g() } }";
-        assert_eq!(check_rust("crates/remora-net/src/lib.rs", src).len(), 1);
+        let v = check_rust("crates/remora-net/src/lib.rs", src);
+        assert_eq!(v.len(), 1);
+        assert_eq!(
+            (v[0].line, v[0].path.as_str(), v[0].rule),
+            (1, "crates/remora-net/src/lib.rs", "unsafe outside src/sys")
+        );
         assert!(check_rust("crates/remora-capture/src/sys/macos.rs", src).is_empty());
         assert!(check_rust("spikes/windows-spike/src/win.rs", src).is_empty());
+    }
+
+    #[test]
+    fn still_sees_code_after_division_and_after_string_literals() {
+        // A lone '/' is division, not a comment; a closed string literal ends.
+        for src in [
+            "let x = a / b; unsafe { g() }",
+            "let s = \"x\"; unsafe { g() }",
+            "let s = \"a\\\"b\"; unsafe {}",
+        ] {
+            assert_eq!(
+                check_rust("crates/a/src/lib.rs", src).len(),
+                1,
+                "missed in: {src}"
+            );
+        }
+        // Reported line numbers are exact.
+        let v = check_rust(
+            "crates/a/src/lib.rs",
+            "fn a() {}\n\nfn b() { unsafe {} }\nuse snow::X;",
+        );
+        assert_eq!(v.iter().map(|x| x.line).collect::<Vec<_>>(), vec![3, 4]);
     }
 
     #[test]
