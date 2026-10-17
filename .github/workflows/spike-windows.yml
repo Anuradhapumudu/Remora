@@ -3,9 +3,7 @@
 name: Windows spike
 
 on:
-  push:
-    branches: [phase-2.5]
-    paths: ["spikes/**", ".github/workflows/spike-windows.yml"]
+  workflow_dispatch: # run manually: Actions → Windows spike → Run workflow
 
 permissions:
   contents: read
