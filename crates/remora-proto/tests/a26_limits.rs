@@ -123,3 +123,27 @@ fn datagram_header_parsing_allocates_nothing() {
         Some(DatagramError::TooLong)
     );
 }
+
+#[test]
+fn a_huge_push_completing_a_split_prefix_never_buffers_the_input() {
+    // The prefix arrives split (slow path), then 1 MiB in a single push: the
+    // rest of the prefix, a 256-byte body, then a prefix claiming 0xFFFF.
+    let mut d = FrameDecoder::new(HANDSHAKE_FRAME_MAX);
+    assert_eq!(d.push(&[0x01]), Ok(vec![]));
+    let mut input = vec![0x00];
+    input.extend_from_slice(&[7; 256]);
+    input.extend_from_slice(&[0xFF, 0xFF]);
+    input.resize(1 << 20, 0xAB);
+    let (r, stats) = count_allocations(|| d.push(&input));
+    assert_eq!(
+        r,
+        Err(FrameError::TooLarge {
+            len: 0xFFFF,
+            max: HANDSHAKE_FRAME_MAX
+        })
+    );
+    assert!(
+        stats.peak_bytes <= HANDSHAKE_FRAME_MAX + SMALL,
+        "buffered the input: {stats:?}"
+    );
+}

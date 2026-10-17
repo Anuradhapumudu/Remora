@@ -272,3 +272,74 @@ fn damaged_crc_is_corrupted_not_malformed() {
     let text = format!("{PREFIX}{}", URL_SAFE_NO_PAD.encode(raw));
     assert_eq!(ConnectionCode::parse(&text, NOW), Err(CodeError::Corrupted));
 }
+
+// ── boundaries pinned by the mutation-testing gate ──────────────────────────
+
+fn many(n: usize) -> Vec<Candidate> {
+    (0..n)
+        .map(|i| Candidate {
+            kind: CandidateKind::Host,
+            addr: SocketAddr::from((
+                Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, i as u16 + 1),
+                40_000,
+            )),
+        })
+        .collect()
+}
+
+#[test]
+fn length_bounds_are_exact() {
+    // Smallest valid code: no candidates (79 bytes). One byte less is impossible.
+    let min = sample(vec![], (NOW + 60) as u32);
+    assert_eq!(ConnectionCode::parse(&min.encode(), NOW), Ok(min));
+    let mut short = raw_valid();
+    short.truncate(2 + 4 + 16 + 32 + 4 + 16); // 74 + 4-byte CRC = 78
+    assert_eq!(
+        ConnectionCode::parse(&text_from_raw(short), NOW),
+        Err(CodeError::BadLength)
+    );
+    // Largest valid code: 8 IPv6 candidates (231 bytes). One byte more is impossible.
+    let max = sample(many(8), (NOW + 60) as u32);
+    let text = max.encode();
+    assert_eq!(ConnectionCode::parse(&text, NOW), Ok(max));
+    let mut raw = URL_SAFE_NO_PAD
+        .decode(&text[PREFIX.len()..])
+        .expect("valid");
+    raw.truncate(raw.len() - 4);
+    raw.push(0);
+    assert_eq!(
+        ConnectionCode::parse(&text_from_raw(raw), NOW),
+        Err(CodeError::BadLength)
+    );
+}
+
+#[test]
+fn text_of_exactly_the_limit_is_not_too_long() {
+    let text = "A".repeat(remora_proto::limits::CODE_TEXT_MAX);
+    assert_eq!(ConnectionCode::parse(&text, NOW), Err(CodeError::BadPrefix));
+}
+
+#[test]
+fn answer_codes_round_trip() {
+    let mut c = valid();
+    c.kind = CodeKind::Answer;
+    assert_eq!(ConnectionCode::parse(&c.encode(), NOW), Ok(c));
+}
+
+#[test]
+fn candidate_count_limit_is_exact() {
+    let eight = sample(many(8), (NOW + 60) as u32);
+    assert!(ConnectionCode::parse(&eight.encode(), NOW).is_ok());
+    // Nine candidates with all their bytes present: rejected for the count, not length.
+    let mut raw = URL_SAFE_NO_PAD
+        .decode(&sample(many(8), (NOW + 60) as u32).encode()[PREFIX.len()..])
+        .expect("valid");
+    raw.truncate(raw.len() - 4);
+    raw[2 + 4 + 16 + 32 + 4 + 16] = 9;
+    raw.extend_from_slice(&[0x40, 10, 0, 0, 9, 0x9C, 0x40]);
+    let r = ConnectionCode::parse(&text_from_raw(raw), NOW);
+    assert!(
+        matches!(r, Err(CodeError::Malformed(_) | CodeError::BadLength)),
+        "{r:?}"
+    );
+}

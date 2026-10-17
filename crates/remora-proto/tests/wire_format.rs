@@ -285,3 +285,21 @@ fn invalid_datagram_headers_are_rejected() {
     assert_eq!(with(&|d| d[15] = 1), Some(DatagramError::Reserved));
     assert_eq!(with(&|_| {}), None);
 }
+
+// ── boundaries pinned by the mutation-testing gate ──────────────────────────
+
+#[test]
+fn a_frame_completed_by_its_own_last_push_is_returned_immediately() {
+    let mut d = FrameDecoder::new(HANDSHAKE_FRAME_MAX);
+    assert_eq!(d.push(&[0, 1]), Ok(vec![]));
+    assert_eq!(d.push(&[42]), Ok(vec![vec![42u8]]));
+}
+
+#[test]
+fn an_envelope_of_exactly_the_limit_is_not_too_large() {
+    let exact = vec![0u8; remora_proto::limits::ENVELOPE_MAX];
+    assert!(!matches!(
+        decode_envelope(&exact),
+        Err(MessageError::TooLarge { .. })
+    ));
+}
