@@ -1,0 +1,34 @@
+# THROWAWAY (Phase 2.5): runs the Windows capture/input spike on GitHub's Windows
+# runner and keeps its report. Delete together with spikes/windows-spike.
+name: Windows spike
+
+on:
+  push:
+    branches: [phase-2.5]
+    paths: ["spikes/**", ".github/workflows/spike-windows.yml"]
+
+permissions:
+  contents: read
+
+jobs:
+  spike:
+    runs-on: windows-2025
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: rustup toolchain install
+      - name: Build spike
+        run: cargo build --release --locked -p windows-spike
+      - name: Run spike (the report is the result; it always exits 0)
+        shell: pwsh
+        run: |
+          ./target/release/windows-spike.exe | Tee-Object -FilePath spike-report.txt
+          "--- runner context ---" | Add-Content spike-report.txt
+          Get-CimInstance Win32_VideoController | Select-Object Name, DriverVersion | Out-String | Add-Content spike-report.txt
+          query session 2>&1 | Out-String | Add-Content spike-report.txt
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: windows-spike-report
+          path: spike-report.txt
