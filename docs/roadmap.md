@@ -35,7 +35,7 @@ Each phase ends **runnable**, with tests and exact manual test steps.
 |---|---|---|
 | 1 | Plan, docs, threat model, workspace skeleton | ✅ done 2026-10-17 |
 | 1.5 | Release pipeline (unsigned), CI | ✅ done 2026-10-17 — `v0.0.1` built all artifacts on GitHub; all verified |
-| 2 | macOS ScreenCaptureKit capture + VideoToolbox encode → file; benchmark; verify 4:4:4 / LTR / intra-refresh support | next |
+| 2 | macOS ScreenCaptureKit capture + VideoToolbox encode → file; benchmark; verify 4:4:4 / LTR / intra-refresh support | ✅ gate passed 2026-10-17 (C12, C3, C4, C5; C2 failed as written → measurement redesigned, see phase2-criteria.md §6) |
 | 2.5 | **Windows spike** (throwaway): capture one DXGI frame, inject one SendInput click; report trait changes | |
 | 3 | Noise + SPAKE2 handshake over QUIC on localhost; safety code; CLI accept prompt; security tests; fuzz targets | |
 | 4 | Encrypted loopback streaming; wgpu viewer; stats overlay | |
@@ -59,10 +59,12 @@ accepted by the owner) before v0.1:
 | macOS signing + notarization path | No Apple Developer ID yet | Before first public release |
 | Per-chip encoder floors for Intel Mac, NVENC, QuickSync, AMF | Only measured on Apple M4 | Phases 6.5 / 9 |
 | **Open question: unexplained ~2 ms benchmark drift.** The same capture+encode configuration measured C2 p50 ≈ 9.0 ms at 02:56–02:59 and ≈ 7.05 ms from 03:05 on (2026-10-17, M4), no thermal/performance warning. ~2 ms is ~10 % of the 20 ms budget. | Not reproduced or explained yet; machine state is now recorded with every run and disagreements > 1 ms are flagged | Phase 4 checks whether it reappears |
-| Physical display hotplug (unplug/replug external monitor) during capture — Phase 2 Q4 | No external display available | Phase 9 (or earlier if a monitor is available) |
+| Physical display hotplug and the other untested Q4 cases (external monitor unplug/replug, clamshell, mirroring, arrangement, aspect/refresh/HDR changes, lock screen, fast user switching) — list in phase2-criteria.md §5.4 | No external display available; single-display subset tested | Phase 9 (or earlier if a monitor is available) |
+| Host must restart capture after −3815 (display sleep, lid close, display removed) — measured in Phase 2, not implemented yet | Phase 2 only measured it | Phase 4 (streaming) / 6 |
 
 ## Progress log
 
 | Date | Phase | v0.1 items open | Notes |
 |---|---|---|---|
+| 2026-10-17 | 2 | 9 / 10 | Capture + hardware encode on M4: screen change → encoded 8.1 ms p95 (≤ 11), 60 fps, < 1 % CPU static, no memory growth. 4:4:4 only outside low-latency mode; display sleep/lid/unplug stop the stream (−3815). No v0.1 checklist item completes until streaming exists (Phase 4). |
 | 2026-10-17 | 1 + 1.5 | 9 / 10 | Docs, threat model, skeleton, CI and release workflows. `v0.0.1` pipeline release verified (MSI install on real Windows still to do). |

@@ -24,8 +24,9 @@ mkdir -p "$OUT"
 stamp() { date +%H:%M:%S; }
 say_step() { echo "[$(stamp)] $*"; }
 
-# Runs the bench in the background; prints its PID. Args: <log> <bench args…>
-bench_bg() { local log="$1"; shift; "$APP" run bench-capture "$@" > "$log" 2>&1 & echo $!; }
+# Starts the bench in the background of THIS shell (so `wait` works) and sets $pid.
+# (Calling it inside $(…) would start it in a subshell that `wait` can't see.)
+bench_bg() { local log="$1"; shift; "$APP" run bench-capture "$@" > "$log" 2>&1 & pid=$!; }
 events() { sed -n '/^events:/,/^$/p' "$1"; }
 
 case "${1:-}" in
@@ -36,7 +37,7 @@ case "${1:-}" in
     alt="$("$BIN/display-mode" list | awk -F'\t' -v o="$orig" '$1 != o && /2560×1664 px/ {print $1; exit}')"
     [[ -n "$alt" ]] || alt="$("$BIN/display-mode" list | awk -F'\t' -v o="$orig" '$1 != o {print $1; exit}')"
     say_step "current mode $orig, switching to $alt and back during a 40 s capture"
-    pid="$(bench_bg "$OUT/hotplug-resolution.log" --seconds 40)"
+    bench_bg "$OUT/hotplug-resolution.log" --seconds 40
     sleep 10; "$BIN/display-mode" set "$alt"
     sleep 15; "$BIN/display-mode" set "$orig"
     wait "$pid" || true
@@ -46,7 +47,7 @@ case "${1:-}" in
     clang -fobjc-arc -framework Foundation -framework CoreGraphics \
       "$ROOT/scripts/macos/virtual-display.m" -o "$BIN/virtual-display"
     say_step "A) capturing the MAIN display while a virtual display is added (10 s) and removed (25 s)"
-    pid="$(bench_bg "$OUT/hotplug-virtual-main.log" --seconds 40)"
+    bench_bg "$OUT/hotplug-virtual-main.log" --seconds 40
     sleep 10; "$BIN/virtual-display" 15
     wait "$pid" || true
     events "$OUT/hotplug-virtual-main.log"
@@ -61,15 +62,15 @@ case "${1:-}" in
     events "$OUT/hotplug-virtual-unplug.log"
     ;;
   display-sleep)
-    say_step "60 s capture; display sleeps at 10 s — press a key to wake it after ~20 s"
-    pid="$(bench_bg "$OUT/hotplug-display-sleep.log" --seconds 60)"
-    sleep 10; pmset displaysleepnow
+    say_step "60 s capture; display sleeps at 15 s — press a key to wake it after ~20 s"
+    bench_bg "$OUT/hotplug-display-sleep.log" --seconds 60
+    sleep 15; pmset displaysleepnow
     wait "$pid" || true
     events "$OUT/hotplug-display-sleep.log"
     ;;
   lid)
     say_step "120 s capture started: close the lid now-ish (~10 s), open it ~30 s later"
-    pid="$(bench_bg "$OUT/hotplug-lid.log" --seconds 120)"
+    bench_bg "$OUT/hotplug-lid.log" --seconds 120
     wait "$pid" || true
     events "$OUT/hotplug-lid.log"
     ;;
