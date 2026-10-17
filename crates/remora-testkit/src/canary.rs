@@ -1,0 +1,213 @@
+//! Canary secrets and log capture (phase3-criteria A28, threat model INV8).
+//!
+//! A test plants distinctive secret values ("canaries"), runs the code, captures
+//! every log line and `Debug`/error string, and asserts no canary appears in any
+//! encoding someone might accidentally log it in.
+
+use std::io::Write;
+use std::sync::{Arc, Mutex, PoisonError};
+
+const HEX_LOWER: &[u8; 16] = b"0123456789abcdef";
+const HEX_UPPER: &[u8; 16] = b"0123456789ABCDEF";
+const B64_STD: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+const B64_URL: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+
+fn hex(bytes: &[u8], table: &[u8; 16]) -> String {
+    bytes
+        .iter()
+        .flat_map(|b| [table[usize::from(b >> 4)], table[usize::from(b & 0xf)]])
+        .map(char::from)
+        .collect()
+}
+
+fn base64(bytes: &[u8], table: &[u8; 64], pad: bool) -> String {
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let n = chunk
+            .iter()
+            .enumerate()
+            .fold(0u32, |acc, (i, &b)| acc | u32::from(b) << (16 - 8 * i));
+        let chars = chunk.len() + 1;
+        for i in 0..4 {
+            if i < chars {
+                out.push(char::from(table[((n >> (18 - 6 * i)) & 63) as usize]));
+            } else if pad {
+                out.push('=');
+            }
+        }
+    }
+    out
+}
+
+/// A planted secret value.
+#[derive(Debug, Clone)]
+pub struct Canary {
+    /// What it stands for (e.g. "otp", "identity key").
+    pub name: &'static str,
+    /// Its bytes.
+    pub bytes: Vec<u8>,
+}
+
+impl Canary {
+    /// A canary for `bytes`. Use distinctive values (≥ 6 bytes) so a match can't
+    /// be a coincidence.
+    pub fn new(name: &'static str, bytes: impl Into<Vec<u8>>) -> Self {
+        Self {
+            name,
+            bytes: bytes.into(),
+        }
+    }
+
+    /// Every textual form the secret could leak in: raw UTF-8 (if valid), hex
+    /// (both cases), base64 (standard and URL-safe, padded and unpadded) and the
+    /// Rust `Debug` form of a byte slice.
+    pub fn encodings(&self) -> Vec<String> {
+        let b = &self.bytes;
+        let mut v = vec![
+            hex(b, HEX_LOWER),
+            hex(b, HEX_UPPER),
+            base64(b, B64_STD, true),
+            base64(b, B64_STD, false),
+            base64(b, B64_URL, true),
+            base64(b, B64_URL, false),
+            format!("{b:?}").trim_end_matches(']').to_owned(),
+        ];
+        if let Ok(s) = std::str::from_utf8(b) {
+            v.push(s.to_owned());
+        }
+        v.retain(|e| !e.is_empty());
+        v.sort();
+        v.dedup();
+        v
+    }
+}
+
+/// A canary found in captured text.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Leak {
+    /// Which canary.
+    pub canary: &'static str,
+    /// The encoding that matched.
+    pub encoding: String,
+    /// The line it appeared in (truncated to 200 chars).
+    pub line: String,
+}
+
+/// Every occurrence of any canary, in any encoding, in `text`.
+pub fn find_leaks(text: &str, canaries: &[Canary]) -> Vec<Leak> {
+    let mut leaks = Vec::new();
+    for c in canaries {
+        for enc in c.encodings() {
+            for line in text.lines().filter(|l| l.contains(enc.as_str())) {
+                leaks.push(Leak {
+                    canary: c.name,
+                    encoding: enc.clone(),
+                    line: line.chars().take(200).collect(),
+                });
+            }
+        }
+    }
+    leaks
+}
+
+#[derive(Clone, Default)]
+struct Buffer(Arc<Mutex<Vec<u8>>>);
+
+impl Write for Buffer {
+    fn write(&mut self, data: &[u8]) -> std::io::Result<usize> {
+        self.0
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .extend_from_slice(data);
+        Ok(data.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for Buffer {
+    type Writer = Buffer;
+    fn make_writer(&'a self) -> Self::Writer {
+        self.clone()
+    }
+}
+
+/// Captures every `tracing` event (all levels, all fields, span context) on the
+/// current thread while alive.
+pub struct LogCapture {
+    buffer: Buffer,
+    _guard: tracing::subscriber::DefaultGuard,
+}
+
+impl LogCapture {
+    /// Starts capturing on this thread.
+    pub fn start() -> Self {
+        let buffer = Buffer::default();
+        let subscriber = tracing_subscriber::fmt()
+            .with_writer(buffer.clone())
+            .with_max_level(tracing::Level::TRACE)
+            .with_ansi(false)
+            .with_target(true)
+            .finish();
+        let guard = tracing::subscriber::set_default(subscriber);
+        Self {
+            buffer,
+            _guard: guard,
+        }
+    }
+
+    /// Everything captured so far.
+    pub fn text(&self) -> String {
+        String::from_utf8_lossy(&self.buffer.0.lock().unwrap_or_else(PoisonError::into_inner))
+            .into_owned()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn encoders_match_known_values() {
+        // RFC 4648 test vectors.
+        assert_eq!(base64(b"foobar", B64_STD, true), "Zm9vYmFy");
+        assert_eq!(base64(b"fo", B64_STD, true), "Zm8=");
+        assert_eq!(base64(b"f", B64_STD, false), "Zg");
+        assert_eq!(base64(&[0xfb, 0xff], B64_URL, false), "-_8");
+        assert_eq!(hex(&[0xde, 0xad], HEX_LOWER), "dead");
+        assert_eq!(hex(&[0xde, 0xad], HEX_UPPER), "DEAD");
+    }
+
+    #[test]
+    fn finds_secret_in_every_encoding() {
+        let c = Canary::new("key", vec![0xde, 0xad, 0xbe, 0xef, 0x13, 0x37]);
+        for enc in c.encodings() {
+            let leaks = find_leaks(&format!("blah {enc} blah"), std::slice::from_ref(&c));
+            assert!(!leaks.is_empty(), "missed encoding {enc}");
+        }
+        assert!(find_leaks("nothing here", &[c]).is_empty());
+    }
+
+    #[test]
+    fn debug_byte_slice_form_is_detected() {
+        let secret = vec![201u8, 202, 203, 204, 205, 206];
+        let c = Canary::new("k", secret.clone());
+        assert!(!find_leaks(&format!("{secret:?}"), &[c]).is_empty());
+    }
+
+    #[test]
+    fn captures_events_and_fields_on_this_thread() {
+        let cap = LogCapture::start();
+        let otp = "424242";
+        tracing::warn!(reason = "test", password = otp, "handshake_failed");
+        let text = cap.text();
+        assert!(text.contains("handshake_failed"));
+        let leaks = find_leaks(&text, &[Canary::new("otp", otp)]);
+        assert_eq!(
+            leaks.len(),
+            1,
+            "the scanner must catch a deliberately logged secret"
+        );
+    }
+}

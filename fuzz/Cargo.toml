@@ -1,0 +1,46 @@
+# Fuzz targets (phase3-criteria A27). Separate workspace: built with the pinned
+# nightly in fuzz/rust-toolchain.toml via `cargo fuzz`, never by the main build.
+[package]
+name = "remora-fuzz"
+version = "0.0.0"
+edition = "2024"
+publish = false
+license = "MIT OR Apache-2.0"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "=0.4.13"
+remora-proto = { path = "../crates/remora-proto" }
+
+[workspace]
+members = ["."]
+
+[[bin]]
+name = "connection_code"
+path = "fuzz_targets/connection_code.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "frame_decoder"
+path = "fuzz_targets/frame_decoder.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "messages"
+path = "fuzz_targets/messages.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "datagram_header"
+path = "fuzz_targets/datagram_header.rs"
+test = false
+doc = false
+bench = false

@@ -77,7 +77,8 @@ Details live in [protocol.md](protocol.md); this is the security-relevant core.
    QUIC connection with the 6-digit password. Identities bound into SPAKE2:
    protocol version, host device ID, connection nonce. Output: a 256-bit key `K`.
    A wrong password produces unrelated keys on each side; neither side learns
-   anything about the other's password beyond "it did not match".
+   anything about the other's password beyond "it did not match" (same
+   conditions as above; see crypto-claims-audit.md C1–C2).
 3. **End-to-end channel (Noise `XXpsk0`):** `psk = HKDF(K, transcript)` is
    mixed in at the very first Noise message, so a wrong password fails the
    first decryption on the host and the host reveals nothing (not even its
@@ -131,8 +132,11 @@ Requirement: a user must be able to read the password out over a phone call.
 
 Why 6 digits (≈ 20 bits) is safe *here*:
 
-* **SPAKE2 makes offline guessing impossible.** A recorded handshake gives an
-  attacker nothing to test guesses against; every guess requires a live
+* **SPAKE2 makes offline guessing impossible** — for the SPAKE2 construction,
+  provided its constants are honestly generated and small-subgroup inputs are
+  handled; for the crate we use, both are open points handled in our wrapper
+  (crypto-claims-audit.md §1). A recorded handshake gives an attacker nothing to
+  test guesses against; every guess requires a live
   protocol run with the real host. A passive observer learns nothing at all.
 * **3 attempts, then rotate.** After 3 failed attempts the host generates a
   fresh password (and shows a notice). An attacker who guesses blindly has at
@@ -263,7 +267,7 @@ Legend — **M** = mitigation, **T** = test that proves it, **R** = residual ris
 
 | STRIDE | Threat | Mitigation / Test / Residual |
 |---|---|---|
-| T/E | Malicious host sends crafted video bitstream to exploit the decoder | M: OS/hardware decoders (on macOS VideoToolbox decodes out of process); frame size limits; resolution limits negotiated and enforced; software decoder (openh264) is a C library — R: **decoder bugs are a real residual risk**; we keep decoders updated and fuzz our own depacketizer. |
+| T/E | Malicious host sends crafted video bitstream to exploit the decoder | M: OS/hardware decoders (on macOS VideoToolbox *may* decode out of process — **unverified**, checked in Phase 4; crypto-claims-audit C12); frame size limits; resolution limits negotiated and enforced; software decoder (openh264) is a C library — R: **decoder bugs are a real residual risk**; we keep decoders updated and fuzz our own depacketizer. |
 | T/E | Crafted cursor image / protocol messages | M: cursor ≤ 256×256 RGBA, validated; all messages size-limited and fuzzed. |
 | S | Viewer connects to the wrong host | M: device ID ↔ key binding, safety code, trusted-device pinning. |
 | I | Host learns viewer's IP | R: inherent to P2P. |
@@ -274,7 +278,7 @@ Legend — **M** = mitigation, **T** = test that proves it, **R** = residual ris
 |---|---|---|
 | I | Identity private key read from disk | M: stored in OS keychain (macOS Keychain, Windows Credential Manager, Linux Secret Service), never in plain files. |
 | T | Local process adds itself to trusted-device list | M: trusted list stored in the keychain alongside the identity key. R: a same-user process that can read the keychain is effectively a compromised account — out of scope. |
-| I | Secrets left in memory / swap | M: `zeroize` on drop for all secret types. R: we cannot prevent swap or hibernation files from containing them. |
+| I | Secrets left in memory / swap | M: `zeroize` on drop for **Remora's own** secret types. R: secrets inside third-party crates are **not** wiped (`spake2` and `snow` don't use `zeroize` — verified); we cannot prevent swap or hibernation files from containing them. |
 
 ### 7.8 Build and release pipeline — ADV9
 
@@ -300,10 +304,24 @@ Full table in [protocol.md](protocol.md#limits). Principles:
 
 ## 9. Residual risks (accepted, documented)
 
-1. **`spake2` crate (0.4.0) has not been independently audited.** It is a small,
-   RFC 9382-style implementation from the RustCrypto organisation. We wrap it
-   behind `remora-crypto` so it can be replaced (e.g. by CPace) without
-   protocol-wide changes; the protocol version would bump.
+1. **`spake2` crate (0.4.0) has not been independently audited.** It is a small
+   implementation from the RustCrypto organisation that is **compatible with
+   python-spake2 (magic-wormhole) — it is NOT an RFC 9382 implementation**
+   (corrected 2026-10-17; an earlier version of this document said
+   "RFC 9382-style"). It ships 13 tests. We wrap it behind `remora-crypto` so it
+   can be replaced (e.g. by an RFC 9382 or CPace implementation) without
+   protocol-wide changes; the protocol version would bump. What we rely on
+   instead of an audit: phase3-criteria.md §6.
+1a. **SPAKE2 implementation differs from RFC 9382** (crypto-claims-audit.md §1):
+    no cofactor multiplication or small-order check (our wrapper rejects such
+    elements — Phase 3 A32), constants copied from python-spake2 whose
+    generation is not yet verified (A33), and no RFC key confirmation (we rely on
+    implicit confirmation by the Noise message-1 tag). **v1.0 review question:**
+    CPace or an RFC 9382 implementation.
+1b. **OTP-rotation DoS:** an attacker who can reach the host can fail three
+    times repeatedly to keep the one-time password rotating. Partially mitigated
+    (exponential cool-down, per-IP limits, visible notice); accepted for v0.1;
+    revisit with signaling in Phase 8.
 2. **Metadata** (IPs, timing, device IDs) is visible to STUN/signaling servers
    and to the peer.
 3. **Traffic analysis** of packet sizes/timing.

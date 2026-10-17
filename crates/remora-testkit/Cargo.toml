@@ -1,6 +1,6 @@
 [package]
 name = "remora-testkit"
-description = "Remora test utilities: test pattern, in-memory network, malicious signaling server, network simulation."
+description = "Remora test utilities: in-process links with a scriptable man-in-the-middle, canary-secret scanning, allocation counting, statistics and policy checks."
 version.workspace = true
 authors.workspace = true
 repository.workspace = true
@@ -11,6 +11,8 @@ publish.workspace = true
 license = "MIT OR Apache-2.0"
 
 [dependencies]
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
 
 [lints]
 workspace = true

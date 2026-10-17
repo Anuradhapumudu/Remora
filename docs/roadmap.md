@@ -48,6 +48,22 @@ Each phase ends **runnable**, with tests and exact manual test steps.
 
 v0.1 is reached at the end of **Phase 8** (Linux X11 in Phase 9 is post-v0.1).
 
+## v1.0 formal-modelling list (in priority order)
+
+Design-level assurance that tests cannot give (tests check the implementation
+against the design, not the design itself):
+
+1. **Remora safety-code commitment scheme** (commit-then-reveal SAS over the
+   Noise handshake hash, protocol.md §3.3) — Remora's own construction; no
+   published analysis covers it because the SPAKE2 crate provides no key
+   confirmation. Model in ProVerif/Tamarin: an active attacker who knows the
+   password cannot make the two sessions' codes collide with probability above
+   10⁻⁶ per attempt.
+2. **Handshake composition:** SPAKE2 (python-spake2 variant) → PSK → Noise
+   `XXpsk0` with exporter + hello binding, including implicit (instead of RFC
+   9382) key confirmation.
+3. Trusted-device (password-less) mode and identity pinning.
+
 ## Known gaps before v0.1
 
 Things that could not be verified yet and must be closed (or explicitly
@@ -61,6 +77,10 @@ accepted by the owner) before v0.1:
 | Per-chip encoder floors for Intel Mac, NVENC, QuickSync, AMF | Only measured on Apple M4 | Phases 6.5 / 9 |
 | **Open question: unexplained ~2 ms benchmark drift.** The same capture+encode configuration measured C2 p50 ≈ 9.0 ms at 02:56–02:59 and ≈ 7.05 ms from 03:05 on (2026-10-17, M4), no thermal/performance warning. ~2 ms is ~10 % of the 20 ms budget. | Not reproduced or explained yet; machine state is now recorded with every run and disagreements > 1 ms are flagged | Phase 4 checks whether it reappears |
 | Physical display hotplug and the other untested Q4 cases (external monitor unplug/replug, clamshell, mirroring, arrangement, aspect/refresh/HDR changes, lock screen, fast user switching) — list in phase2-criteria.md §5.4 | No external display available; single-display subset tested | Phase 9 (or earlier if a monitor is available) |
+| Threat-model invariants not testable in Phase 3: INV2 on the real media path, INV9 (no pixels logged/written), INV10 (keys/buttons released), INV11 (session indicator, partly manual) — phase3-criteria.md §5 | No media/input path yet | INV2/INV9/INV11 in Phase 4, INV10 in Phase 6 |
+| No formal model of the handshake composition; `spake2` crate unaudited (python-spake2 compatible, not RFC 9382) | Out of scope for tests (phase3-criteria.md §6) | External review / ProVerif-Tamarin model before v1.0 |
+| **v1.0 review question:** replace SPAKE2 (python-spake2 variant) with CPace (IRTF CFRG draft) or an RFC 9382 implementation — crypto-claims-audit.md §1 | Swap is prepared by the `Pake` abstraction | Before v1.0 |
+| **Decay risk: INV11 is partly manual** (session indicator) — manual checks get skipped | No UI yet | Phase 4: automated CLI indicator check; Phase 7: automated GUI test (indicator visible for the whole `Active` period, button reaches `Closed` within 1 s) |
 | Remove the dev signing identity + RemoraDev screen-recording grant (phase2-criteria.md §7) — kept by owner decision while developing | Still needed for development | End of Phase 4 |
 | Host must restart capture after −3815 (display sleep, lid close, display removed) — measured in Phase 2, not implemented yet | Phase 2 only measured it | Phase 4 (streaming) / 6 |
 

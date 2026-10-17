@@ -42,13 +42,13 @@ WebSocket and the user only types a device ID.
 |---|---|---|
 | format version | 1 | `0x01` |
 | kind | 1 | 0 = offer, 1 = answer |
-| expiry | 4 | Unix time in **minutes**, big-endian; offer valid ≤ 5 min |
+| expiry | 4 | Unix time in **seconds**, big-endian; valid until this time; at most 5 min (+ 30 s clock-skew allowance) in the future when parsed (seconds, not minutes, so the A07 boundaries are exact) |
 | nonce | 16 | Random; single-use on the host. The answer echoes the offer's nonce |
 | identity key | 32 | Ed25519 public key of the sender |
 | ICE ufrag | 4 | Random |
 | ICE password | 16 | Random (128 bits) |
 | candidate count | 1 | ≤ 8 |
-| candidates | 7 or 19 each | `kind:u8` (host/srflx) + IPv4 (4) or IPv6 (16) + port (2) |
+| candidates | 7 or 19 each | `kind:u8` = low nibble type (0 host, 1 server-reflexive) · high nibble family (4 = IPv4 → 4 address bytes, 6 = IPv6 → 16) + address + port (2, big-endian, ≠ 0) |
 | CRC-32 | 4 | **Typo detection only, not security** |
 
 Encoded as **base64url without padding**, prefixed `remora1:`. Typical size with two IPv4 and two
@@ -95,7 +95,11 @@ psk       = HKDF-SHA256(salt = exporter, ikm = K, info = "remora/1/noise-psk" �
 prologue  = "remora/1" ‖ exporter ‖ BLAKE2s(ViewerHello_bytes ‖ HostHello_bytes)
 ```
 
-* **SPAKE2** (`spake2` crate, Ed25519 group): password = `"remora/1/otp:" ‖ six ASCII digits`;
+* **SPAKE2** behind Remora's own `Pake` abstraction (implementation: `spake2`
+  crate, python-spake2 compatible — **not** RFC 9382; crypto-claims-audit.md §1).
+  Before passing a received element to the crate, Remora checks its length and
+  side byte and rejects non-decompressible, identity and non-torsion-free points.
+  password = `"remora/1/otp:" ‖ six ASCII digits`;
   `id_a = "remora/1/viewer"`; `id_b = "remora/1/host:" ‖ host_device_id ‖ nonce`.
 * Binding the **exporter** into the prologue means a MITM at the QUIC layer
   (two different TLS sessions) produces different prologues → Noise fails.
@@ -118,7 +122,12 @@ matches.
 
 **Device ID** = first 80 bits of `BLAKE2s("remora/1/device-id" ‖ ed25519_pub)`,
 shown as a 9-digit group code + checksum digit, e.g. `482 913 557-3`.
-(80 bits: second-preimage needs ~2⁸⁰ work.)
+(80 bits: forging an ID for *someone else's* key needs ~2⁸⁰ work; two keys of
+the *same* attacker can collide after ~2⁴⁰, which is harmless because IDs only
+route and the full key is always verified.)
+
+Signatures are checked with `ed25519-dalek`'s **`verify_strict`** (rejects
+small-order keys and malleable signatures); plain `verify` is not used.
 
 ### 3.3 Safety code (SAS)
 
