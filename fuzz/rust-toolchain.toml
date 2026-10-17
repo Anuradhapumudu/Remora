@@ -1,0 +1,4 @@
+# cargo-fuzz needs nightly (sanitizer flags). Pinned to a date >= 14 days old.
+[toolchain]
+channel = "nightly-2026-10-01"
+profile = "minimal"

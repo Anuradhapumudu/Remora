@@ -42,13 +42,13 @@ WebSocket and the user only types a device ID.
 |---|---|---|
 | format version | 1 | `0x01` |
 | kind | 1 | 0 = offer, 1 = answer |
-| expiry | 4 | Unix time in **minutes**, big-endian; offer valid ≤ 5 min |
+| expiry | 4 | Unix time in **seconds**, big-endian; valid until this time; at most 5 min (+ 30 s clock-skew allowance) in the future when parsed (seconds, not minutes, so the A07 boundaries are exact) |
 | nonce | 16 | Random; single-use on the host. The answer echoes the offer's nonce |
 | identity key | 32 | Ed25519 public key of the sender |
 | ICE ufrag | 4 | Random |
 | ICE password | 16 | Random (128 bits) |
 | candidate count | 1 | ≤ 8 |
-| candidates | 7 or 19 each | `kind:u8` (host/srflx) + IPv4 (4) or IPv6 (16) + port (2) |
+| candidates | 7 or 19 each | `kind:u8` = low nibble type (0 host, 1 server-reflexive) · high nibble family (4 = IPv4 → 4 address bytes, 6 = IPv6 → 16) + address + port (2, big-endian, ≠ 0) |
 | CRC-32 | 4 | **Typo detection only, not security** |
 
 Encoded as **base64url without padding**, prefixed `remora1:`. Typical size with two IPv4 and two

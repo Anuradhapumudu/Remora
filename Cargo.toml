@@ -50,6 +50,7 @@ subtle = "2.6"
 keyring = "4.2"
 
 # protocol
+base64 = "0.23.1"
 prost = "0.14.4"
 prost-build = "0.14.4"
 protox = "0.9.1"

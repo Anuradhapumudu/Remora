@@ -39,7 +39,8 @@ once a workspace member actually uses it.
 | subtle | 2.6 | 2.6.1 | crypto | Constant-time comparison |
 | keyring | 4.2 | 4.2.0 | crypto (key storage) | OS keychain. **v4 API differs from v3** (split into `keyring-core` + per-OS stores) — re-verify in Phase 3 |
 | is | 0.11.1 | 0.11.1 | net | Sans-IO ICE agent from str0m (nat-traversal.md §3). Pin exact minor; frequent breaking releases |
-| prost | 0.14.4 | 0.14.4 | proto | Protobuf runtime |
+| prost | 0.14.4 | 0.14.4 | proto | Protobuf runtime; messages written as Rust structs with `#[derive(prost::Message)]` (no code generator — decision D20) |
+| base64 | 0.23.1 | 0.23.1 | proto | Connection codes: `URL_SAFE_NO_PAD` requires no padding and rejects non-canonical trailing bits (verified: base64-0.23.1/src/engine/general_purpose/mod.rs:472, 499) |
 | prost-build | 0.14.4 | 0.14.4 | proto (build) | Code generation |
 | protox | 0.9.1 | 0.9.1 (0.10.0 < 14 days) | proto (build) | Pure-Rust `.proto` compiler, so contributors don't need `protoc` |
 | reed-solomon-simd | 3.1.0 | 3.1.0 | net | FEC for video datagrams |
