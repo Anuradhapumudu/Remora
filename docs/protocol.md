@@ -137,12 +137,24 @@ pinned, and (d) when connecting by device ID, that `DeviceId(ed25519_pub)`
 matches.
 
 **Device ID** = first 80 bits of `BLAKE2s("remora/1/device-id" ‖ ed25519_pub)`.
-**Display format: open (owner decision needed).** The earlier text said "a
-9-digit group code + checksum digit, e.g. `482 913 557-3`", but 9 decimal
-digits hold only ~30 bits, not 80; showing all 80 bits in decimal takes 25
-digits. Either the shown code is shorter than the ID (and the routing
-service must then resolve collisions) or it is longer than 9 digits. Phase 3
-compares raw 10-byte IDs only; the text format is decided before the CLI step.
+
+**Full ID vs short code (owner decision 2026-10-18):**
+
+* The **full 80-bit ID is the only ID the protocol compares** (`HostHello`,
+  `PeerPolicy::DeviceId`, pinning). Nothing in the protocol ever treats the
+  short code as the device's identity.
+* Users see a **short code** derived from the full ID. It is used **only**
+  for display and for a routing lookup on remora-signal.
+* The short code is an **ADDRESS, not a credential.** Security comes from the
+  one-time password (Noise msg1) and the safety code — never from the code
+  being hard to guess. Someone who knows your code must gain nothing: they can
+  try to connect, which still needs your password and your approval of the
+  SAS. Codes may be shared, printed, and enumerated without harming security.
+* Without a routing service (copy-paste connection codes) the short code
+  plays no part: the connection code carries the full 32-byte identity key.
+* Length, check digit and collision handling: **proposed 2026-10-18, awaiting
+  owner approval** — not implemented.
+
 (80 bits: forging an ID for *someone else's* key needs ~2⁸⁰ work; two keys of
 the *same* attacker can collide after ~2⁴⁰, which is harmless because IDs only
 route and the full key is always verified.)

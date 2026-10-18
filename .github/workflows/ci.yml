@@ -65,3 +65,36 @@ jobs:
 
       - name: cargo audit
         run: cargo audit
+
+  # docs/dependencies.md rule 1, enforced (cargo-deny cannot express it):
+  # every crates.io package newly locked by this change must be >= 14 days
+  # old. Fails closed if crates.io cannot be reached.
+  crate-age:
+    name: dependency release age (>= 14 days)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Self-test (planted too-new entries must be caught)
+        run: python3 -I scripts/ci/check-crate-age.py --self-test
+      - name: Check newly locked crates
+        env:
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          if [ "$EVENT" = "pull_request" ]; then
+            base=$(git merge-base HEAD "origin/$BASE_REF")
+          elif [ "$EVENT" = "push" ] && git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            base="$BEFORE"
+          else
+            base=""
+          fi
+          if [ -n "$base" ]; then
+            python3 -I scripts/ci/check-crate-age.py --base "$base" Cargo.lock fuzz/Cargo.lock
+          else
+            python3 -I scripts/ci/check-crate-age.py --all Cargo.lock fuzz/Cargo.lock
+          fi

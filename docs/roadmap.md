@@ -62,6 +62,28 @@ against the design, not the design itself):
 2. **Handshake composition:** SPAKE2 (python-spake2 variant) → PSK → Noise
    `XXpsk0` with exporter + hello binding, including implicit (instead of RFC
    9382) key confirmation.
+2b. **Cross-implementation test vector for `Noise_XXpsk0_25519_ChaChaPoly_BLAKE2s`**
+   (owner, 2026-10-18: critical path, not a nice-to-have). Two parts of the
+   crypto core currently rest on a single implementation agreeing with
+   itself: item 1 (our commitment scheme) and our exact Noise pattern, which
+   snow's own vector suite does not contain (crypto-claims-audit C22).
+   Realistic options, verified 2026-10-18:
+   * **flynn/noise (Go, BSD-3)** — its committed `vectors.txt` already has
+     3 vectors named exactly `Noise_XXpsk0_25519_ChaChaPoly_BLAKE2s` (fixed
+     statics, ephemerals, PSK, per-message ciphertexts), produced by its own
+     `vectorgen`. Replay them through snow using its
+     `fixed_ephemeral_key_for_testing_only` builder option: one test file,
+     the vector file pinned by commit SHA + sha256. **Cheapest, preferred.**
+   * The same `vectorgen` (Go is installed on the dev machine) can produce
+     vectors with **our** prologue layout and payload sizes.
+   * **noiseprotocol (Python)** supports `psk` modifiers, 25519,
+     ChaChaPoly and BLAKE2s (verified in its 0.3.1 source) — a third
+     implementation, but last released 2020-11-25 and needs `cryptography`.
+   * Asking the Noise community (mailing list) — slow; gives review rather
+     than vectors. Useful for item 1, not for this.
+   Limit: agreement between two implementations shows both compute the
+   spec's function; it says nothing about the pattern's security.
+   **Close by:** before v1.0 (target: alongside Phase 5, so it does not drift).
 3. Trusted-device (password-less) mode and identity pinning.
 
 ## Known gaps before v0.1

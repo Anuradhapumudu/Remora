@@ -9,6 +9,16 @@ plus a scratch build to detect duplicate crates), not taken from memory.
 1. **≥ 14 days old.** A release younger than 14 days is not adopted; we pin the
    previous one (`cargo update -p <crate> --precise <version>`). Gives the
    community time to notice a malicious or broken release.
+   **Enforced mechanically** since 2026-10-18 by the `crate-age` CI job
+   (`scripts/ci/check-crate-age.py`): every crates.io package newly locked in
+   `Cargo.lock` or `fuzz/Cargo.lock` (compared with the merge-base on `main`)
+   is looked up on the crates.io API and the build fails if it is < 14 days
+   old, or if it cannot be looked up (fails closed). The job first runs a
+   self-test with planted too-new entries. Why a script: cargo-deny 0.20.2 has
+   no release-age check, and cargo's `-Z min-publish-age` is nightly-only and
+   filters resolution instead of checking a lockfile — revisit when it is
+   stable. Run locally: `python3 scripts/ci/check-crate-age.py --base
+   $(git merge-base HEAD origin/main) Cargo.lock fuzz/Cargo.lock`.
 2. **No pre-releases** (`-alpha`, `-pre`, `-dev`) for anything security-relevant.
 3. **One RustCrypto generation.** All our crypto shares `curve25519-dalek 4`,
    `digest 0.10`, `rand_core 0.6` (decision D3 in architecture.md). cargo-deny
@@ -69,6 +79,14 @@ crates.io release date. Three were < 14 days old and were locked to the
 previous release, in both `Cargo.lock` and `fuzz/Cargo.lock`:
 `cc` 1.8.0 → **1.6.0** (1.7.0 was also < 14 days), `libc` 0.2.191 →
 **0.2.190**, `zeroize` 1.9.1 → **1.9.0**.
+
+**Remembering the rule was not enough.** When the check first ran over the
+phase-3 branch it found five more violations that earlier steps had locked
+by hand without noticing: `arbitrary` 1.5.0 → **1.4.2** (fuzz only),
+`either` 1.19.0 → **1.18.0**, `smallvec` 1.16.3 → **1.16.2**, `syn` 3.0.9 →
+**3.0.6**, `unicode-ident` 1.0.27 → **1.0.26** (the latter three are
+build-time / proc-macro crates). All locked to the newest release that was
+≥ 14 days old on 2026-10-18.
 
 ## Known duplicate versions (accepted)
 
