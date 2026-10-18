@@ -618,6 +618,14 @@ impl Host {
             let counts = password_mode && e == remora_crypto::noise::HandshakeError::Msg1Auth;
             Ending::Failed(FailReason::from_handshake(e), counts)
         })?;
+        if password_mode {
+            // INV15: the viewer just proved the one-time password, so it is
+            // used up now - before this session goes on, whatever happens to
+            // it later - and can never authenticate a second session.
+            self.otp = generate_otp(rng);
+            self.limiter.password_used();
+            out.push(HostAction::OtpUsed { id });
+        }
         let (hs, msg2) = hs
             .write_msg2(&self.config.identity.cert)
             .map_err(|e| fail(FailReason::from_handshake(e)))?;

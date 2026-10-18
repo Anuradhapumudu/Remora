@@ -149,6 +149,12 @@ impl Limiter {
         }
     }
 
+    /// The current password was used successfully and replaced (INV15): the
+    /// attempt count restarts for the new one. A running cool-down is kept.
+    pub fn password_used(&mut self) {
+        self.failures = 0;
+    }
+
     /// Handshakes currently counted as pending.
     pub fn pending(&self) -> usize {
         self.pending
