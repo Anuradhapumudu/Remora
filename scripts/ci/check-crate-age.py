@@ -66,7 +66,8 @@ def fetch_created_at(name, version):
             with urllib.request.urlopen(req, timeout=30) as resp:
                 data = json.load(resp)
             return dt.datetime.fromisoformat(data["version"]["created_at"].replace("Z", "+00:00"))
-        except (urllib.error.URLError, KeyError, ValueError) as e:
+        # OSError covers URLError and timeouts raised while reading the body.
+        except (OSError, KeyError, ValueError) as e:
             last = e
             time.sleep(2 * (attempt + 1))
     raise RuntimeError(f"could not look up {name} {version}: {last}")
@@ -100,7 +101,7 @@ def fetch_advisory(name, advisory_id):
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:
             return resp.read().decode("utf-8")
-    except urllib.error.URLError as e:
+    except OSError as e:
         raise RuntimeError(f"could not fetch {advisory_id}: {e}") from e
 
 
