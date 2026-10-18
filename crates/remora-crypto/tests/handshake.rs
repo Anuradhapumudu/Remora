@@ -815,3 +815,33 @@ fn payload_with_an_oversized_name_length_is_a_framing_error() {
         Some(HandshakeError::MalformedPayload)
     );
 }
+
+#[test]
+fn noise_key_rebuilt_from_its_secret_is_the_same_key() {
+    use rand_core::RngCore;
+    use remora_crypto::noise::NoiseStaticKeypair;
+    let mut secret = [0u8; 32];
+    OsRng.fill_bytes(&mut secret);
+    let a = NoiseStaticKeypair::from_secret(secret);
+    let b = NoiseStaticKeypair::from_secret(secret);
+    assert_eq!(a.public(), b.public());
+    let mut other = secret;
+    other[5] ^= 1;
+    assert_ne!(NoiseStaticKeypair::from_secret(other).public(), a.public());
+    // RFC 7748 §6.1 (rfc-editor.org/rfc/rfc7748.txt, lines 768-771, read
+    // 2026-10-18): Alice's X25519 private key and X25519(a, 9). Copied as
+    // hex strings verbatim from the RFC text, not typed from memory.
+    let hex = |h: &str| -> [u8; 32] {
+        let mut out = [0u8; 32];
+        for (i, b) in out.iter_mut().enumerate() {
+            *b = u8::from_str_radix(&h[2 * i..2 * i + 2], 16).unwrap();
+        }
+        out
+    };
+    let alice = hex("77076d0a7318a57d3c16c17251b26645df4c2f87ebc0992ab177fba51db92c2a");
+    let alice_pub = hex("8520f0098930a754748b7ddcb43ef75a0dbf3a0d26381af4eba4a98eaa9b4e6a");
+    assert_eq!(
+        NoiseStaticKeypair::from_secret(alice).public().as_bytes(),
+        &alice_pub
+    );
+}

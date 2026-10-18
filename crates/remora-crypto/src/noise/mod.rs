@@ -75,6 +75,16 @@ impl NoiseStaticKeypair {
         }
     }
 
+    /// Rebuilds a key pair from its secret (e.g. loaded from the OS
+    /// keychain). The public key is derived, so the two cannot disagree.
+    pub fn from_secret(secret: [u8; 32]) -> Self {
+        let public = curve25519_dalek::MontgomeryPoint::mul_base_clamped(secret).to_bytes();
+        Self {
+            secret,
+            public: NoiseStaticPublic(public),
+        }
+    }
+
     /// The public key (goes into our `IdentityCert`).
     pub fn public(&self) -> &NoiseStaticPublic {
         &self.public
