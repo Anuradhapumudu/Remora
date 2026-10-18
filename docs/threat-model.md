@@ -123,6 +123,7 @@ Details live in [protocol.md](protocol.md); this is the security-relevant core.
 | INV12 | 3 failed password attempts for a one-time password rotate the password and notify the host user. | Unit test |
 | INV13 | The unattended-access password is rejected by code if shorter than 12 characters (after Unicode NFKC normalisation). | Unit test |
 | INV14 | No `unsafe` outside `sys`/FFI modules; every `unsafe` block has a `// SAFETY:` comment. | `#![forbid(unsafe_code)]` / `#![deny(unsafe_code)]` lints + clippy `undocumented_unsafe_blocks` |
+| INV15 | The one-time password is consumed the moment a viewer proves it (Noise msg1 authenticates): a new password is in effect before that session continues, whatever its outcome (used, denied, timed out, disconnected, failed later). The same password never authenticates twice — neither later nor concurrently. Wrong-password attempts do not consume it (they count toward INV12). | Unit test (remora-session `tests/inv15_one_time.rs`, phase3-criteria A36) |
 
 ## 6. Password and safety-code policy (and the reasoning)
 
@@ -146,7 +147,13 @@ Why 6 digits (≈ 20 bits) is safe *here*:
 * **A correct guess is still not enough.** In attended mode a human must click
   *Accept* on a prompt showing the device name, device ID and safety code.
 * **Per-session lifetime.** The password is valid only while the host window is
-  open and only for one successful session.
+  open and **for one use only** (INV15): it is consumed as soon as a viewer
+  proves it, so a code seen over a shoulder, in a screenshot or in chat
+  history cannot be used to reconnect later or to open a second session
+  alongside the first. *History:* this sentence ("only for one successful
+  session") was here from Phase 1, but nothing enforced it and no invariant
+  or test covered it; it was found during the Phase 3 session implementation
+  (2026-10-18) and made INV15.
 
 Generation: uniform over 000000–999999 using the OS CSPRNG with rejection
 sampling (no modulo bias). Displayed as `123 456`.

@@ -67,6 +67,7 @@ Each row: the attack, how the test stages it, and the **required** outcome.
 | **A02** | **Three** wrong passwords in a row | 3rd failure rotates the OTP (old one rejected even if now guessed right), host UI event "3 failed attempts — new password", cool-down starts at 30 s and doubles; a correct new-password attempt during cool-down → `RateLimited` / `RATE_LIMITED`. |
 | **A03** | **Parallel guessing**: 50 simultaneous connections with different guesses | At most 4 handshakes pending at once (others closed `RATE_LIMITED` before any crypto); attempts are counted **globally per OTP**, so the 3-attempt limit holds across connections; ≤ 10 attempts/min per source IP. |
 | **A04** | **Error oracle** (bytes and timing) | See §3.1a. |
+| **A36** | **Reuse of a one-time password** (added 2026-10-18, owner; INV15): complete a session with the password, then reconnect with the same password; also try it concurrently while the first session is active, and after sessions that ended by deny, prompt timeout, disconnect, or a later handshake error | Every reuse fails at Noise msg1 with `AuthFailed`; no prompt is shown. The host emits `OtpUsed` once per password-mode session and a new password is in effect immediately. Wrong-password attempts do not consume the code (INV12 unchanged). Trusted-mode sessions do not touch it. |
 
 #### 3.1a A04 in detail — what may and may not be distinguishable
 
@@ -222,6 +223,28 @@ one A17-S test.
 | **A33** | **Unverifiable SPAKE2 constants** | A test re-derives M and N from python-spake2's published seed procedure and compares them to the crate's constants. If they cannot be reproduced, Phase 3 reports the PAKE as resting on unverified constants (owner decision). |
 | **A34** | **Noise implementation correctness evidence** | snow's own Noise test-vector suite is run once in CI against the exact locked version, and the result recorded. |
 
+### 3.8 Found during implementation (recorded, owner request)
+
+**INV15 / A36 — the "one-time" password was not one-time.** threat-model.md
+§6.1 has said since Phase 1 that the password is valid "only for one
+successful session", but no invariant, criterion or test enforced it, and the
+first session implementation only rotated it after 3 failures (INV12). Found
+while implementing remora-session; owner decision 2026-10-18: consume it on
+use. Implemented **at authentication** (msg1), which is before — and so covers
+— every way a session can end, and also blocks a second, concurrent session
+with the same code.
+
+**Audit of other "one-time / single-use / fresh" claims (2026-10-18):**
+
+| Claim | Enforced? |
+|---|---|
+| OTP "one-time" (threat-model A4, §6.1) | **Now** — INV15 / A36 |
+| Connection-code nonce "single-use on the host" (protocol.md §2; threat-model replay rows) | **Not yet** — A06, built in step 5 (net); must land there |
+| Fresh ephemeral keys and SAS nonces per handshake | Yes — A17-S5; `a17_sas_binds_the_handshake_transcript_not_only_the_nonces` |
+| "Fresh password" after 3 failures | Yes — A02 / INV12 |
+| One sender per media key; rotate at 2³² packets | Yes — A13 |
+| Media key rotation after **1 hour** | **Not yet** — no media path; Phase 4 |
+
 ## 4. Negative cases called out explicitly (where bugs hide)
 
 | Case | Covered by |
@@ -252,6 +275,7 @@ one A17-S test.
 | **INV12** 3 failures rotate OTP and notify | A02 | **Full** | — |
 | **INV13** unattended password ≥ 12 chars, NFKC | A30 (policy function) | **Full** for the policy | Unattended mode itself is post-v0.1; its use of the policy is tested then |
 | **INV14** no `unsafe` outside FFI; SAFETY comments | A31 + existing lints | **Full** | — |
+| **INV15** one-time password used once (added 2026-10-18) | A36 | **Full** | — |
 
 **Gaps (not dropped, scheduled):** INV2 (real media path), INV9, INV10, INV11
 (automated part only partial). Added to docs/roadmap.md "Known gaps".

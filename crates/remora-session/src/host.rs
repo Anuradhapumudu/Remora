@@ -135,6 +135,13 @@ pub enum HostAction {
         /// Password attempt number counted for it (`n/3`), if any.
         attempt: Option<u32>,
     },
+    /// The one-time password was used: a viewer proved it (Noise msg1
+    /// authenticated), so it is consumed and a new one is already in effect
+    /// — show [`Host::otp`] (INV15). Emitted once per password-mode session.
+    OtpUsed {
+        /// The session that used it.
+        id: SessionId,
+    },
     /// Three failed attempts: a new password is in effect; tell the user
     /// ("3 failed attempts — new password") and show [`Host::otp`].
     OtpRotated {
