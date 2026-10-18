@@ -26,6 +26,7 @@ tracing = { workspace = true }
 remora-testkit = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time", "net", "sync"] }
 prost = { workspace = true }
+bytes = { workspace = true }
 
 [lints]
 workspace = true

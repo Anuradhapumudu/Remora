@@ -18,6 +18,12 @@ examine_globs = [
     "crates/remora-crypto/src/**/*.rs",
     # remora-session: state machine, approval gate, attempt limiter (§7).
     "crates/remora-session/src/**/*.rs",
+    # remora-net: the handshake driver (§7) - host driver, stream framing /
+    # exporter / close codes, and the A04 timing floor. TLS setup and the
+    # viewer driver are plumbing whose failures the session layer catches.
+    "crates/remora-net/src/host.rs",
+    "crates/remora-net/src/wire.rs",
+    "crates/remora-net/src/lib.rs",
 ]
 
 # Test-only modules inside src/ (they ARE the tests; mutating them is noise).

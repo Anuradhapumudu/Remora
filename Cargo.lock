@@ -1213,6 +1213,7 @@ version = "0.0.1"
 name = "remora-net"
 version = "0.0.1"
 dependencies = [
+ "bytes",
  "prost",
  "quinn",
  "rand_core 0.6.4",

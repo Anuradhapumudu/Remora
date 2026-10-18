@@ -64,6 +64,10 @@ jobs:
         # timeouts so nobody mistakes them for a clean run.
         env:
           CRATE: ${{ matrix.crate }}
+          # The A04 timing test only has to notice a missing or broken floor
+          # here (any single sample shows it); the 200-sample criteria run
+          # is the separate "A04 timing" workflow.
+          A04_SAMPLES: "3"
         run: |
           set +e
           cargo mutants --no-shuffle -p "$CRATE" -o mutants-out
