@@ -10,6 +10,7 @@ on:
   pull_request:
     paths:
       - "crates/remora-proto/**"
+      - "crates/remora-crypto/**"
       - "fuzz/**"
 
 permissions:
@@ -22,7 +23,17 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target: [connection_code, frame_decoder, messages, datagram_header]
+        target:
+          [
+            connection_code,
+            frame_decoder,
+            messages,
+            datagram_header,
+            identity_cert,
+            pake_message,
+            handshake_payload,
+            media_open,
+          ]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

@@ -74,6 +74,16 @@ wrapper, and (c) the Noise layer catching any key mismatch.
 | C18 | "3 attempts ⇒ 3/10⁶ per password" (§6.1) | ✅ | Arithmetic. |
 | C19 | "SpakeA/B are 33 bytes" (protocol §3) | ✅ | `finish()` requires `1 + 32` bytes (side byte + compressed point). |
 
+## 2b. Findings while building remora-crypto (2026-10-18)
+
+| # | Claim / question | Status | Evidence |
+|---|---|---|---|
+| C20 | "The `spake2` crate omits the small-order check *that python-spake2 also omits*" (implicit in §1) | ❌ → corrected | Read python-spake2 0.9 (PyPI sdist, sha256 `421fc4a8…a9334`), `src/spake2/ed25519_basic.py` `bytes_to_element`: it **rejects** the identity and any point with `L·P ≠ 0`. The Rust port dropped that check. Our A32 validator restores exactly this behaviour (plus a canonical-encoding check). |
+| C21 | M and N are "nothing-up-my-sleeve" constants (A33) | ✅ reproduced | Same sdist, `params.py` / `groups.py` / `ed25519_basic.py`: `HKDF-SHA256(salt="", ikm=b"M"/b"N"/b"symmetric", info="SPAKE2 arbitrary element", L=48)`, big-endian mod p, try-and-increment with the even x root, multiply by 8. Re-derived twice, independently: a stdlib-only Python script (integer arithmetic) and the Rust test `pake::a33_constants` (curve25519-dalek). Both give exactly the crate's M = `15cfd18e…a02312`, N = `f04f2e7e…e583c3`, S = `6f00dae8…b8e6f1`. This shows the crate uses hash-derived points; it does not prove try-and-increment hashing is sound (standard argument, not re-proven here). |
+| C22 | "snow's own Noise test vectors cover our patterns" (A34) | ⚠️ partial | Ran snow 0.10.0's `tests/vectors.rs` with `--features vector-tests` on an unmodified copy of the registry source: 3/3 pass (`snow`, `snow_extended`, `cacophony`). Coverage of **our** patterns: `Noise_XX_25519_ChaChaPoly_BLAKE2s` — 1 vector in `snow.txt`, 1 in `cacophony.txt`. `Noise_XXpsk0_25519_ChaChaPoly_BLAKE2s` — **0 vectors**; only `XXpsk0+psk1`, `+psk2`, `+psk3`, `+psk1+psk2+psk3` variants. So the psk0 code path is exercised, our exact pattern is not. Gap: a cross-implementation vector for `XXpsk0` (another Noise implementation) before v1.0. |
+| C23 | "Device ID shown as a 9-digit code + checksum" (protocol §3.2) | ❌ → open | 9 decimal digits hold ~30 bits, the ID is 80. Marked open in protocol.md; owner decision needed before the CLI step. |
+| C24 | "`decompress` rejects non-canonical encodings" (would have been an easy assumption) | ❌ (not assumed) | curve25519-dalek 4.1.3 `edwards.rs` `decompress` + `field.rs` `from_bytes`: accepts `y ≥ p` (reduced) and the sign bit on x = 0. Our validator re-compresses and compares. An independent enumeration found 8 canonical + 6 non-canonical encodings of small-order points, and no torsion-free point has a non-canonical encoding (only y < 19 can be written as y + p). |
+
 ## 3. What changes in the docs
 
 * threat-model.md: §6.1, §4.2, §7.6, §7.7 and §9 updated per C1, C2, C11, C12

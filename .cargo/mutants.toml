@@ -12,6 +12,16 @@ examine_globs = [
     "crates/remora-proto/src/datagram.rs",
     "crates/remora-proto/src/frame.rs",
     "crates/remora-proto/src/messages.rs",
+    # remora-crypto: all of it (phase3-criteria §7), explicitly including the
+    # A32 element validator (src/pake/validate.rs) — a security control that
+    # compensates for a check the spake2 crate does not perform.
+    "crates/remora-crypto/src/**/*.rs",
+]
+
+# Test-only modules inside src/ (they ARE the tests; mutating them is noise).
+exclude_globs = [
+    "crates/remora-crypto/src/pake/a33_constants.rs",
+    "crates/remora-crypto/src/noise/tests.rs",
 ]
 
 # Justified exclusions (regex over mutant names), one line of reason each.

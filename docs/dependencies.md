@@ -33,9 +33,11 @@ once a workspace member actually uses it.
 | spake2 | 0.4.0 | 0.4.0 | crypto | PAKE. **Not independently audited** (threat model §9). 0.5.0-pre exists — not used |
 | ed25519-dalek | 2.2 | 2.2.0 | crypto | Identity keys. 3.0.0 exists but is on the next RustCrypto generation (D3) |
 | chacha20poly1305 | 0.10 | 0.10.1 | crypto | Media AEAD (same version snow uses) |
+| curve25519-dalek | 4.1.3 | 4.1.3 | crypto | **Only** for validating received SPAKE2 elements (A32: decompress, canonical re-encoding, `is_small_order`, `is_torsion_free`) and X25519 public keys (`MontgomeryPoint::mul_base_clamped`). Already in the graph via spake2/ed25519-dalek/snow; same single version (D3). 5.0.0 is the next generation |
+| unicode-normalization | 0.1.25 | 0.1.25 (0.1.26 of 2026-10-16 < 14 days) | crypto | NFKC + `is_combining_mark` for the unattended-password policy (A30). License `(MIT OR Apache-2.0) AND Unicode-3.0` — both allowed |
 | hkdf / sha2 / blake2 | 0.12 / 0.10 / 0.10 | — | crypto | Key derivation, hashes |
 | rand_core | 0.6 (`getrandom`) | 0.6.4 | crypto | OS CSPRNG (`OsRng`) |
-| zeroize | 1.8 | 1.9.1 | crypto | Wipe secrets on drop |
+| zeroize | 1.8 | **1.9.0** (1.9.1 of 2026-10-06 was < 14 days old when first locked on 2026-10-18; this table previously said 1.9.1 — corrected) | crypto | Wipe secrets on drop |
 | subtle | 2.6 | 2.6.1 | crypto | Constant-time comparison |
 | keyring | 4.2 | 4.2.0 | crypto (key storage) | OS keychain. **v4 API differs from v3** (split into `keyring-core` + per-OS stores) — re-verify in Phase 3 |
 | is | 0.11.1 | 0.11.1 | net | Sans-IO ICE agent from str0m (nat-traversal.md §3). Pin exact minor; frequent breaking releases |
@@ -59,6 +61,14 @@ once a workspace member actually uses it.
 | anyhow | 1.0 | — | binaries only | Error plumbing in `main` |
 | clap | 4.6 | — | binaries | CLI flags (`--test-pattern`, …) |
 | criterion | 0.8.2 | — | benches | Benchmarks |
+
+## Transitive locks (2026-10-18, remora-crypto landing)
+
+Adding remora-crypto resolved 70 new packages; each was checked against its
+crates.io release date. Three were < 14 days old and were locked to the
+previous release, in both `Cargo.lock` and `fuzz/Cargo.lock`:
+`cc` 1.8.0 → **1.6.0** (1.7.0 was also < 14 days), `libc` 0.2.191 →
+**0.2.190**, `zeroize` 1.9.1 → **1.9.0**.
 
 ## Known duplicate versions (accepted)
 

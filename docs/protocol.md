@@ -79,7 +79,7 @@ Viewer (initiator)                                       Host (responder)
  │ ◀─────── msg2: e, ee, s, es  + payload {IdentityCert_h, C_r}          │
  │    msg3: s, se + payload {IdentityCert_v, n_i}               ───────▶ │
  │ ◀─────── first transport msg: SasReveal {n_r}                         │
- │    viewer checks BLAKE2s(n_r) == C_r                                  │
+ │    viewer checks n_r against C_r (§3.3)                               │
  │    both display SAS                                                   │
  │ ◀─────── SessionPending (host shows accept prompt)                    │
  │ ◀─────── SessionAccept{role, media key announce} | SessionReject      │
@@ -90,9 +90,10 @@ Viewer (initiator)                                       Host (responder)
 
 ```
 exporter  = QUIC.export_keying_material(len = 32, label = "EXPORTER-remora/1", context = "")
-transcript= BLAKE2s(ViewerHello_bytes ‖ HostHello_bytes ‖ SpakeA ‖ SpakeB)
+hellos    = u32_be(len VH) ‖ ViewerHello_bytes ‖ u32_be(len HH) ‖ HostHello_bytes
+transcript= BLAKE2s(hellos ‖ SpakeA ‖ SpakeB)
 psk       = HKDF-SHA256(salt = exporter, ikm = K, info = "remora/1/noise-psk" ‖ transcript)
-prologue  = "remora/1" ‖ exporter ‖ BLAKE2s(ViewerHello_bytes ‖ HostHello_bytes)
+prologue  = "remora/1" ‖ exporter ‖ BLAKE2s(hellos)
 ```
 
 * **SPAKE2** behind Remora's own `Pake` abstraction (implementation: `spake2`
@@ -103,25 +104,45 @@ prologue  = "remora/1" ‖ exporter ‖ BLAKE2s(ViewerHello_bytes ‖ HostHello_
   `id_a = "remora/1/viewer"`; `id_b = "remora/1/host:" ‖ host_device_id ‖ nonce`.
 * Binding the **exporter** into the prologue means a MITM at the QUIC layer
   (two different TLS sessions) produces different prologues → Noise fails.
-* Binding the **hellos** prevents tampering with version/mode selection.
+* Binding the **hellos** prevents tampering with version/mode selection. They
+  are **length-prefixed** so no byte can move from one hello to the other
+  without changing the hash (architecture.md D22; test A08).
 * `psk0` means a wrong password fails when the host decrypts message 1; the
   host never sends its identity to a peer that doesn't know the password.
 
 ### 3.2 Identity certificate (inside Noise msg2 / msg3 payloads)
 
-```
-IdentityCert { ed25519_pub: [u8;32], noise_static_pub: [u8;32],
-               device_name: string (≤ 64 bytes UTF-8), created_unix: u64,
-               sig: Ed25519(ed25519_priv, "remora/1/cert" ‖ noise_static_pub ‖ device_name ‖ created_unix) }
-```
+Fixed binary layout (architecture.md D22), at most 137 + 64 = 201 bytes:
+
+| Field | Size | Notes |
+|---|---|---|
+| `ed25519_pub` | 32 | signer |
+| `noise_static_pub` | 32 | X25519 key this cert vouches for |
+| `created_unix` | 8 | u64 big-endian, informational |
+| `name_len` | 1 | ≤ 64 |
+| `device_name` | `name_len` | UTF-8, display only (untrusted text) |
+| `sig` | 64 | Ed25519 over `"remora/1/cert" ‖ noise_static_pub ‖ name_len ‖ device_name ‖ u64_be(created_unix)` |
+
+The signed message does not repeat `ed25519_pub`: Ed25519 already hashes the
+public key into every signature. Parsing checks every length before
+allocating; a cert with trailing bytes is rejected.
+
+**Noise payloads:** msg2 = `IdentityCert_h ‖ C_r` (32 B), msg3 =
+`IdentityCert_v ‖ n_i` (32 B). The cert's `name_len` frames it; the payload
+must be exactly cert + 32 bytes, otherwise `ProtocolViolation`.
 
 The receiver verifies (a) the signature, (b) `noise_static_pub` equals the Noise
 remote static key just authenticated, (c) in Trusted mode, `ed25519_pub` is
 pinned, and (d) when connecting by device ID, that `DeviceId(ed25519_pub)`
 matches.
 
-**Device ID** = first 80 bits of `BLAKE2s("remora/1/device-id" ‖ ed25519_pub)`,
-shown as a 9-digit group code + checksum digit, e.g. `482 913 557-3`.
+**Device ID** = first 80 bits of `BLAKE2s("remora/1/device-id" ‖ ed25519_pub)`.
+**Display format: open (owner decision needed).** The earlier text said "a
+9-digit group code + checksum digit, e.g. `482 913 557-3`", but 9 decimal
+digits hold only ~30 bits, not 80; showing all 80 bits in decimal takes 25
+digits. Either the shown code is shorter than the ID (and the routing
+service must then resolve collisions) or it is longer than 9 digits. Phase 3
+compares raw 10-byte IDs only; the text format is decided before the CLI step.
 (80 bits: forging an ID for *someone else's* key needs ~2⁸⁰ work; two keys of
 the *same* attacker can collide after ~2⁴⁰, which is harmless because IDs only
 route and the full key is always verified.)

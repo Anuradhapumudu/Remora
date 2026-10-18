@@ -13,6 +13,8 @@ cargo-fuzz = true
 [dependencies]
 libfuzzer-sys = "=0.4.13"
 remora-proto = { path = "../crates/remora-proto" }
+remora-crypto = { path = "../crates/remora-crypto" }
+rand_core = { version = "0.6", features = ["getrandom"] }
 
 [workspace]
 members = ["."]
@@ -41,6 +43,34 @@ bench = false
 [[bin]]
 name = "datagram_header"
 path = "fuzz_targets/datagram_header.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "identity_cert"
+path = "fuzz_targets/identity_cert.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "pake_message"
+path = "fuzz_targets/pake_message.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "handshake_payload"
+path = "fuzz_targets/handshake_payload.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "media_open"
+path = "fuzz_targets/media_open.rs"
 test = false
 doc = false
 bench = false
