@@ -29,4 +29,11 @@ jobs:
       - name: A04 timing (200 samples per type)
         env:
           A04_SAMPLES: "200"
-        run: cargo test --release --locked -p remora-net --test a04_timing -- --nocapture
+        run: |
+          cargo test --release --locked -p remora-net --test a04_timing -- --nocapture 2>&1 | tee a04.log
+          # The run is the statistical evidence only if it really had 200
+          # samples for all 9 measurements (7 types + the A/A pair).
+          runs=$(grep -c "n=200 " a04.log || true)
+          echo "measurements with n=200: $runs"
+          [ "$runs" -eq 9 ]
+          grep -q "A/A control" a04.log

@@ -89,9 +89,17 @@ security first). Each exception is one line in
 `.cargo/crate-age-exceptions.txt` (`crate version RUSTSEC-ID…`) and is
 **verified by the CI check against the RustSec advisory database** (same
 package, version listed as a `>=` patched bound), never trusted. Exceptions
-are reported as stale once the release is 14 days old. Current: `rustls
-0.23.46` (RUSTSEC-2026-0346…0349). Owner approval of this mechanism: pending
-(2026-10-18).
+**expire** once the release is 14 days old: the check then fails until the
+line is deleted, and it validates every exception on every run, not only
+crates in the current diff. Owner-approved 2026-10-18 (D30) on exactly these
+terms: per crate, per version, per advisory ID; never a standing "security
+fixes bypass the rule" flag.
+
+**Exception log** (every use, auditable):
+
+| Date | Crate | Version | Advisories fixed | Released | Expires (14 days) | Removed |
+|---|---|---|---|---|---|---|
+| 2026-10-18 | rustls | 0.23.46 | RUSTSEC-2026-0346, -0347, -0348, -0349 | 2026-10-14 | 2026-10-28 | — |
 
 **Remembering the rule was not enough.** When the check first ran over the
 phase-3 branch it found five more violations that earlier steps had locked

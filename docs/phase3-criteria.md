@@ -67,7 +67,7 @@ Each row: the attack, how the test stages it, and the **required** outcome.
 | **A02** | **Three** wrong passwords in a row | 3rd failure rotates the OTP (old one rejected even if now guessed right), host UI event "3 failed attempts — new password", cool-down starts at 30 s and doubles; a correct new-password attempt during cool-down → `RateLimited` / `RATE_LIMITED`. |
 | **A03** | **Parallel guessing**: 50 simultaneous connections with different guesses | At most 4 handshakes pending at once (others closed `RATE_LIMITED` before any crypto); attempts are counted **globally per OTP**, so the 3-attempt limit holds across connections; ≤ 10 attempts/min per source IP. |
 | **A04** | **Error oracle** (bytes and timing) | See §3.1a. |
-| **A36** | **Reuse of a one-time password** (added 2026-10-18, owner; INV15): complete a session with the password, then reconnect with the same password; also try it concurrently while the first session is active, and after sessions that ended by deny, prompt timeout, disconnect, or a later handshake error | Every reuse fails at Noise msg1 with `AuthFailed`; no prompt is shown. The host emits `OtpUsed` once per password-mode session and a new password is in effect immediately. Wrong-password attempts do not consume the code (INV12 unchanged). Trusted-mode sessions do not touch it. |
+| **A36** | **Reuse of a one-time password** (required cases, owner: reconnect after success — `inv15_successful_session_then_same_password_fails`; concurrent session with the same password — `inv15_same_password_cannot_open_a_second_session_while_the_first_is_active`; reconnect after a denied prompt — `inv15_after_a_denied_prompt_the_same_password_fails`) (added 2026-10-18, owner; INV15): complete a session with the password, then reconnect with the same password; also try it concurrently while the first session is active, and after sessions that ended by deny, prompt timeout, disconnect, or a later handshake error | Every reuse fails at Noise msg1 with `AuthFailed`; no prompt is shown. The host emits `OtpUsed` once per password-mode session and a new password is in effect immediately. Wrong-password attempts do not consume the code (INV12 unchanged). Trusted-mode sessions do not touch it. |
 
 #### 3.1a A04 in detail — what may and may not be distinguishable
 
@@ -91,6 +91,14 @@ The requirement is therefore per step:
   ever exceeds 150 ms the host logs an anomaly (the floor would stop hiding it).
   Chosen over "measure and prove overlap" because a floor removes the signal by
   construction instead of hoping a measurement is sensitive enough.
+* **Which job carries this claim:** **only** the `A04 timing` workflow
+  (`.github/workflows/timing.yml`: 200 samples per type, release build,
+  nightly and on PRs touching net/session/crypto). It checks its own output
+  has 9 measurements of n = 200. The 3-sample run inside the mutation gate
+  only proves the floor exists (a missing floor shows in any sample) and
+  proves **nothing** statistical. Because everything else would stay green
+  if that workflow stopped running, the CI job `a04-evidence-fresh` fails
+  when it has no successful run in the last 48 hours.
 * **Test:** for each failure type of a step, 200 handshakes over loopback;
   record time from sending the failing message to receiving the close.
   **PASS** if every sample is ≥ 200 ms and ≤ 200 ms + 25 ms, and the medians of

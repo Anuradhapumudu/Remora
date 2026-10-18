@@ -201,3 +201,24 @@ fn inv15_trusted_sessions_do_not_touch_the_password() {
             .any(|a| matches!(a, HostAction::OtpUsed { .. }))
     );
 }
+
+#[test]
+fn inv15_after_a_denied_prompt_the_same_password_fails() {
+    // Owner (2026-10-18): one of the three required cases, named on its own.
+    // The password was proven before the prompt, so denying does not give
+    // it back: the user needs a fresh code (a Phase 7 UI requirement makes
+    // that obvious instead of looking like a bug).
+    let (h, v) = (device("host"), device("viewer"));
+    let mut host = host_with(&h, vec![]);
+    let otp = host.otp().clone();
+    let mut c = to_prompt(&mut host, &v, ip(1));
+    let acts = host.deny(c.id);
+    c.host_actions(&mut host, acts);
+    assert_eq!(c.log.viewer_failure(), Some(FailReason::Rejected));
+    let retry = reuse(&mut host, &v, &otp, 2, T0);
+    assert_eq!(retry.log.host_close(), Some(CloseCode::AuthFailed));
+    assert!(retry.log.prompt().is_none());
+    // The fresh code works.
+    let fresh = to_prompt(&mut host, &v, ip(3));
+    assert!(fresh.log.prompt().is_some());
+}

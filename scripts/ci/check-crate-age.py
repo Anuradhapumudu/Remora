@@ -122,6 +122,33 @@ def exception_holds(name, version, ids, fetch_adv):
     return None
 
 
+def check_exceptions(exceptions, fetch, now, fetch_adv=None, pause=1.0):
+    """Validate EVERY exception line, whether or not its crate changed in
+    this diff (owner condition, D28): each one applies to exactly one crate,
+    one version and its listed advisories, and EXPIRES once that release is
+    14 days old - then the line must be deleted, so none can linger."""
+    failures = []
+    for i, ((name, version), ids) in enumerate(sorted(exceptions.items())):
+        if i and pause:
+            time.sleep(pause)
+        try:
+            created = fetch(name, version)
+        except RuntimeError as e:
+            failures.append(f"UNVERIFIED exception {name} {version}: {e}")
+            continue
+        age = now - created
+        if age >= MIN_AGE:
+            failures.append(
+                f"EXPIRED   exception {name} {version} ({age.days} days old): delete its line "
+                "from .cargo/crate-age-exceptions.txt (the 14-day rule now covers it)"
+            )
+            continue
+        why_not = exception_holds(name, version, ids, fetch_adv or fetch_advisory)
+        if why_not is not None:
+            failures.append(f"BAD EXCEPTION {name} {version}: {why_not}")
+    return failures
+
+
 def check(entries, fetch, now, pause=1.0, exceptions=None, fetch_adv=None):
     """Return a list of failure messages for entries younger than MIN_AGE."""
     exceptions = exceptions or {}
@@ -136,14 +163,10 @@ def check(entries, fetch, now, pause=1.0, exceptions=None, fetch_adv=None):
             continue
         age = now - created
         ids = exceptions.get((name, version))
-        if ids and age >= MIN_AGE:
-            print(f"STALE     exception for {name} {version} ({age.days} days old): remove it")
         if ids and age < MIN_AGE:
-            why_not = exception_holds(name, version, ids, fetch_adv or fetch_advisory)
-            if why_not is None:
-                print(f"EXCEPTED  {name} {version} ({age.days} days): security fix for {', '.join(ids)}")
-                continue
-            failures.append(f"BAD EXCEPTION {name} {version}: {why_not}")
+            # Validity of the exception itself is checked by
+            # check_exceptions(), which runs on every exception every time.
+            print(f"EXCEPTED  {name} {version} ({age.days} days): security fix for {', '.join(ids)}")
             continue
         if age < MIN_AGE:
             failures.append(
@@ -197,17 +220,29 @@ def self_test():
         return advisories[(name, advisory_id)]
 
     def run(ids):
-        return check(entries, fake, now, pause=0, exceptions={("fresh", "2.0.0"): ids}, fetch_adv=fake_adv)
+        exc = {("fresh", "2.0.0"): ids}
+        return check_exceptions(exc, fake, now, fetch_adv=fake_adv, pause=0) + check(
+            entries, fake, now, pause=0, exceptions=exc, fetch_adv=fake_adv
+        )
 
     ok = sorted(re.match(r"(?:TOO NEW|UNVERIFIED) +(\S+)", f).group(1) for f in run(["RUSTSEC-2026-0001"]))
     assert ok == ["edge-new", "missing"], ok
     for bad_ids in (["RUSTSEC-2026-0002"], ["RUSTSEC-2026-0003"], ["RUSTSEC-2026-0009"],
                     ["RUSTSEC-2026-0001", "RUSTSEC-2026-0002"]):
         assert any(f.startswith("BAD EXCEPTION fresh") for f in run(bad_ids)), bad_ids
+    # An exception expires once its release is 14 days old: it must fail
+    # (forcing the line's removal), even if that crate is not in the diff.
+    expired = check_exceptions({("old", "1.0.0"): ["RUSTSEC-2026-0001"]}, fake, now, fetch_adv=fake_adv, pause=0)
+    assert len(expired) == 1 and expired[0].startswith("EXPIRED"), expired
+    # An exception only covers its own version: the same crate at another
+    # version is still TOO NEW.
+    other = check({("fresh", "2.0.1")}, lambda n, v: now - dt.timedelta(days=1), now, pause=0,
+                  exceptions={("fresh", "2.0.0"): ["RUSTSEC-2026-0001"]}, fetch_adv=fake_adv)
+    assert len(other) == 1 and other[0].startswith("TOO NEW"), other
     # Diffing: an entry present at the base is not re-checked.
     base = lock.split("[[package]]\nname = \"fresh\"")[0]
     assert ("fresh", "2.0.0") in registry_entries(lock) - registry_entries(base)
-    print("self-test: ok (planted too-new, edge, unverifiable entries and bad exceptions all caught)")
+    print("self-test: ok (planted too-new, edge, unverifiable entries, bad, expired and wrong-version exceptions all caught)")
 
 
 def main():
@@ -231,7 +266,9 @@ def main():
         entries |= head
     print(f"checking {len(entries)} newly locked registry package(s)")
     exceptions = load_exceptions(".cargo/crate-age-exceptions.txt")
-    failures = check(entries, fetch_created_at, dt.datetime.now(dt.timezone.utc), exceptions=exceptions)
+    now = dt.datetime.now(dt.timezone.utc)
+    failures = check_exceptions(exceptions, fetch_created_at, now)
+    failures += check(entries, fetch_created_at, now, exceptions=exceptions)
     for f in failures:
         print(f, file=sys.stderr)
     if failures:

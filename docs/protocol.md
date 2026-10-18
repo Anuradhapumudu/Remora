@@ -206,6 +206,7 @@ where `h` is the final Noise handshake hash. Rationale: threat model §6.3.
 | Wrong password | Host: Noise msg1 decryption fails → counts one attempt → closes connection with generic `AuthFailed`. No timing difference between "unknown device" and "wrong password" paths. |
 | 3rd failure | Password rotates; host UI notified; cool-down starts. |
 | Commitment mismatch | Viewer aborts with `ProtocolViolation`. |
+| Host user denies (or the prompt times out) | `SessionReject`. The one-time password was **already consumed** when the viewer proved it (INV15), so a retry needs a **fresh code** from the host. **UI requirement (Phase 7, owner):** both sides must say so plainly — viewer: "The host declined. Ask for a new code to try again."; host: show the new code — so it does not look like the old code is broken. |
 | Any message too large / malformed | Close with `ProtocolViolation`. |
 | Handshake not complete in 10 s | Close with `Timeout`. |
 | Host user does not answer prompt in 60 s | `SessionReject{reason = Timeout}`. |
