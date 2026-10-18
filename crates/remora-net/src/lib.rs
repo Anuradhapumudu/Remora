@@ -27,7 +27,9 @@ use std::time::Duration;
 pub use host::{HostEvent, HostServer};
 pub use tls::{ALPN, SERVER_NAME, client_config, server_config};
 pub use viewer::{ViewerClient, ViewerEvent, connect};
-pub use wire::{FramedStream, close, close_code_of, exporter, to_varint};
+pub use wire::{
+    FrameReceiver, FrameSender, FramedStream, close, close_code_of, exporter, to_varint,
+};
 
 /// Minimum time between a failing message's arrival and the host's
 /// `AUTH_FAILED` close (phase3-criteria §3.1a).
@@ -74,6 +76,7 @@ pub fn floor_deadline(
     arrival: tokio::time::Instant,
     decided: tokio::time::Instant,
 ) -> (tokio::time::Instant, bool) {
-    let _ = (arrival, decided);
-    todo!()
+    let deadline = (arrival + AUTH_FAILURE_FLOOR).max(decided);
+    let anomaly = decided.saturating_duration_since(arrival) >= TIMING_ANOMALY;
+    (deadline, anomaly)
 }

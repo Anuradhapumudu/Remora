@@ -234,3 +234,61 @@ async fn a04_bytes_auth_failed_close_has_an_empty_reason_phrase() {
         other => panic!("{other:?}"),
     }
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn dropping_the_host_server_closes_its_connections() {
+    // Mutation-gate finding: the accept loop holds its own endpoint handle,
+    // so without an explicit close on drop, live sessions would outlive
+    // the server object (the "session active" indicator would be gone
+    // while the session is not).
+    let (h, v) = (device("host"), device("viewer"));
+    let mut host = start_host(&h, vec![]).await;
+    let nonce = host.server.issue_nonce(Duration::from_secs(300));
+    let (_client, mut vev) = connect(
+        host.addr,
+        viewer_cfg(&v, password(&host.server.otp())),
+        nonce,
+    )
+    .await
+    .unwrap();
+    let Some(HostEvent::Prompt { id, sas, .. }) = host
+        .wait_for(5, |e| matches!(e, HostEvent::Prompt { .. }))
+        .await
+    else {
+        panic!("no prompt")
+    };
+    host.server.approve(id, sas).unwrap();
+    assert!(
+        viewer_wait(&mut vev, 5, |e| *e == ViewerEvent::Active)
+            .await
+            .is_some()
+    );
+    drop(host);
+    let closed = viewer_wait(&mut vev, 3, |e| matches!(e, ViewerEvent::Closed { .. })).await;
+    assert!(
+        matches!(
+            closed,
+            Some(ViewerEvent::Closed {
+                remote: Some(CloseCode::Normal),
+                ..
+            })
+        ),
+        "{closed:?}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn debug_output_names_the_type_and_holds_no_secrets() {
+    let h = device("host");
+    let host = start_host(&h, vec![]).await;
+    let otp = host.server.otp();
+    let shown = format!("{:?}", host.server);
+    assert!(shown.starts_with("HostServer"), "{shown}");
+    assert!(!shown.contains(otp.reveal()));
+    let (_ep, conn, stream) = raw_connect(host.addr).await;
+    assert!(format!("{stream:?}").starts_with("FramedStream"));
+    let (tx, rx) = stream.split();
+    assert!(format!("{tx:?}").starts_with("FrameSender"));
+    assert!(format!("{rx:?}").starts_with("FrameReceiver"));
+    drop(conn);
+}

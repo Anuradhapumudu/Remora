@@ -50,13 +50,12 @@ async fn a10_tampered_frame_after_active_closes_with_protocol_violation() {
             if s.state() == remora_session::State::Active {
                 break;
             }
-            if s.state() == remora_session::State::PendingApproval {
-                if let Some(HostEvent::Prompt { id, sas, .. }) = host
+            if s.state() == remora_session::State::PendingApproval
+                && let Some(HostEvent::Prompt { id, sas, .. }) = host
                     .wait_for(5, |e| matches!(e, HostEvent::Prompt { .. }))
                     .await
-                {
-                    host.server.approve(id, sas).unwrap();
-                }
+            {
+                host.server.approve(id, sas).unwrap();
             }
             let f = stream.recv_frame().await.unwrap().unwrap();
             pending = s.on_frame(&f, remora_session::Millis(0), &mut rand_core::OsRng);
@@ -130,7 +129,9 @@ async fn a24_slowloris_is_closed_with_timeout_after_10_s() {
     );
 }
 
-#[tokio::test(flavor = "multi_thread")]
+// Single-threaded runtime on purpose: LogCapture is a thread-local
+// subscriber, so every task must run on this test's thread to be captured.
+#[tokio::test]
 async fn logging_one_warn_per_failure_with_details_and_no_secrets() {
     let capture = LogCapture::start();
     let (h, v) = (device("host"), device("viewer"));

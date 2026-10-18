@@ -236,6 +236,9 @@ pub enum Dir {
     HostToViewer,
 }
 
+/// Frames seen by the MITM, in order.
+pub type Transcript = Arc<Mutex<Vec<(Dir, Vec<u8>)>>>;
+
 pub type Tap = Arc<Mutex<dyn FnMut(Dir, usize, Vec<u8>) -> Vec<Vec<u8>> + Send>>;
 
 /// A QUIC-layer man in the middle: terminates TLS towards the viewer (as a
@@ -243,14 +246,14 @@ pub type Tap = Arc<Mutex<dyn FnMut(Dir, usize, Vec<u8>) -> Vec<Vec<u8>> + Send>>
 /// client), relaying stream-0 frames through `tap`, and relaying close codes.
 pub struct Mitm {
     pub addr: SocketAddr,
-    pub transcript: Arc<Mutex<Vec<(Dir, Vec<u8>)>>>,
+    pub transcript: Transcript,
     _ep: quinn::Endpoint,
 }
 
 pub async fn start_mitm(target: SocketAddr, tap: Tap) -> Mitm {
     let ep = quinn::Endpoint::server(remora_net::server_config().unwrap(), loopback()).unwrap();
     let addr = ep.local_addr().unwrap();
-    let transcript: Arc<Mutex<Vec<(Dir, Vec<u8>)>>> = Arc::new(Mutex::new(Vec::new()));
+    let transcript: Transcript = Arc::new(Mutex::new(Vec::new()));
     let ep2 = ep.clone();
     let t2 = transcript.clone();
     tokio::spawn(async move {

@@ -2,12 +2,20 @@
 
 use std::net::SocketAddr;
 
+use rand_core::OsRng;
 use remora_crypto::identity::IdentityCert;
 use remora_crypto::sas::Sas;
-use remora_session::{AppMessage, CloseCode, FailReason, Step, ViewerConfig};
+use remora_session::{
+    AppMessage, CloseCode, FailReason, Millis, Step, ViewerAction, ViewerConfig, ViewerSession,
+};
+use std::time::Duration;
 use tokio::sync::mpsc;
 
-use crate::NetError;
+use tokio::time::Instant;
+
+use crate::{
+    FramedStream, NetError, SERVER_NAME, TICK, client_config, close, close_code_of, exporter,
+};
 
 /// What the viewer UI / CLI is told.
 #[derive(Debug, Clone, PartialEq)]
@@ -58,8 +66,103 @@ pub async fn connect(
     config: ViewerConfig,
     nonce: [u8; 16],
 ) -> Result<(ViewerClient, mpsc::UnboundedReceiver<ViewerEvent>), NetError> {
-    let _ = (addr, config, nonce);
-    todo!()
+    let local: SocketAddr = if addr.is_ipv4() {
+        (std::net::Ipv4Addr::UNSPECIFIED, 0).into()
+    } else {
+        (std::net::Ipv6Addr::UNSPECIFIED, 0).into()
+    };
+    let mut endpoint = quinn::Endpoint::client(local)?;
+    endpoint.set_default_client_config(client_config()?);
+    let conn = endpoint.connect(addr, SERVER_NAME)?.await?;
+    let ex = exporter(&conn)?;
+    let (send, recv) = conn.open_bi().await?;
+    let stream = FramedStream::new(send, recv);
+    let start = Instant::now();
+    let (session, first) = ViewerSession::start(config, nonce, ex, Millis(0));
+    let (events, rx) = mpsc::unbounded_channel();
+    let (commands, cmd_rx) = mpsc::unbounded_channel();
+    tokio::spawn(drive(
+        endpoint, conn, stream, session, first, events, cmd_rx, start,
+    ));
+    Ok((ViewerClient { commands }, rx))
+}
+
+fn now(start: Instant) -> Millis {
+    Millis(u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX))
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn drive(
+    _endpoint: quinn::Endpoint,
+    conn: quinn::Connection,
+    stream: FramedStream,
+    mut session: ViewerSession,
+    first: Vec<ViewerAction>,
+    events: mpsc::UnboundedSender<ViewerEvent>,
+    mut commands: mpsc::UnboundedReceiver<ViewerCommand>,
+    start: Instant,
+) {
+    let (mut tx, mut rx) = stream.split();
+    let mut tick = tokio::time::interval(TICK);
+    let mut pending = first;
+    loop {
+        // Perform the session's actions in order.
+        for action in std::mem::take(&mut pending) {
+            match action {
+                ViewerAction::Send(frame) => {
+                    let _ = tx.send_frame(&frame).await;
+                }
+                ViewerAction::Close(code) => {
+                    if code == CloseCode::Normal {
+                        // Orderly: give the Goodbye time to arrive (closing
+                        // at once discards unsent stream data); the host
+                        // closes as soon as it has it.
+                        let _ = tokio::time::timeout(Duration::from_secs(1), conn.closed()).await;
+                    }
+                    close(&conn, code);
+                    let _ = events.send(ViewerEvent::Closed {
+                        local: Some(code),
+                        remote: None,
+                    });
+                    return;
+                }
+                ViewerAction::ShowSas { sas, host } => {
+                    let _ = events.send(ViewerEvent::ShowSas { sas, host });
+                }
+                ViewerAction::Active => {
+                    let _ = events.send(ViewerEvent::Active);
+                }
+                ViewerAction::Deliver(msg) => {
+                    let _ = events.send(ViewerEvent::Deliver(msg));
+                }
+                ViewerAction::Failed { reason, step } => {
+                    let _ = events.send(ViewerEvent::Failed { reason, step });
+                }
+            }
+        }
+        tokio::select! {
+            frame = rx.recv_frame() => match frame {
+                Ok(Some(frame)) => pending = session.on_frame(&frame, now(start), &mut OsRng),
+                _ => {
+                    let err = conn.closed().await;
+                    let _ = events.send(ViewerEvent::Closed { local: None, remote: close_code_of(&err) });
+                    return;
+                }
+            },
+            dgram = conn.read_datagram() => match dgram {
+                Ok(d) => pending = session.on_datagram(&d),
+                Err(err) => {
+                    let _ = events.send(ViewerEvent::Closed { local: None, remote: close_code_of(&err) });
+                    return;
+                }
+            },
+            cmd = commands.recv() => match cmd {
+                Some(ViewerCommand::Input(input)) => pending = session.send_input(input).into_iter().collect(),
+                Some(ViewerCommand::Disconnect) | None => pending = session.disconnect(),
+            },
+            _ = tick.tick() => pending = session.tick(now(start)),
+        }
+    }
 }
 
 impl ViewerClient {
