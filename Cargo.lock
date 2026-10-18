@@ -1150,6 +1150,7 @@ version = "0.0.1"
 dependencies = [
  "rand_core 0.6.4",
  "remora-crypto",
+ "remora-proto",
  "remora-testkit",
  "thiserror",
  "zeroize",

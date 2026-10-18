@@ -12,6 +12,7 @@ license = "GPL-3.0-or-later"
 
 [dependencies]
 remora-crypto = { workspace = true }
+remora-proto = { workspace = true }
 rand_core = { workspace = true }
 thiserror = { workspace = true }
 zeroize = { workspace = true }
