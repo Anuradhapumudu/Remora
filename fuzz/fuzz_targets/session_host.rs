@@ -24,6 +24,8 @@ fuzz_target!(|data: &[u8]| {
         trusted: vec![key.public()],
     };
     let mut host = Host::new(config, &mut OsRng);
+    // A06: the hello must carry an issued nonce; the fuzzer can find this one.
+    host.issue_nonce([0; 16], Millis(u64::MAX));
     let ip = IpAddr::V4(Ipv4Addr::LOCALHOST);
     let Ok(id) = host.accept_connection(ip, Exporter::from_bytes([1; 32]), Millis(0), &mut OsRng) else {
         return;

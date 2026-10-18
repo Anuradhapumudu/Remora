@@ -239,7 +239,7 @@ with the same code.
 | Claim | Enforced? |
 |---|---|
 | OTP "one-time" (threat-model A4, §6.1) | **Now** — INV15 / A36 |
-| Connection-code nonce "single-use on the host" (protocol.md §2; threat-model replay rows) | **Not yet** — A06, built in step 5 (net); must land there |
+| Connection-code nonce "single-use on the host" (protocol.md §2; threat-model replay rows) | **Now** — A06 in remora-session (`Host::issue_nonce`, checked before SPAKE2; tests/a06_nonce.rs). Over QUIC re-tested in remora-net |
 | Fresh ephemeral keys and SAS nonces per handshake | Yes — A17-S5; `a17_sas_binds_the_handshake_transcript_not_only_the_nonces` |
 | "Fresh password" after 3 failures | Yes — A02 / INV12 |
 | One sender per media key; rotate at 2³² packets | Yes — A13 |

@@ -198,3 +198,25 @@ fn a06_trusted_mode_needs_an_issued_nonce_too() {
         Some(FailReason::AuthFailed(AuthDetail::UnknownNonce))
     );
 }
+
+#[test]
+fn a06_expiry_pruning_keeps_exactly_the_unexpired_nonces() {
+    // Mutation-gate finding: counting alone did not show WHICH nonces a
+    // tick keeps.
+    let (h, v) = (device("host"), device("viewer"));
+    let mut host = host_with(&h, vec![]);
+    host.issue_nonce([1; 16], Millis(T0.0 + 300_000));
+    host.issue_nonce([2; 16], Millis(T0.0 + 600_000));
+    host.tick(Millis(T0.0 + 1));
+    assert_eq!(host.outstanding_nonces(), 2, "nothing expired yet");
+    host.tick(Millis(T0.0 + 300_000));
+    assert_eq!(host.outstanding_nonces(), 1);
+    // The survivor is the later one, and it still works.
+    let c = connect_with_nonce(&mut host, &v, [2; 16], 1, Millis(T0.0 + 300_001));
+    assert!(c.log.prompt().is_some());
+    let gone = connect_with_nonce(&mut host, &v, [1; 16], 2, Millis(T0.0 + 300_001));
+    assert_eq!(
+        gone.log.host_failure(),
+        Some(FailReason::AuthFailed(AuthDetail::UnknownNonce))
+    );
+}

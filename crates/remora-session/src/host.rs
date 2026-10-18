@@ -1,6 +1,6 @@
 //! The host: admission, every host-side session, the approval gate.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::net::IpAddr;
 use std::sync::Arc;
 
@@ -214,6 +214,16 @@ pub struct Host {
     pub(crate) otp: Otp,
     pub(crate) limiter: Limiter,
     pub(crate) sessions: HashMap<SessionId, HostSession>,
+    /// Issued connection-code nonces, oldest first (A06).
+    pub(crate) nonces: VecDeque<IssuedNonce>,
+}
+
+/// One nonce the host put in an offer code.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct IssuedNonce {
+    pub(crate) nonce: [u8; 16],
+    pub(crate) expires: Millis,
+    pub(crate) used: bool,
 }
 
 impl std::fmt::Debug for Host {
@@ -235,6 +245,7 @@ impl Host {
             otp: generate_otp(rng),
             limiter: Limiter::new(),
             sessions: HashMap::new(),
+            nonces: VecDeque::new(),
         }
     }
 
@@ -247,13 +258,38 @@ impl Host {
     /// offer code). A `ViewerHello` must carry an issued, unused, unexpired
     /// nonce; each nonce authenticates at most one connection (A06).
     pub fn issue_nonce(&mut self, nonce: [u8; 16], expires: Millis) {
-        let _ = (nonce, expires);
+        self.nonces.push_back(IssuedNonce {
+            nonce,
+            expires,
+            used: false,
+        });
+        while self.nonces.len() > crate::MAX_OUTSTANDING_NONCES {
+            self.nonces.pop_front();
+        }
     }
 
     /// Issued nonces still held in memory (used ones are kept until they
     /// expire, so a replay is recognised as such).
     pub fn outstanding_nonces(&self) -> usize {
-        0
+        self.nonces.len()
+    }
+
+    /// Checks and consumes the hello's nonce (A06): issued, unexpired,
+    /// unused. Called before SPAKE2 starts.
+    fn take_nonce(&mut self, nonce: &[u8; 16], now: Millis) -> Result<(), FailReason> {
+        let entry = self
+            .nonces
+            .iter_mut()
+            .find(|n| n.nonce == *nonce)
+            .ok_or(FailReason::AuthFailed(AuthDetail::UnknownNonce))?;
+        if now >= entry.expires {
+            return Err(FailReason::Expired);
+        }
+        if entry.used {
+            return Err(FailReason::NonceReused);
+        }
+        entry.used = true;
+        Ok(())
     }
 
     /// The limiter (read-only, for the UI and tests).
@@ -367,6 +403,8 @@ impl Host {
     /// (60 s) of every session.
     pub fn tick(&mut self, now: Millis) -> Vec<HostAction> {
         let mut out = Vec::new();
+        // Expired nonces are forgotten; a replay of one is then simply unknown.
+        self.nonces.retain(|n| now < n.expires);
         let mut ids: Vec<SessionId> = self.sessions.keys().copied().collect();
         ids.sort();
         for id in ids {
@@ -537,6 +575,7 @@ impl Host {
         }
         let mut nonce = [0u8; 16];
         nonce.copy_from_slice(&hello.nonce); // length validated by decode_viewer_hello
+        self.take_nonce(&nonce, now).map_err(fail)?;
         let hh = HostHello {
             version: PROTOCOL_VERSION,
             host_device_id: self.device_id.as_bytes().to_vec(),
