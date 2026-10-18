@@ -307,3 +307,124 @@ fn inv11_viewer_disconnect_from_every_state() {
         let _ = host.disconnect(c.id);
     }
 }
+
+// ------------------------------------------- mutation-gate findings ----
+
+#[test]
+fn host_disconnect_of_an_active_session_says_goodbye_to_the_viewer() {
+    let (h, v) = (device("host"), device("viewer"));
+    let mut host = host_with(&h, vec![]);
+    let mut c = to_active(&mut host, &v, ip(1));
+    let acts = host.disconnect(c.id);
+    assert!(
+        acts.iter().any(|a| matches!(a, HostAction::Send { .. })),
+        "Goodbye sent"
+    );
+    c.host_actions(&mut host, acts);
+    assert_eq!(c.viewer.state(), State::Closed);
+    assert_eq!(c.log.viewer_close(), Some(CloseCode::Normal));
+    assert!(
+        c.log.viewer_failure().is_none(),
+        "an orderly close, not a failure"
+    );
+}
+
+#[test]
+fn host_disconnect_while_pending_says_goodbye_and_withdraws_the_prompt() {
+    let (h, v) = (device("host"), device("viewer"));
+    let mut host = host_with(&h, vec![]);
+    let mut c = to_prompt(&mut host, &v, ip(1));
+    let acts = host.disconnect(c.id);
+    assert!(acts.contains(&HostAction::PromptClosed { id: c.id }));
+    c.host_actions(&mut host, acts);
+    assert_eq!(c.log.viewer_close(), Some(CloseCode::Normal));
+}
+
+#[test]
+fn datagram_while_pending_withdraws_the_prompt_but_not_in_earlier_states() {
+    let (h, v) = (device("host"), device("viewer"));
+    let mut host = host_with(&h, vec![]);
+    let c = to_prompt(&mut host, &v, ip(1));
+    let acts = host.on_datagram(c.id, &[1; 64]);
+    assert!(acts.contains(&HostAction::PromptClosed { id: c.id }));
+    let mut host = host_with(&h, vec![]);
+    let id = host
+        .accept_connection(ip(2), exporter(7), T0, &mut OsRng)
+        .unwrap();
+    let acts = host.on_datagram(id, &[1; 64]);
+    assert!(
+        !acts
+            .iter()
+            .any(|a| matches!(a, HostAction::PromptClosed { .. })),
+        "no prompt was open"
+    );
+}
+
+#[test]
+fn datagrams_in_active_are_dropped_without_ending_the_session() {
+    let (h, v) = (device("host"), device("viewer"));
+    let mut host = host_with(&h, vec![]);
+    let mut c = to_active(&mut host, &v, ip(1));
+    assert!(host.on_datagram(c.id, &[3; 64]).is_empty());
+    assert_eq!(host.state(c.id), Some(State::Active));
+    assert!(c.viewer.on_datagram(&[1; 64]).is_empty());
+    assert_eq!(c.viewer.state(), State::Active);
+    c.viewer.disconnect();
+    assert!(
+        c.viewer.on_datagram(&[1; 64]).is_empty(),
+        "closed: nothing happens"
+    );
+}
+
+#[test]
+fn forget_drops_closed_sessions_only() {
+    let (h, v) = (device("host"), device("viewer"));
+    let mut host = host_with(&h, vec![]);
+    let live = to_prompt(&mut host, &v, ip(1));
+    let gone = to_prompt(&mut host, &v, ip(2));
+    host.disconnect(gone.id);
+    host.forget(gone.id);
+    host.forget(live.id);
+    assert_eq!(host.state(gone.id), None);
+    assert_eq!(host.state(live.id), Some(State::PendingApproval));
+}
+
+#[test]
+fn oversized_msg1_is_a_protocol_violation_not_a_password_attempt() {
+    // Only a msg1 that fails to AUTHENTICATE costs an attempt; a frame that
+    // is simply too large says nothing about the password.
+    let (h, v) = (device("host"), device("viewer"));
+    let mut host = host_with(&h, vec![]);
+    let mode = password_mode(&host, None);
+    let (mut c, first) = start(&mut host, &v, mode, ip(1), T0);
+    c.pump(&mut host, first, vec![], &mut |v2h, idx, f| {
+        if v2h && idx == 2 {
+            Some(vec![0; 65_536])
+        } else {
+            Some(f)
+        }
+    });
+    assert_eq!(c.log.host_close(), Some(CloseCode::ProtocolViolation));
+    assert!(
+        c.log
+            .host
+            .iter()
+            .any(|a| matches!(a, HostAction::Failed { attempt: None, .. }))
+    );
+    assert_eq!(host.limiter().failures(), 0);
+}
+
+#[test]
+fn debug_output_shows_state_but_never_the_password() {
+    let (h, v) = (device("host"), device("viewer"));
+    let mut host = host_with(&h, vec![]);
+    let c = to_prompt(&mut host, &v, ip(1));
+    let hd = format!("{host:?}");
+    assert!(
+        hd.contains("sessions: 1") && hd.contains("pending: 1"),
+        "{hd}"
+    );
+    assert!(!hd.contains(host.otp().reveal()));
+    let vd = format!("{:?}", c.viewer);
+    assert!(vd.contains("PendingApproval"), "{vd}");
+}

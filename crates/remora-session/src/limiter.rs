@@ -31,6 +31,8 @@ pub const COOLDOWN_START_MS: u64 = 30_000;
 pub const COOLDOWN_MAX_MS: u64 = 3_600_000;
 /// Length of the per-IP window.
 pub const IP_WINDOW_MS: u64 = 60_000;
+/// Above this many tracked IPs, stale windows are swept out.
+const MAX_TRACKED_IPS: usize = 1024;
 
 /// Why an admission or attempt was refused.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -76,30 +78,86 @@ impl Limiter {
     /// A new connection from `ip`: checks the pending cap and the per-IP
     /// window, and on success counts it as pending.
     pub fn admit(&mut self, ip: IpAddr, now: Millis) -> Result<(), Refusal> {
-        let _ = (ip, now);
-        todo!()
+        let window = self.per_ip.entry(ip).or_default();
+        // Forget connections older than the window (the window slides).
+        while window
+            .front()
+            .is_some_and(|&t| now.0.saturating_sub(t.0) >= IP_WINDOW_MS)
+        {
+            window.pop_front();
+        }
+        if window.len() >= PER_IP_PER_MINUTE {
+            return Err(Refusal::IpRateLimited);
+        }
+        if self.pending >= MAX_PENDING {
+            return Err(Refusal::TooManyPending);
+        }
+        window.push_back(now);
+        self.pending += 1;
+        if self.per_ip.len() > MAX_TRACKED_IPS {
+            self.sweep(now);
+        }
+        Ok(())
     }
 
     /// A pending handshake ended (any outcome).
     pub fn release(&mut self) {
-        todo!()
+        self.pending = self.pending.saturating_sub(1);
+    }
+
+    /// Drops per-IP windows with no connection inside the window, so the map
+    /// only holds IPs seen in the last minute.
+    fn sweep(&mut self, now: Millis) {
+        self.per_ip.retain(|_, w| {
+            w.back()
+                .is_some_and(|&t| now.0.saturating_sub(t.0) < IP_WINDOW_MS)
+        });
     }
 
     /// May a password-mode attempt start now?
     pub fn check_password_attempt(&self, now: Millis) -> Result<(), Refusal> {
-        let _ = now;
-        todo!()
+        match self.cooldown_until {
+            Some(until) if now < until => Err(Refusal::CoolingDown { until }),
+            _ => Ok(()),
+        }
     }
 
     /// Counts one failed password attempt against the current password.
     pub fn record_failure(&mut self, now: Millis) -> FailureOutcome {
-        let _ = now;
-        todo!()
+        self.failures += 1;
+        let attempt = self.failures;
+        if attempt < ATTEMPTS_PER_OTP {
+            return FailureOutcome {
+                attempt,
+                rotate: false,
+                cooldown_until: None,
+            };
+        }
+        // 30 s · 2^rotations, capped at 1 h (checked_shl: no overflow panic).
+        let cooldown = 1u64
+            .checked_shl(self.rotations)
+            .and_then(|m| COOLDOWN_START_MS.checked_mul(m))
+            .map_or(COOLDOWN_MAX_MS, |d| d.min(COOLDOWN_MAX_MS));
+        self.rotations = self.rotations.saturating_add(1);
+        self.failures = 0;
+        let until = now.plus(cooldown);
+        self.cooldown_until = Some(until);
+        FailureOutcome {
+            attempt,
+            rotate: true,
+            cooldown_until: Some(until),
+        }
     }
 
     /// Handshakes currently counted as pending.
     pub fn pending(&self) -> usize {
         self.pending
+    }
+
+    /// Source IPs with a per-IP window held in memory (bounded: stale
+    /// windows are swept once more than 1024 are held).
+    pub fn tracked_ips(&self) -> usize {
+        self.per_ip.len()
     }
 
     /// Failures counted against the current password.

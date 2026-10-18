@@ -156,3 +156,73 @@ fn a03_failures_are_global_not_per_connection() {
     l.release();
     assert!(l.record_failure(T).rotate);
 }
+
+#[test]
+fn failure_count_is_visible_and_resets_on_rotation() {
+    let mut l = Limiter::new();
+    assert_eq!(l.failures(), 0);
+    l.record_failure(T);
+    assert_eq!(l.failures(), 1);
+    l.record_failure(T);
+    assert_eq!(l.failures(), 2);
+    l.record_failure(T);
+    assert_eq!(l.failures(), 0);
+}
+
+#[test]
+fn per_ip_memory_is_bounded_by_sweeping_stale_windows() {
+    // Mutation-gate finding: the sweep that keeps the per-IP map from
+    // growing without bound (one entry per source IP ever seen) was untested.
+    let ipv6 = |n: u32| {
+        IpAddr::V6(std::net::Ipv6Addr::new(
+            0x2001,
+            0xdb8,
+            0,
+            0,
+            0,
+            0,
+            (n >> 16) as u16,
+            n as u16,
+        ))
+    };
+    let mut l = Limiter::new();
+    for n in 0..1023 {
+        l.admit(ipv6(n), T).unwrap();
+        l.release();
+    }
+    assert_eq!(l.tracked_ips(), 1023);
+    // 1024 held: not above the threshold, no sweep yet.
+    let later = Millis(T.0 + IP_WINDOW_MS);
+    l.admit(ipv6(5000), later).unwrap();
+    l.release();
+    assert_eq!(l.tracked_ips(), 1024);
+    // One more: above the threshold. Windows whose last connection is
+    // exactly one window old are stale and go; the two fresh ones stay.
+    l.admit(ipv6(5001), later).unwrap();
+    l.release();
+    assert_eq!(l.tracked_ips(), 2);
+}
+
+#[test]
+fn sweep_keeps_windows_that_are_still_inside_the_minute() {
+    let ipv6 = |n: u32| {
+        IpAddr::V6(std::net::Ipv6Addr::new(
+            0x2001,
+            0xdb8,
+            1,
+            0,
+            0,
+            0,
+            (n >> 16) as u16,
+            n as u16,
+        ))
+    };
+    let mut l = Limiter::new();
+    for n in 0..1100 {
+        l.admit(ipv6(n), Millis(T.0 + 1)).unwrap();
+        l.release();
+    }
+    // Every window is 59 999 ms old at most: the sweeps along the way kept all.
+    l.admit(ipv6(9999), Millis(T.0 + IP_WINDOW_MS)).unwrap();
+    assert_eq!(l.tracked_ips(), 1101);
+}

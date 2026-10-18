@@ -216,14 +216,14 @@ impl Conn {
                 self.log.viewer.push(a);
             }
             for a in std::mem::take(&mut host_out) {
-                if let HostAction::Send { id, frame } = &a {
-                    if *id == self.id {
-                        let idx = self.h2v.len();
-                        self.h2v.push(frame.clone());
-                        if let Some(f) = tamper(false, idx, frame.clone()) {
-                            viewer_out.extend(self.viewer.on_frame(&f, self.now, &mut OsRng));
-                            progressed = true;
-                        }
+                if let HostAction::Send { id, frame } = &a
+                    && *id == self.id
+                {
+                    let idx = self.h2v.len();
+                    self.h2v.push(frame.clone());
+                    if let Some(f) = tamper(false, idx, frame.clone()) {
+                        viewer_out.extend(self.viewer.on_frame(&f, self.now, &mut OsRng));
+                        progressed = true;
                     }
                 }
                 self.log.host.push(a);

@@ -127,6 +127,50 @@ impl FailReason {
     /// The code the peer sees. Generic: every authentication-type failure,
     /// including a bad PAKE element (A32), is `AUTH_FAILED`.
     pub fn close_code(&self) -> CloseCode {
-        todo!()
+        match self {
+            FailReason::AuthFailed(_)
+            | FailReason::IdentityMismatch
+            | FailReason::IdentityChanged => CloseCode::AuthFailed,
+            // A frame of the wrong length is a framing error; a well-sized
+            // but invalid element is an authentication failure (A32).
+            FailReason::ProtocolViolation(Violation::PakeElement(PakeError::WrongLength {
+                ..
+            })) => CloseCode::ProtocolViolation,
+            FailReason::ProtocolViolation(Violation::PakeElement(_)) => CloseCode::AuthFailed,
+            FailReason::ProtocolViolation(_) => CloseCode::ProtocolViolation,
+            FailReason::VersionUnsupported => CloseCode::VersionUnsupported,
+            FailReason::Rejected => CloseCode::Rejected,
+            FailReason::Timeout => CloseCode::Timeout,
+            FailReason::RateLimited => CloseCode::RateLimited,
+        }
+    }
+
+    /// Classifies a remora-crypto handshake error.
+    pub fn from_handshake(e: HandshakeError) -> Self {
+        use HandshakeError as H;
+        match e {
+            H::DeviceIdMismatch => FailReason::IdentityMismatch,
+            H::PinnedKeyChanged => FailReason::IdentityChanged,
+            H::TooLarge | H::MalformedPayload | H::RevealExpected | H::CommitmentMismatch => {
+                FailReason::ProtocolViolation(Violation::Handshake(e))
+            }
+            H::Msg1Auth
+            | H::Msg2Auth
+            | H::Msg3Auth
+            | H::RevealAuth
+            | H::Cert(_)
+            | H::CertKeyMismatch
+            | H::UntrustedKey
+            | H::TrustedModeRequiresPin
+            | H::Internal => FailReason::AuthFailed(AuthDetail::Handshake(e)),
+        }
+    }
+
+    /// Classifies a PAKE error (bad element, or the implementation refused).
+    pub fn from_pake(e: PakeError) -> Self {
+        match e {
+            PakeError::Internal => FailReason::AuthFailed(AuthDetail::Pake),
+            other => FailReason::ProtocolViolation(Violation::PakeElement(other)),
+        }
     }
 }

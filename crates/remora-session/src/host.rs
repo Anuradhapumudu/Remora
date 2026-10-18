@@ -4,15 +4,36 @@ use std::collections::HashMap;
 use std::net::IpAddr;
 use std::sync::Arc;
 
+use prost::Message;
 use rand_core::{CryptoRng, RngCore};
 use remora_crypto::identity::{DeviceId, IdentityCert, IdentityPublic};
-use remora_crypto::noise::{Established, HostAwaitMsg1, HostAwaitMsg3, NoiseStaticKeypair};
-use remora_crypto::pake::Spake2Ed25519;
+use remora_crypto::keyschedule::{derive_psk, prologue, transcript_hash};
+use remora_crypto::noise::{
+    Established, HandshakeMode, HostAwaitMsg1, HostAwaitMsg3, NoiseStaticKeypair, PeerPolicy,
+    host_start,
+};
+use remora_crypto::otp::generate_otp;
+use remora_crypto::pake::{Pake, PakeContext, PakeMessage, PakeRole, Spake2Ed25519};
 use remora_crypto::sas::Sas;
 use remora_crypto::secret::{Exporter, Otp};
 
+use remora_proto::messages::{
+    Control, Envelope, Goodbye, HostHello, Mode, SasReveal, SessionAccept, SessionPending,
+    SessionReject, control, decode_envelope, decode_viewer_hello, envelope,
+};
+
+use crate::fail::{AuthDetail, Violation};
 use crate::limiter::Limiter;
-use crate::{AppMessage, FailReason, Millis, State, Step};
+use crate::{
+    AppMessage, CloseCode, FailReason, HANDSHAKE_TIMEOUT_MS, Millis, PROMPT_TIMEOUT_MS,
+    PROTOCOL_VERSION, State, Step,
+};
+
+/// `SessionReject.reason` values (protocol.md §3.4).
+const REJECT_DENIED: u32 = 1;
+const REJECT_TIMEOUT: u32 = 2;
+/// `SessionAccept.role`: owner (protocol.md §5).
+const ROLE_OWNER: u32 = 1;
 
 /// A device's long-term identity: its Noise static key and the cert that
 /// binds it to its Ed25519 identity key.
@@ -123,21 +144,51 @@ pub enum HostAction {
 }
 
 /// One host-side session's private state.
+#[allow(
+    clippy::large_enum_variant,
+    reason = "one state per connection and at most a few connections; boxing only adds allocations"
+)]
 pub(crate) enum HostSessionState {
     Hello,
     Spake {
         vh: Vec<u8>,
         hh: Vec<u8>,
         pake: Spake2Ed25519,
+        spake_b: PakeMessage,
     },
     Msg1(HostAwaitMsg1),
     Msg3(HostAwaitMsg3),
     Pending {
         est: Established,
+        sas: Sas,
         prompt_deadline: Millis,
     },
     Active(Established),
     Closed,
+}
+
+impl HostSessionState {
+    fn public(&self) -> State {
+        match self {
+            HostSessionState::Hello => State::Hello,
+            HostSessionState::Spake { .. } => State::Spake,
+            HostSessionState::Msg1(_) | HostSessionState::Msg3(_) => State::Noise,
+            HostSessionState::Pending { .. } => State::PendingApproval,
+            HostSessionState::Active(_) => State::Active,
+            HostSessionState::Closed => State::Closed,
+        }
+    }
+
+    fn step(&self) -> Step {
+        match self {
+            HostSessionState::Hello => Step::Hello,
+            HostSessionState::Spake { .. } => Step::Spake,
+            HostSessionState::Msg1(_) => Step::NoiseMsg1,
+            HostSessionState::Msg3(_) => Step::NoiseMsg3,
+            HostSessionState::Pending { .. } => Step::Approval,
+            HostSessionState::Active(_) | HostSessionState::Closed => Step::Active,
+        }
+    }
 }
 
 pub(crate) struct HostSession {
@@ -146,6 +197,7 @@ pub(crate) struct HostSession {
     pub(crate) deadline: Millis,
     pub(crate) password_mode: bool,
     pub(crate) holds_pending_slot: bool,
+    pub(crate) policy: PeerPolicy,
 }
 
 /// The host side of Remora: admission, sessions, approvals.
@@ -169,8 +221,14 @@ impl std::fmt::Debug for Host {
 impl Host {
     /// A host with a freshly generated one-time password.
     pub fn new<R: RngCore + CryptoRng>(config: HostConfig, rng: &mut R) -> Self {
-        let _ = (config, rng);
-        todo!()
+        let device_id = DeviceId::of(config.identity.cert.identity());
+        Self {
+            config,
+            device_id,
+            otp: generate_otp(rng),
+            limiter: Limiter::new(),
+            sessions: HashMap::new(),
+        }
     }
 
     /// The current one-time password (for the host's screen only).
@@ -193,8 +251,23 @@ impl Host {
         now: Millis,
         rng: &mut R,
     ) -> Result<SessionId, Refused> {
-        let _ = (peer_ip, exporter, now, rng);
-        todo!()
+        self.limiter.admit(peer_ip, now).map_err(Refused)?;
+        let mut id = SessionId(rng.next_u64());
+        while self.sessions.contains_key(&id) {
+            id = SessionId(rng.next_u64());
+        }
+        self.sessions.insert(
+            id,
+            HostSession {
+                state: HostSessionState::Hello,
+                exporter,
+                deadline: now.plus(HANDSHAKE_TIMEOUT_MS),
+                password_mode: false,
+                holds_pending_slot: true,
+                policy: PeerPolicy::AnyKey,
+            },
+        );
+        Ok(id)
     }
 
     /// A frame arrived on session `id`'s reliable stream.
@@ -205,52 +278,529 @@ impl Host {
         now: Millis,
         rng: &mut R,
     ) -> Vec<HostAction> {
-        let _ = (id, frame, now, rng);
-        todo!()
+        let Some(sess) = self.sessions.get_mut(&id) else {
+            return Vec::new();
+        };
+        let state = std::mem::replace(&mut sess.state, HostSessionState::Closed);
+        let step = state.step();
+        let mut out = Vec::new();
+        let result = match state {
+            HostSessionState::Closed => return Vec::new(),
+            HostSessionState::Hello => self.on_hello(id, frame, now, rng, &mut out),
+            HostSessionState::Spake {
+                vh,
+                hh,
+                pake,
+                spake_b,
+            } => self.on_spake(id, frame, vh, hh, pake, spake_b, &mut out),
+            HostSessionState::Msg1(hs) => self.on_msg1(id, frame, hs, rng, &mut out),
+            HostSessionState::Msg3(hs) => self.on_msg3(id, frame, hs, now, &mut out),
+            HostSessionState::Pending { est, .. } => Self::on_pending(frame, est),
+            HostSessionState::Active(est) => self.on_active(id, frame, est, &mut out),
+        };
+        match result {
+            Ok(next) => {
+                if let Some(sess) = self.sessions.get_mut(&id) {
+                    sess.state = next;
+                }
+            }
+            Err(Ending::Failed(reason, counts)) => {
+                let attempt = if counts {
+                    Some(self.count_attempt(now, rng, &mut out))
+                } else {
+                    None
+                };
+                // A failure while the prompt is open also withdraws the prompt.
+                self.fail(id, reason, step, attempt, step == Step::Approval, &mut out);
+            }
+            Err(Ending::Normal { prompt_open }) => {
+                self.close(id, CloseCode::Normal, prompt_open, &mut out)
+            }
+        }
+        out
     }
 
     /// A datagram arrived on session `id`. Before `Active` it closes the
     /// session; in Phase 3 an active session drops it (no media path yet).
     pub fn on_datagram(&mut self, id: SessionId, datagram: &[u8]) -> Vec<HostAction> {
-        let _ = (id, datagram);
-        todo!()
+        let _ = datagram;
+        let mut out = Vec::new();
+        match self
+            .sessions
+            .get(&id)
+            .map(|s| (s.state.public(), s.state.step()))
+        {
+            None | Some((State::Closed, _)) | Some((State::Active, _)) => {}
+            Some((st, step)) => self.fail(
+                id,
+                FailReason::ProtocolViolation(Violation::DatagramBeforeActive),
+                step,
+                None,
+                st == State::PendingApproval,
+                &mut out,
+            ),
+        }
+        out
     }
 
     /// The clock advanced: handshake deadlines (10 s) and prompt deadlines
     /// (60 s) of every session.
     pub fn tick(&mut self, now: Millis) -> Vec<HostAction> {
-        let _ = now;
-        todo!()
+        let mut out = Vec::new();
+        let mut ids: Vec<SessionId> = self.sessions.keys().copied().collect();
+        ids.sort();
+        for id in ids {
+            let Some(sess) = self.sessions.get_mut(&id) else {
+                continue;
+            };
+            match &mut sess.state {
+                HostSessionState::Closed | HostSessionState::Active(_) => {}
+                HostSessionState::Pending {
+                    est,
+                    prompt_deadline,
+                    ..
+                } => {
+                    if now >= *prompt_deadline {
+                        if let Ok(frame) =
+                            est.encrypt(&control_env(control::Kind::Reject(SessionReject {
+                                reason: REJECT_TIMEOUT,
+                            })))
+                        {
+                            out.push(HostAction::Send { id, frame });
+                        }
+                        self.fail(
+                            id,
+                            FailReason::Rejected,
+                            Step::Approval,
+                            None,
+                            true,
+                            &mut out,
+                        );
+                    }
+                }
+                state => {
+                    if now >= sess.deadline {
+                        let step = state.step();
+                        self.fail(id, FailReason::Timeout, step, None, false, &mut out);
+                    }
+                }
+            }
+        }
+        out
     }
 
     /// The host user pressed "accept" on the prompt for `id` showing `sas`.
     /// Applies only if that session is pending approval **and** its safety
     /// code is `sas` (A22, A23).
     pub fn approve(&mut self, id: SessionId, sas: Sas) -> Result<Vec<HostAction>, ApproveError> {
-        let _ = (id, sas);
-        todo!()
+        let sess = self
+            .sessions
+            .get_mut(&id)
+            .ok_or(ApproveError::UnknownSession)?;
+        let HostSessionState::Pending { sas: shown, .. } = &sess.state else {
+            return Err(ApproveError::NotPending);
+        };
+        if *shown != sas {
+            return Err(ApproveError::SasMismatch);
+        }
+        let state = std::mem::replace(&mut sess.state, HostSessionState::Closed);
+        let HostSessionState::Pending { mut est, .. } = state else {
+            return Err(ApproveError::NotPending);
+        };
+        let mut out = Vec::new();
+        match est.encrypt(&control_env(control::Kind::Accept(SessionAccept {
+            role: ROLE_OWNER,
+        }))) {
+            Ok(frame) => {
+                out.push(HostAction::Send { id, frame });
+                sess.state = HostSessionState::Active(est);
+                if sess.holds_pending_slot {
+                    sess.holds_pending_slot = false;
+                    self.limiter.release();
+                }
+                out.push(HostAction::Active { id });
+            }
+            Err(_) => self.fail(
+                id,
+                FailReason::AuthFailed(AuthDetail::Handshake(
+                    remora_crypto::noise::HandshakeError::Internal,
+                )),
+                Step::Approval,
+                None,
+                true,
+                &mut out,
+            ),
+        }
+        Ok(out)
     }
 
     /// The host user pressed "deny".
     pub fn deny(&mut self, id: SessionId) -> Vec<HostAction> {
-        let _ = id;
-        todo!()
+        let mut out = Vec::new();
+        if let Some(HostSession {
+            state: HostSessionState::Pending { est, .. },
+            ..
+        }) = self.sessions.get_mut(&id)
+        {
+            if let Ok(frame) = est.encrypt(&control_env(control::Kind::Reject(SessionReject {
+                reason: REJECT_DENIED,
+            }))) {
+                out.push(HostAction::Send { id, frame });
+            }
+            self.close(id, CloseCode::Rejected, true, &mut out);
+        }
+        out
     }
 
     /// One-click disconnect from any state (INV11).
     pub fn disconnect(&mut self, id: SessionId) -> Vec<HostAction> {
-        let _ = id;
-        todo!()
+        let mut out = Vec::new();
+        let Some(sess) = self.sessions.get_mut(&id) else {
+            return out;
+        };
+        let prompt_open = matches!(sess.state, HostSessionState::Pending { .. });
+        match &mut sess.state {
+            HostSessionState::Closed => return out,
+            HostSessionState::Pending { est, .. } | HostSessionState::Active(est) => {
+                if let Ok(frame) = est.encrypt(&control_env(control::Kind::Bye(Goodbye {}))) {
+                    out.push(HostAction::Send { id, frame });
+                }
+            }
+            _ => {}
+        }
+        self.close(id, CloseCode::Normal, prompt_open, &mut out);
+        out
     }
 
     /// The state of session `id`, if it exists.
     pub fn state(&self, id: SessionId) -> Option<State> {
-        let _ = id;
-        todo!()
+        self.sessions.get(&id).map(|s| s.state.public())
     }
 
     /// Sessions currently `Active` (for the always-visible indicator).
     pub fn active_sessions(&self) -> Vec<SessionId> {
-        todo!()
+        let mut v: Vec<SessionId> = self
+            .sessions
+            .iter()
+            .filter(|(_, s)| matches!(s.state, HostSessionState::Active(_)))
+            .map(|(id, _)| *id)
+            .collect();
+        v.sort();
+        v
     }
+
+    /// Forgets a closed session entirely (call once its connection is gone,
+    /// so closed sessions do not accumulate). No effect on a live session.
+    pub fn forget(&mut self, id: SessionId) {
+        if matches!(
+            self.sessions.get(&id).map(|s| &s.state),
+            Some(HostSessionState::Closed)
+        ) {
+            self.sessions.remove(&id);
+        }
+    }
+
+    // ------------------------------------------------------------ steps --
+
+    fn on_hello<R: RngCore + CryptoRng>(
+        &mut self,
+        id: SessionId,
+        frame: &[u8],
+        now: Millis,
+        rng: &mut R,
+        out: &mut Vec<HostAction>,
+    ) -> Result<HostSessionState, Ending> {
+        let hello = decode_viewer_hello(frame)
+            .map_err(|e| fail(FailReason::ProtocolViolation(Violation::Malformed(e))))?;
+        if !hello.versions.contains(&PROTOCOL_VERSION) {
+            return Err(fail(FailReason::VersionUnsupported));
+        }
+        let mut nonce = [0u8; 16];
+        nonce.copy_from_slice(&hello.nonce); // length validated by decode_viewer_hello
+        let hh = HostHello {
+            version: PROTOCOL_VERSION,
+            host_device_id: self.device_id.as_bytes().to_vec(),
+        }
+        .encode_to_vec();
+        let vh = frame.to_vec();
+        let Some(sess) = self.sessions.get_mut(&id) else {
+            return Err(fail(FailReason::Timeout));
+        };
+        if hello.mode == Mode::Password as i32 {
+            if !self.config.password_enabled {
+                return Err(fail(FailReason::AuthFailed(AuthDetail::ModeUnavailable)));
+            }
+            self.limiter
+                .check_password_attempt(now)
+                .map_err(|_| fail(FailReason::RateLimited))?;
+            sess.password_mode = true;
+            sess.policy = PeerPolicy::AnyKey;
+            let ctx = PakeContext {
+                host_device_id: self.device_id,
+                nonce,
+            };
+            let (pake, spake_b) = Spake2Ed25519::start(PakeRole::Host, &self.otp, &ctx, rng);
+            out.push(HostAction::Send {
+                id,
+                frame: hh.clone(),
+            });
+            Ok(HostSessionState::Spake {
+                vh,
+                hh,
+                pake,
+                spake_b,
+            })
+        } else {
+            if self.config.trusted.is_empty() {
+                return Err(fail(FailReason::AuthFailed(AuthDetail::ModeUnavailable)));
+            }
+            sess.policy = PeerPolicy::TrustedSet(self.config.trusted.clone());
+            let pro = prologue(&sess.exporter, &vh, &hh);
+            let hs = host_start(HandshakeMode::Trusted, &pro, &self.config.identity.noise)
+                .map_err(|e| fail(FailReason::from_handshake(e)))?;
+            out.push(HostAction::Send { id, frame: hh });
+            Ok(HostSessionState::Msg1(hs))
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn on_spake(
+        &mut self,
+        id: SessionId,
+        frame: &[u8],
+        vh: Vec<u8>,
+        hh: Vec<u8>,
+        pake: Spake2Ed25519,
+        spake_b: PakeMessage,
+        out: &mut Vec<HostAction>,
+    ) -> Result<HostSessionState, Ending> {
+        let spake_a = PakeMessage::from_bytes(frame).map_err(|e| fail(FailReason::from_pake(e)))?;
+        // A bad element is an attempt against the password: counted.
+        let k = pake
+            .finish(&spake_a)
+            .map_err(|e| Ending::Failed(FailReason::from_pake(e), true))?;
+        let exporter = self.exporter(id)?;
+        let t = transcript_hash(&vh, &hh, &spake_a, &spake_b);
+        let psk = derive_psk(&exporter, &k, &t);
+        let pro = prologue(&exporter, &vh, &hh);
+        let hs = host_start(
+            HandshakeMode::Password(&psk),
+            &pro,
+            &self.config.identity.noise,
+        )
+        .map_err(|e| fail(FailReason::from_handshake(e)))?;
+        out.push(HostAction::Send {
+            id,
+            frame: spake_b.as_bytes().to_vec(),
+        });
+        Ok(HostSessionState::Msg1(hs))
+    }
+
+    fn on_msg1<R: RngCore + CryptoRng>(
+        &mut self,
+        id: SessionId,
+        frame: &[u8],
+        hs: HostAwaitMsg1,
+        rng: &mut R,
+        out: &mut Vec<HostAction>,
+    ) -> Result<HostSessionState, Ending> {
+        let password_mode = self.sessions.get(&id).is_some_and(|s| s.password_mode);
+        let hs = hs.read_msg1(frame, rng).map_err(|e| {
+            // A msg1 that fails to authenticate in password mode is a wrong
+            // (or tampered) password: one attempt (A01, INV3).
+            let counts = password_mode && e == remora_crypto::noise::HandshakeError::Msg1Auth;
+            Ending::Failed(FailReason::from_handshake(e), counts)
+        })?;
+        let (hs, msg2) = hs
+            .write_msg2(&self.config.identity.cert)
+            .map_err(|e| fail(FailReason::from_handshake(e)))?;
+        out.push(HostAction::Send { id, frame: msg2 });
+        Ok(HostSessionState::Msg3(hs))
+    }
+
+    fn on_msg3(
+        &mut self,
+        id: SessionId,
+        frame: &[u8],
+        hs: HostAwaitMsg3,
+        now: Millis,
+        out: &mut Vec<HostAction>,
+    ) -> Result<HostSessionState, Ending> {
+        let policy = self
+            .sessions
+            .get(&id)
+            .map(|s| s.policy.clone())
+            .unwrap_or(PeerPolicy::AnyKey);
+        let got = hs
+            .read_msg3(frame, &policy)
+            .map_err(|e| fail(FailReason::from_handshake(e)))?;
+        let viewer = got.peer_cert().clone();
+        let (mut est, n_r) = got.reveal();
+        let internal = || {
+            fail(FailReason::from_handshake(
+                remora_crypto::noise::HandshakeError::Internal,
+            ))
+        };
+        let reveal = est
+            .encrypt(&control_env(control::Kind::SasReveal(SasReveal {
+                n_r: n_r.to_vec(),
+            })))
+            .map_err(|_| internal())?;
+        let pending = est
+            .encrypt(&control_env(control::Kind::Pending(SessionPending {})))
+            .map_err(|_| internal())?;
+        out.push(HostAction::Send { id, frame: reveal });
+        out.push(HostAction::Send { id, frame: pending });
+        let sas = est.sas();
+        out.push(HostAction::Prompt {
+            id,
+            sas,
+            viewer_name: viewer.device_name().to_owned(),
+            viewer_key: *viewer.identity(),
+        });
+        Ok(HostSessionState::Pending {
+            est,
+            sas,
+            prompt_deadline: now.plus(PROMPT_TIMEOUT_MS),
+        })
+    }
+
+    /// While the prompt is open the viewer may only say `Goodbye`; anything
+    /// else — input above all — closes the session (A20, A21).
+    fn on_pending(frame: &[u8], mut est: Established) -> Result<HostSessionState, Ending> {
+        let env = decrypt_envelope(&mut est, frame).map_err(fail)?;
+        match env.msg {
+            Some(envelope::Msg::Control(Control {
+                kind: Some(control::Kind::Bye(_)),
+            })) => Err(Ending::Normal { prompt_open: true }),
+            Some(envelope::Msg::Input(_)) => Err(Ending::Failed(
+                FailReason::ProtocolViolation(Violation::BeforeActive),
+                false,
+            )),
+            _ => Err(fail(FailReason::ProtocolViolation(Violation::WrongRole))),
+        }
+    }
+
+    fn on_active(
+        &mut self,
+        id: SessionId,
+        frame: &[u8],
+        mut est: Established,
+        out: &mut Vec<HostAction>,
+    ) -> Result<HostSessionState, Ending> {
+        let env = decrypt_envelope(&mut est, frame).map_err(|r| Ending::Failed(r, false))?;
+        match env.msg {
+            Some(envelope::Msg::Input(input)) => {
+                out.push(HostAction::Deliver {
+                    id,
+                    msg: AppMessage::Input(input),
+                });
+                Ok(HostSessionState::Active(est))
+            }
+            Some(envelope::Msg::Control(Control {
+                kind: Some(control::Kind::Bye(_)),
+            })) => Err(Ending::Normal { prompt_open: false }),
+            _ => Err(Ending::Failed(
+                FailReason::ProtocolViolation(Violation::WrongRole),
+                false,
+            )),
+        }
+    }
+
+    // ---------------------------------------------------------- helpers --
+
+    fn exporter(&self, id: SessionId) -> Result<Exporter, Ending> {
+        self.sessions
+            .get(&id)
+            .map(|s| s.exporter.clone())
+            .ok_or_else(|| fail(FailReason::Timeout))
+    }
+
+    /// Counts a failed password attempt; rotates the OTP on the third.
+    fn count_attempt<R: RngCore + CryptoRng>(
+        &mut self,
+        now: Millis,
+        rng: &mut R,
+        out: &mut Vec<HostAction>,
+    ) -> u32 {
+        let o = self.limiter.record_failure(now);
+        if o.rotate {
+            self.otp = generate_otp(rng);
+            out.push(HostAction::OtpRotated {
+                cooldown_until: o.cooldown_until.unwrap_or(now),
+            });
+        }
+        o.attempt
+    }
+
+    /// Ends a session with a failure: exactly one `Failed` (for the log),
+    /// then `PromptClosed` if a prompt was open, then the close code.
+    fn fail(
+        &mut self,
+        id: SessionId,
+        reason: FailReason,
+        step: Step,
+        attempt: Option<u32>,
+        prompt_open: bool,
+        out: &mut Vec<HostAction>,
+    ) {
+        let code = reason.close_code();
+        out.push(HostAction::Failed {
+            id,
+            reason,
+            step,
+            attempt,
+        });
+        self.close(id, code, prompt_open, out);
+    }
+
+    fn close(
+        &mut self,
+        id: SessionId,
+        code: CloseCode,
+        prompt_open: bool,
+        out: &mut Vec<HostAction>,
+    ) {
+        if let Some(sess) = self.sessions.get_mut(&id) {
+            sess.state = HostSessionState::Closed;
+            if sess.holds_pending_slot {
+                sess.holds_pending_slot = false;
+                self.limiter.release();
+            }
+        }
+        if prompt_open {
+            out.push(HostAction::PromptClosed { id });
+        }
+        out.push(HostAction::Close { id, code });
+    }
+}
+
+/// How a step ended a session.
+enum Ending {
+    /// A failure; `true` if it counts as a password attempt.
+    Failed(FailReason, bool),
+    /// An orderly `Goodbye`.
+    Normal { prompt_open: bool },
+}
+
+fn fail(reason: FailReason) -> Ending {
+    Ending::Failed(reason, false)
+}
+
+fn control_env(kind: control::Kind) -> Vec<u8> {
+    Envelope {
+        msg: Some(envelope::Msg::Control(Control { kind: Some(kind) })),
+    }
+    .encode_to_vec()
+}
+
+/// Decrypts and decodes one transport frame (fail closed on either).
+pub(crate) fn decrypt_envelope(
+    est: &mut Established,
+    frame: &[u8],
+) -> Result<Envelope, FailReason> {
+    let plain = est
+        .decrypt(frame)
+        .map_err(|_| FailReason::ProtocolViolation(Violation::TransportAuth))?;
+    decode_envelope(&plain).map_err(|e| FailReason::ProtocolViolation(Violation::Malformed(e)))
 }
