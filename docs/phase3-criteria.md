@@ -361,4 +361,15 @@ the §7 mutation counts, fuzz hours per target, and the gaps carried forward.
 
 ## 11. Changes to criteria
 
-None.
+**Proposed 2026-10-18, awaiting owner approval (not yet in effect):**
+
+* **A20 at the Noise steps.** A20 requires `ProtocolViolation` for an
+  application message in every pre-`Active` state. At the Noise steps (host
+  waiting for msg1 / msg3, viewer waiting for msg2) a frame is only ever
+  decrypted as a handshake message, so an application message cannot be told
+  apart from a corrupted handshake message: it fails as one, with
+  `AuthFailed` (and, at msg1, counts as a password attempt). Proposed
+  wording: *"`ProtocolViolation` where the frame is recognisable (plaintext
+  Hello/Spake states, every encrypted state); `AuthFailed` at the Noise
+  steps. In every state: closed, never processed, injector/renderer count 0."*
+  The session tests (tests/a20_a21_gate.rs) are written to this wording.

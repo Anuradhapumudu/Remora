@@ -14,6 +14,7 @@ cargo-fuzz = true
 libfuzzer-sys = "=0.4.13"
 remora-proto = { path = "../crates/remora-proto" }
 remora-crypto = { path = "../crates/remora-crypto" }
+remora-session = { path = "../crates/remora-session" }
 rand_core = { version = "0.6", features = ["getrandom"] }
 
 [workspace]
@@ -71,6 +72,13 @@ bench = false
 [[bin]]
 name = "media_open"
 path = "fuzz_targets/media_open.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "session_host"
+path = "fuzz_targets/session_host.rs"
 test = false
 doc = false
 bench = false

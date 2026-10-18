@@ -16,6 +16,8 @@ examine_globs = [
     # A32 element validator (src/pake/validate.rs) — a security control that
     # compensates for a check the spake2 crate does not perform.
     "crates/remora-crypto/src/**/*.rs",
+    # remora-session: state machine, approval gate, attempt limiter (§7).
+    "crates/remora-session/src/**/*.rs",
 ]
 
 # Test-only modules inside src/ (they ARE the tests; mutating them is noise).

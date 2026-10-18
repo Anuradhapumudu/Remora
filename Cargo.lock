@@ -869,6 +869,14 @@ dependencies = [
 [[package]]
 name = "remora-session"
 version = "0.0.1"
+dependencies = [
+ "prost",
+ "rand_core",
+ "remora-crypto",
+ "remora-proto",
+ "remora-testkit",
+ "thiserror",
+]
 
 [[package]]
 name = "remora-signal"

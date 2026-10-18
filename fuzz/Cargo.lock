@@ -510,6 +510,7 @@ dependencies = [
  "rand_core",
  "remora-crypto",
  "remora-proto",
+ "remora-session",
 ]
 
 [[package]]
@@ -518,6 +519,17 @@ version = "0.0.1"
 dependencies = [
  "base64",
  "prost",
+ "thiserror",
+]
+
+[[package]]
+name = "remora-session"
+version = "0.0.1"
+dependencies = [
+ "prost",
+ "rand_core",
+ "remora-crypto",
+ "remora-proto",
  "thiserror",
 ]
 

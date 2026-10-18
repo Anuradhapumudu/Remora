@@ -11,6 +11,7 @@ on:
     paths:
       - "crates/remora-proto/**"
       - "crates/remora-crypto/**"
+      - "crates/remora-session/**"
       - "fuzz/**"
 
 permissions:
@@ -33,6 +34,7 @@ jobs:
             pake_message,
             handshake_payload,
             media_open,
+            session_host,
           ]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
