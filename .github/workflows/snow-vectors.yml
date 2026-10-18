@@ -1,0 +1,42 @@
+# phase3-criteria A34: run snow's own Noise test-vector suite once, against
+# the exact snow version in our Cargo.lock, and keep the result. Runs when
+# this file changes (so once on the PR that adds it) and by hand.
+#
+# Note: snow's dev-dependencies are resolved fresh inside its own source
+# directory (they are not in our lockfile); they only build snow's tests
+# and never reach a Remora binary.
+name: snow test vectors
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/snow-vectors.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  vectors:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: rustup toolchain install
+      - name: Run snow's vector suite at our locked version
+        run: |
+          version=$(grep -A1 '^name = "snow"$' Cargo.lock | sed -n 's/^version = "\(.*\)"$/\1/p')
+          echo "snow version from Cargo.lock: $version"
+          cargo fetch --locked
+          src=$(find "$HOME/.cargo/registry/src" -maxdepth 2 -type d -name "snow-$version" | head -1)
+          test -n "$src"
+          cp -R "$src" "$RUNNER_TEMP/snow"
+          cd "$RUNNER_TEMP/snow"
+          cargo test --features vector-tests --test vectors 2>&1 | tee vectors.log
+          grep -q "test result: ok. 3 passed" vectors.log
+          # Which of OUR patterns the suite covers (crypto-claims-audit C22).
+          for p in Noise_XX_25519_ChaChaPoly_BLAKE2s Noise_XXpsk0_25519_ChaChaPoly_BLAKE2s; do
+            echo "$p: $(grep -ho "\"$p\"" tests/vectors/*.txt | wc -l) vector(s)"
+          done
