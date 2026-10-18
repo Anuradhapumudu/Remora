@@ -1,6 +1,7 @@
 //! phase3-criteria A11 (tampered media dropped, session continues), A12
 //! (replay window), A13 (no nonce reuse). The 2³²-packet limit is a unit test
 //! in src/media.rs. Written before the implementation.
+#![allow(clippy::unwrap_used, clippy::expect_used)] // test code: a panic is how a test fails
 
 use rand_core::OsRng;
 use remora_crypto::media::{
@@ -297,4 +298,70 @@ fn live_key_limit() {
     );
     r.remove_key(0);
     assert!(r.add_key(100, MediaKey::generate(&mut OsRng)).is_ok());
+}
+
+#[test]
+fn body_size_boundary() {
+    // 1500 (datagram) − 16 (header) − 16 (tag) = 1468 bytes of body.
+    let (mut s, mut r) = pair(7);
+    let d = s.seal(header(), &vec![1; 1468]).unwrap();
+    assert_eq!(d.len(), 1500);
+    assert_eq!(r.open(&d).unwrap().1.len(), 1468);
+    assert_eq!(
+        s.seal(header(), &vec![1; 1469]).err(),
+        Some(MediaError::BodyTooLarge)
+    );
+    assert_eq!(s.packets_sent(), 1, "a refused body does not use a counter");
+}
+
+#[test]
+fn a12_replay_window_matches_a_reference_model() {
+    // Model-based check of the sliding bitmap (mutation-gate finding: the
+    // shift was never exercised with bits set). Deliver a pseudo-random mix
+    // of in-order, reordered, duplicated, old and far-ahead counters and
+    // compare every verdict with a trivially correct model: a set of
+    // accepted counters plus the highest one.
+    let mut seed = 0x2545_F491_4F6C_DD1Du64;
+    let mut next = || {
+        seed ^= seed << 13;
+        seed ^= seed >> 7;
+        seed ^= seed << 17;
+        seed
+    };
+    let (mut s, mut r) = pair(1);
+    let mut sent: Vec<Vec<u8>> = Vec::new();
+    let mut accepted = std::collections::HashSet::new();
+    let mut highest: Option<u64> = None;
+    for _ in 0..20_000 {
+        // Mostly move forward by small, word-crossing and occasionally huge
+        // steps; sometimes resend something already sent.
+        let pick = next() % 100;
+        let c = if pick < 60 || sent.is_empty() {
+            let skip = match next() % 10 {
+                0 => 63 + next() % 3,          // around a word boundary
+                1 => 64 * (1 + next() % 3),    // whole words
+                2 if next() % 50 == 0 => 5000, // beyond the window
+                _ => next() % 3,
+            };
+            for _ in 0..skip {
+                sent.push(s.seal(header(), b"").unwrap());
+            }
+            sent.push(s.seal(header(), b"").unwrap());
+            (sent.len() - 1) as u64
+        } else {
+            let back = next() % (REPLAY_WINDOW + 200);
+            (sent.len() as u64 - 1).saturating_sub(back)
+        };
+        let want = match highest {
+            Some(h) if c + REPLAY_WINDOW <= h => Err(MediaDrop::TooOld),
+            _ if accepted.contains(&c) => Err(MediaDrop::Replay),
+            _ => Ok(()),
+        };
+        let got = r.open(&sent[c as usize]).map(|_| ());
+        assert_eq!(got, want, "counter {c}, highest {highest:?}");
+        if got.is_ok() {
+            accepted.insert(c);
+            highest = Some(highest.map_or(c, |h| h.max(c)));
+        }
+    }
 }

@@ -49,14 +49,6 @@ pub enum PakeRole {
 }
 
 impl PakeRole {
-    /// The side byte this role puts on its own messages.
-    pub fn own_side(self) -> u8 {
-        match self {
-            PakeRole::Viewer => SIDE_VIEWER,
-            PakeRole::Host => SIDE_HOST,
-        }
-    }
-
     /// The side byte this role expects on the peer's message.
     pub fn peer_side(self) -> u8 {
         match self {

@@ -4,6 +4,7 @@
 //! (remora-net). A17-S2's malformed-msg2 case needs a raw `snow` responder
 //! and lives in the crate's unit tests (src/noise/tests.rs). Written before
 //! the implementation.
+#![allow(clippy::unwrap_used, clippy::expect_used)] // test code: a panic is how a test fails
 
 mod common;
 
@@ -732,4 +733,85 @@ fn handshake_payload_is_cert_then_exactly_32_bytes() {
             bad.len()
         );
     }
+}
+
+#[test]
+fn size_limit_is_exactly_the_noise_maximum() {
+    // 65 535 bytes is allowed (fails authentication), 65 536 is TooLarge.
+    let f = password_fixture();
+    let h = host_start(HandshakeMode::Password(&f.psk_h), &f.pro_h, &f.host.noise).unwrap();
+    assert_eq!(
+        h.read_msg1(&vec![0; 65_535], &mut OsRng).err(),
+        Some(HandshakeError::Msg1Auth)
+    );
+    let mut r = run(f.setup()).unwrap();
+    assert_eq!(
+        r.host.decrypt(&vec![0; 65_535]).err(),
+        Some(TransportError::Auth)
+    );
+}
+
+#[test]
+fn a17_sas_binds_the_handshake_transcript_not_only_the_nonces() {
+    // Two sessions whose nonces are forced EQUAL (fixed RNG) must still get
+    // different codes, because h (the Noise handshake hash) differs: fresh
+    // ephemeral keys every time. This is what makes a MITM's two sessions
+    // disagree. (Mutation-gate finding: a constant h was not caught.)
+    struct FixedRng;
+    impl rand_core::RngCore for FixedRng {
+        fn next_u32(&mut self) -> u32 {
+            7
+        }
+        fn next_u64(&mut self) -> u64 {
+            7
+        }
+        fn fill_bytes(&mut self, d: &mut [u8]) {
+            d.fill(7);
+        }
+        fn try_fill_bytes(&mut self, d: &mut [u8]) -> Result<(), rand_core::Error> {
+            d.fill(7);
+            Ok(())
+        }
+    }
+    impl rand_core::CryptoRng for FixedRng {}
+    let f = password_fixture();
+    let mut codes = std::collections::HashSet::new();
+    for _ in 0..20 {
+        let (v, m1) =
+            viewer_start(HandshakeMode::Password(&f.psk_v), &f.pro_v, &f.viewer.noise).unwrap();
+        let h = host_start(HandshakeMode::Password(&f.psk_h), &f.pro_h, &f.host.noise).unwrap();
+        let h = h.read_msg1(&m1, &mut FixedRng).unwrap();
+        let (h, m2) = h.write_msg2(&f.host.cert).unwrap();
+        let v = v.read_msg2(&m2, &PeerPolicy::AnyKey).unwrap();
+        let (v, m3) = v.write_msg3(&f.viewer.cert, &mut FixedRng).unwrap();
+        let h = h.read_msg3(&m3, &PeerPolicy::AnyKey).unwrap();
+        let (mut host_est, n_r) = h.reveal();
+        let frame = host_est.encrypt(&reveal_envelope(&n_r)).unwrap();
+        let viewer_est = v.read_reveal(&frame).unwrap();
+        assert_eq!(viewer_est.sas(), host_est.sas());
+        codes.insert(host_est.sas());
+    }
+    // 20 codes from 10⁶ with h fresh each time: two or more repeats has
+    // probability < 10⁻⁷; a constant h gives 1 distinct code.
+    assert!(codes.len() >= 19, "SAS ignores h: {codes:?}");
+}
+
+#[test]
+fn payload_with_an_oversized_name_length_is_a_framing_error() {
+    use remora_crypto::noise::decode_handshake_payload;
+    let f = password_fixture();
+    let mut p = [f.host.cert.encode().as_slice(), &[0; 32]].concat();
+    // name_len 65 and a payload length that matches it exactly.
+    p[72] = 65;
+    p.resize(137 + 65 + 32, b'x');
+    assert_eq!(
+        decode_handshake_payload(&p).err(),
+        Some(HandshakeError::MalformedPayload)
+    );
+    p[72] = 255;
+    p.resize(137 + 255 + 32, b'x');
+    assert_eq!(
+        decode_handshake_payload(&p).err(),
+        Some(HandshakeError::MalformedPayload)
+    );
 }

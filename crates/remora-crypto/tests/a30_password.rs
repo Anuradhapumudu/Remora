@@ -1,5 +1,6 @@
 //! phase3-criteria A30 / threat model INV13: unattended-password policy.
 //! Written before the implementation.
+#![allow(clippy::unwrap_used, clippy::expect_used)] // test code: a panic is how a test fails
 
 use remora_crypto::password::{
     MAX_CHARS, MAX_INPUT_BYTES, MIN_CHARS, PasswordError, validate_unattended_password,

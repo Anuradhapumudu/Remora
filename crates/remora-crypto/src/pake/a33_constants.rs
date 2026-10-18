@@ -48,10 +48,10 @@ fn reduce_mod_p(be: &[u8; 48]) -> [u64; 4] {
         let mut lo = [v[0], v[1], v[2], v[3] & 0x7fff_ffff_ffff_ffff, 0, 0];
         let mut hi = [0u64; 6];
         // hi = v >> 255
-        for i in 0..6 {
+        for (i, limb) in hi.iter_mut().enumerate() {
             let a = v.get(i + 3).copied().unwrap_or(0) >> 63;
             let b = v.get(i + 4).copied().unwrap_or(0) << 1;
-            hi[i] = a | b;
+            *limb = a | b;
         }
         // lo += 19 * hi
         let mut carry: u128 = 0;

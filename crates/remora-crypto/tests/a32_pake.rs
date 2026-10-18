@@ -7,6 +7,7 @@
 //! arithmetic only, no curve library): all 8 points of the 8-torsion
 //! subgroup, every canonical and non-canonical 32-byte encoding of each.
 //! They are hard-coded so the test does not trust the code it is testing.
+#![allow(clippy::unwrap_used, clippy::expect_used)] // test code: a panic is how a test fails
 
 use curve25519_dalek::edwards::CompressedEdwardsY;
 use rand_core::OsRng;

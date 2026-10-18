@@ -19,10 +19,29 @@
 //! 5. not of small order (the identity and the other 7 low-order points);
 //! 6. torsion-free (in the prime-order subgroup).
 
+use curve25519_dalek::edwards::CompressedEdwardsY;
+
 use super::{PakeError, PakeMessage, PakeRole};
 
 /// Checks a peer's PAKE message as described in the module docs.
 pub fn validate_peer_message(msg: &PakeMessage, own_role: PakeRole) -> Result<(), PakeError> {
-    let _ = (msg, own_role);
-    todo!()
+    let bytes = msg.as_bytes();
+    if bytes[0] != own_role.peer_side() {
+        return Err(PakeError::WrongSide);
+    }
+    let mut enc = [0u8; 32];
+    enc.copy_from_slice(&bytes[1..]);
+    let point = CompressedEdwardsY(enc)
+        .decompress()
+        .ok_or(PakeError::NotOnCurve)?;
+    if point.compress().to_bytes() != enc {
+        return Err(PakeError::NonCanonical);
+    }
+    if point.is_small_order() {
+        return Err(PakeError::SmallOrder);
+    }
+    if !point.is_torsion_free() {
+        return Err(PakeError::NotTorsionFree);
+    }
+    Ok(())
 }

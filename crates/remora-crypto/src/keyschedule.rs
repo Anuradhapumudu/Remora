@@ -13,6 +13,10 @@
 //! concatenation would make `VH ‖ HH` and `VH' ‖ HH'` with a shifted boundary
 //! hash equal).
 
+use blake2::{Blake2s256, Digest};
+use hkdf::Hkdf;
+use sha2::Sha256;
+
 use crate::pake::PakeMessage;
 use crate::secret::{Exporter, PakeKey, Psk};
 
@@ -41,20 +45,45 @@ pub fn transcript_hash(
     spake_a: &PakeMessage,
     spake_b: &PakeMessage,
 ) -> [u8; 32] {
-    let _ = (viewer_hello, host_hello, spake_a, spake_b);
-    todo!()
+    let mut d = Blake2s256::new();
+    hash_hellos(&mut d, viewer_hello, host_hello);
+    d.update(spake_a.as_bytes());
+    d.update(spake_b.as_bytes());
+    d.finalize().into()
 }
 
 /// `HKDF-SHA256(salt = exporter, ikm = K, info = PSK_INFO ‖ transcript)`.
 pub fn derive_psk(exporter: &Exporter, k: &PakeKey, transcript: &[u8; 32]) -> Psk {
-    let _ = (exporter, k, transcript);
-    todo!()
+    let mut okm = [0u8; 32];
+    #[allow(
+        clippy::expect_used,
+        reason = "HKDF-SHA256 can output up to 8160 bytes; 32 is a constant, so this cannot fail"
+    )]
+    Hkdf::<Sha256>::new(Some(&exporter.0), &k.0)
+        .expand_multi_info(&[PSK_INFO, transcript], &mut okm)
+        .expect("32-byte HKDF output");
+    Psk(okm)
 }
 
 /// `PROLOGUE_PREFIX ‖ exporter ‖ BLAKE2s(hellos)`.
 pub fn prologue(exporter: &Exporter, viewer_hello: &[u8], host_hello: &[u8]) -> Prologue {
-    let _ = (exporter, viewer_hello, host_hello);
-    todo!()
+    let mut d = Blake2s256::new();
+    hash_hellos(&mut d, viewer_hello, host_hello);
+    let mut p = Vec::with_capacity(PROLOGUE_PREFIX.len() + 64);
+    p.extend_from_slice(PROLOGUE_PREFIX);
+    p.extend_from_slice(&exporter.0);
+    p.extend_from_slice(&d.finalize());
+    Prologue(p)
+}
+
+/// Feeds `u32_be(len VH) ‖ VH ‖ u32_be(len HH) ‖ HH` into `d`. Hellos are
+/// at most one 4 KiB frame, so the `u32` length never saturates.
+fn hash_hellos(d: &mut Blake2s256, viewer_hello: &[u8], host_hello: &[u8]) {
+    for hello in [viewer_hello, host_hello] {
+        let len = u32::try_from(hello.len()).unwrap_or(u32::MAX);
+        d.update(len.to_be_bytes());
+        d.update(hello);
+    }
 }
 
 #[cfg(test)]

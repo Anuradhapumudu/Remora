@@ -163,8 +163,22 @@ pub enum HandshakeError {
 pub fn decode_handshake_payload(
     payload: &[u8],
 ) -> Result<(crate::identity::IdentityCert, [u8; 32]), HandshakeError> {
-    let _ = payload;
-    todo!()
+    use crate::identity::{CERT_FIXED_LEN, CERT_MAX_LEN, IdentityCert};
+    const NAME_LEN_AT: usize = 72;
+    let name_len = usize::from(
+        *payload
+            .get(NAME_LEN_AT)
+            .ok_or(HandshakeError::MalformedPayload)?,
+    );
+    let cert_len = CERT_FIXED_LEN + name_len;
+    // A name above the limit is a framing error here, before the cert parser.
+    if cert_len > CERT_MAX_LEN || payload.len() != cert_len + 32 {
+        return Err(HandshakeError::MalformedPayload);
+    }
+    let cert = IdentityCert::decode(&payload[..cert_len]).map_err(HandshakeError::Cert)?;
+    let mut tail = [0u8; 32];
+    tail.copy_from_slice(&payload[cert_len..]);
+    Ok((cert, tail))
 }
 
 /// Errors on the established channel. Any of them closes the session.

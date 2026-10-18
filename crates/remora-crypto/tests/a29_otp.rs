@@ -1,6 +1,7 @@
 //! phase3-criteria A29: OTP generation is unbiased. Structural test primary
 //! (rejection sampling with an injected RNG), χ² secondary. Written before the
 //! implementation.
+#![allow(clippy::unwrap_used, clippy::expect_used)] // test code: a panic is how a test fails
 
 use rand_core::{CryptoRng, RngCore};
 use remora_crypto::otp::{OTP_SPACE, ProductionRng, REJECT_FROM, generate_otp};

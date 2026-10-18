@@ -29,4 +29,7 @@ exclude_re = [
     # EQUIVALENT: in ConnectionCode::encode, `0x40 | kind` / `0x60 | kind` with
     # kind ∈ {0, 1} and a zero low nibble — `|` and `^` always give the same byte.
     'replace \| with \^ in ConnectionCode::encode',
+    # EQUIVALENT: in ReplayWindow::shift, `hi = w << bits` and
+    # `lo = w' >> (64 - bits)` never share a set bit, so `|` and `^` agree.
+    'replace \| with \^ in ReplayWindow::shift',
 ]

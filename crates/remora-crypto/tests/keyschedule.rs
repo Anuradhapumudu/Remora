@@ -1,6 +1,7 @@
 //! Key schedule (protocol.md §3.1), checked against an independent
 //! computation with the hash/HKDF crates directly. Written before the
 //! implementation.
+#![allow(clippy::unwrap_used, clippy::expect_used)] // test code: a panic is how a test fails
 
 use blake2::{Blake2s256, Digest};
 use rand_core::OsRng;

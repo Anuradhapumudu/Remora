@@ -18,6 +18,9 @@
 
 use std::fmt;
 
+use blake2::{Blake2s256, Digest};
+use subtle::ConstantTimeEq;
+
 /// Commitment hash prefix.
 pub const COMMIT_CONTEXT: &[u8] = b"remora/1/sas-commit";
 /// SAS hash prefix.
@@ -45,18 +48,27 @@ impl fmt::Display for Sas {
 
 /// `C_r = BLAKE2s(COMMIT_CONTEXT ‖ n_r)`.
 pub fn commitment(n_r: &[u8; 32]) -> [u8; 32] {
-    let _ = n_r;
-    todo!()
+    let mut d = Blake2s256::new();
+    d.update(COMMIT_CONTEXT);
+    d.update(n_r);
+    d.finalize().into()
 }
 
 /// Constant-time check that `n_r` opens commitment `c_r`.
 pub fn verify_commitment(c_r: &[u8; 32], n_r: &[u8; 32]) -> bool {
-    let _ = (c_r, n_r);
-    todo!()
+    commitment(n_r).ct_eq(c_r).into()
 }
 
 /// The SAS from the handshake hash `h` and both nonces.
 pub fn sas(h: &[u8; 32], n_i: &[u8; 32], n_r: &[u8; 32]) -> Sas {
-    let _ = (h, n_i, n_r);
-    todo!()
+    let mut d = Blake2s256::new();
+    d.update(SAS_CONTEXT);
+    d.update(h);
+    d.update(n_i);
+    d.update(n_r);
+    let out = d.finalize();
+    let mut first8 = [0u8; 8];
+    first8.copy_from_slice(&out[..8]);
+    // < 10⁶, so it fits a u32. Bias of `mod 10⁶` on 64 bits is < 10⁻¹³ (C9).
+    Sas((u64::from_be_bytes(first8) % SAS_SPACE) as u32)
 }

@@ -1,6 +1,7 @@
 //! phase3-criteria A17-S3 (the SAS depends on every bit of h, n_i, n_r) and
 //! A18-stat (the responder's fixed choices cannot pin the SAS). Written
 //! before the implementation.
+#![allow(clippy::unwrap_used, clippy::expect_used)] // test code: a panic is how a test fails
 
 use blake2::{Blake2s256, Digest};
 use remora_crypto::sas::{COMMIT_CONTEXT, SAS_CONTEXT, Sas, commitment, sas, verify_commitment};

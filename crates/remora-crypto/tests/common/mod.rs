@@ -1,4 +1,5 @@
 //! Shared helpers for remora-crypto's attack tests.
+#![allow(clippy::unwrap_used, clippy::expect_used)] // test code: a panic is how a test fails
 #![allow(dead_code)] // each test binary uses a different subset
 
 use std::cell::Cell;

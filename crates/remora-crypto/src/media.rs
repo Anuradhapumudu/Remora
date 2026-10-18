@@ -17,7 +17,10 @@
 
 use std::collections::{HashMap, HashSet};
 
+use chacha20poly1305::aead::{Aead, KeyInit, Payload};
+use chacha20poly1305::{ChaCha20Poly1305, Key, Nonce};
 use remora_proto::datagram::{DatagramError, DatagramHeader};
+use remora_proto::limits::{AEAD_TAG_LEN, DATAGRAM_HEADER_LEN, DATAGRAM_MAX};
 
 use crate::secret::MediaKey;
 
@@ -100,9 +103,49 @@ impl MediaSender {
     /// **overwritten** with this sender's values; the caller cannot choose
     /// the counter.
     pub fn seal(&mut self, header: DatagramHeader, body: &[u8]) -> Result<Vec<u8>, MediaError> {
-        let _ = (header, body);
-        todo!()
+        if body.len() > DATAGRAM_MAX - DATAGRAM_HEADER_LEN - AEAD_TAG_LEN {
+            return Err(MediaError::BodyTooLarge);
+        }
+        // The only place a counter is chosen; it only ever increases, and a
+        // key stops at 2³² packets. So (key, nonce) can never repeat (A13).
+        if self.next_counter >= MAX_PACKETS_PER_KEY {
+            return Err(MediaError::KeyExhausted);
+        }
+        let header = DatagramHeader {
+            key_id: self.key_id,
+            counter: self.next_counter,
+            ..header
+        };
+        let aad = header.encode();
+        let ct = cipher(&self.key)
+            .encrypt(
+                &nonce(self.next_counter),
+                Payload {
+                    msg: body,
+                    aad: &aad,
+                },
+            )
+            .map_err(|_| MediaError::BodyTooLarge)?;
+        self.next_counter += 1;
+        let mut out = Vec::with_capacity(aad.len() + ct.len());
+        out.extend_from_slice(&aad);
+        out.extend_from_slice(&ct);
+        Ok(out)
     }
+}
+
+/// `4 zero bytes ‖ counter_be` (protocol.md §6).
+fn nonce(counter: u64) -> Nonce {
+    let mut n = [0u8; 12];
+    n[4..].copy_from_slice(&counter.to_be_bytes());
+    Nonce::from(n)
+}
+
+/// A cipher for one operation. ChaCha20 has no key schedule, so building
+/// it per packet is cheap and keeps the only long-lived key copy inside the
+/// zeroizing [`MediaKey`].
+fn cipher(key: &MediaKey) -> ChaCha20Poly1305 {
+    ChaCha20Poly1305::new(Key::from_slice(&key.0))
 }
 
 /// Sliding replay window for one key.
@@ -110,6 +153,67 @@ impl MediaSender {
 pub(crate) struct ReplayWindow {
     pub(crate) highest: Option<u64>,
     pub(crate) bitmap: [u64; (REPLAY_WINDOW / 64) as usize],
+}
+
+/// Bit `i` of the bitmap (word `i / 64`, bit `i % 64`) means "counter
+/// `highest - i` was accepted".
+impl ReplayWindow {
+    fn check(&self, counter: u64) -> Result<(), MediaDrop> {
+        let Some(highest) = self.highest else {
+            return Ok(());
+        };
+        if counter > highest {
+            return Ok(());
+        }
+        let age = highest - counter;
+        if age >= REPLAY_WINDOW {
+            return Err(MediaDrop::TooOld);
+        }
+        if self.bitmap[(age / 64) as usize] & (1 << (age % 64)) != 0 {
+            return Err(MediaDrop::Replay);
+        }
+        Ok(())
+    }
+
+    /// Records an accepted counter (after [`ReplayWindow::check`] passed).
+    fn mark(&mut self, counter: u64) {
+        match self.highest {
+            Some(highest) if counter <= highest => {
+                let age = highest - counter;
+                self.bitmap[(age / 64) as usize] |= 1 << (age % 64);
+            }
+            Some(highest) => {
+                self.shift(counter - highest);
+                self.highest = Some(counter);
+                self.bitmap[0] |= 1;
+            }
+            None => {
+                self.highest = Some(counter);
+                self.bitmap[0] |= 1;
+            }
+        }
+    }
+
+    /// Ages every entry by `by` positions (towards higher bit indices);
+    /// entries older than the window fall off.
+    fn shift(&mut self, by: u64) {
+        if by >= REPLAY_WINDOW {
+            self.bitmap = [0; (REPLAY_WINDOW / 64) as usize];
+            return;
+        }
+        let words = (by / 64) as usize;
+        let bits = (by % 64) as u32;
+        let n = self.bitmap.len();
+        for i in (0..n).rev() {
+            let src = i.checked_sub(words);
+            let hi = src.map_or(0, |s| self.bitmap[s] << bits);
+            let lo = match src.and_then(|s| s.checked_sub(1)) {
+                Some(s) if bits > 0 => self.bitmap[s] >> (64 - bits),
+                _ => 0,
+            };
+            self.bitmap[i] = hi | lo;
+        }
+    }
 }
 
 impl Default for ReplayWindow {
@@ -147,20 +251,51 @@ impl MediaReceiver {
     /// Installs an announced key. A `key_id` can be installed only once per
     /// session (A13).
     pub fn add_key(&mut self, key_id: u16, key: MediaKey) -> Result<(), MediaError> {
-        let _ = (key_id, key);
-        todo!()
+        if self.used_ids.contains(&key_id) {
+            return Err(MediaError::KeyIdReused(key_id));
+        }
+        if self.keys.len() >= MAX_LIVE_KEYS {
+            return Err(MediaError::TooManyKeys);
+        }
+        self.used_ids.insert(key_id);
+        self.keys.insert(key_id, (key, ReplayWindow::default()));
+        Ok(())
     }
 
     /// Forgets a rotated-out key (its `key_id` stays used).
     pub fn remove_key(&mut self, key_id: u16) {
-        let _ = key_id;
-        todo!()
+        self.keys.remove(&key_id);
     }
 
     /// Parses, authenticates and replay-checks one datagram.
     pub fn open(&mut self, datagram: &[u8]) -> Result<(DatagramHeader, Vec<u8>), MediaDrop> {
-        let _ = datagram;
-        todo!()
+        let r = self.open_inner(datagram);
+        if r.is_err() {
+            self.dropped += 1;
+        }
+        r
+    }
+
+    fn open_inner(&mut self, datagram: &[u8]) -> Result<(DatagramHeader, Vec<u8>), MediaDrop> {
+        let (header, body) = DatagramHeader::parse(datagram).map_err(MediaDrop::Header)?;
+        let (key, window) = self
+            .keys
+            .get_mut(&header.key_id)
+            .ok_or(MediaDrop::UnknownKey)?;
+        window.check(header.counter)?;
+        let plaintext = cipher(key)
+            .decrypt(
+                &nonce(header.counter),
+                Payload {
+                    msg: body,
+                    aad: &datagram[..DATAGRAM_HEADER_LEN],
+                },
+            )
+            .map_err(|_| MediaDrop::Auth)?;
+        // Only an authenticated packet may move the window: a forged
+        // far-ahead counter must not make genuine packets "too old".
+        window.mark(header.counter);
+        Ok((header, plaintext))
     }
 
     /// Datagrams dropped so far (any [`MediaDrop`]).

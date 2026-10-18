@@ -13,6 +13,10 @@
 //! Input longer than [`MAX_INPUT_BYTES`] is refused **before** normalising
 //! (NFKC can expand text, so it must not run on unbounded input — INV7).
 
+use unicode_normalization::UnicodeNormalization;
+use unicode_normalization::char::is_combining_mark;
+use zeroize::Zeroizing;
+
 use crate::secret::UnattendedPassword;
 
 /// Minimum length in non-combining characters.
@@ -84,6 +88,28 @@ pub(crate) const COMMON: &[&str] = &[
 /// Checks an unattended-access password against the policy and returns it
 /// normalised (NFKC).
 pub fn validate_unattended_password(input: &str) -> Result<UnattendedPassword, PasswordError> {
-    let _ = input;
-    todo!()
+    // Size first: NFKC must never run on unbounded input.
+    if input.len() > MAX_INPUT_BYTES {
+        return Err(PasswordError::InputTooLarge);
+    }
+    // Intermediate copies hold the password too, so they are wiped as well.
+    let mut normalized: Zeroizing<String> = Zeroizing::new(input.nfkc().collect());
+    if normalized.chars().any(char::is_control) {
+        return Err(PasswordError::ControlCharacter);
+    }
+    let chars = normalized
+        .chars()
+        .filter(|&c| !is_combining_mark(c))
+        .count();
+    if chars < MIN_CHARS {
+        return Err(PasswordError::TooShort { chars });
+    }
+    if chars > MAX_CHARS {
+        return Err(PasswordError::TooLong { chars });
+    }
+    let lower: Zeroizing<String> = Zeroizing::new(normalized.to_lowercase());
+    if COMMON.contains(&lower.as_str()) {
+        return Err(PasswordError::Common);
+    }
+    Ok(UnattendedPassword(std::mem::take(&mut *normalized)))
 }

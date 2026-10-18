@@ -37,13 +37,25 @@ pub enum OtpError {
 impl Otp {
     /// Parses what the viewer's user typed: exactly six ASCII digits.
     pub fn parse(text: &str) -> Result<Self, OtpError> {
-        let _ = text;
-        todo!()
+        let bytes = text.as_bytes();
+        if bytes.len() != 6 {
+            return Err(OtpError::WrongLength);
+        }
+        let mut digits = [0u8; 6];
+        for (out, &b) in digits.iter_mut().zip(bytes) {
+            if !b.is_ascii_digit() {
+                return Err(OtpError::NotDigit);
+            }
+            *out = b;
+        }
+        Ok(Self(digits))
     }
 
     /// The digits, for showing on the host's screen. Never log this.
     pub fn reveal(&self) -> &str {
-        todo!()
+        // Every constructor stores six ASCII digits, so this cannot fail;
+        // the fallback avoids a panic path rather than handling a real case.
+        std::str::from_utf8(&self.0).unwrap_or("")
     }
 }
 

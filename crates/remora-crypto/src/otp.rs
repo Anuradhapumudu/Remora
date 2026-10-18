@@ -24,8 +24,20 @@ pub type ProductionRng = rand_core::OsRng;
 
 /// Draws a uniformly random six-digit OTP from `rng` by rejection sampling.
 pub fn generate_otp<R: RngCore + CryptoRng>(rng: &mut R) -> Otp {
-    let _ = rng;
-    todo!()
+    loop {
+        let draw = rng.next_u32();
+        if draw >= REJECT_FROM {
+            // Biased tail: throw it away and draw again (never map it).
+            continue;
+        }
+        let mut n = draw % OTP_SPACE;
+        let mut digits = [b'0'; 6];
+        for d in digits.iter_mut().rev() {
+            *d = b'0' + (n % 10) as u8;
+            n /= 10;
+        }
+        return Otp(digits);
+    }
 }
 
 /// [`generate_otp`] with the OS CSPRNG ([`ProductionRng`]).

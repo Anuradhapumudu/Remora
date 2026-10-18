@@ -1,5 +1,6 @@
 //! phase3-criteria A15 (cert binding and `verify_strict`), device ID and the
 //! cert parser's limits (A26). Written before the implementation.
+#![allow(clippy::unwrap_used, clippy::expect_used)] // test code: a panic is how a test fails
 
 use blake2::{Blake2s256, Digest};
 use rand_core::OsRng;
@@ -234,4 +235,22 @@ fn device_id_is_the_first_80_bits_of_the_domain_separated_hash() {
         DeviceId::of(&IdentityPublic::from_bytes([0; 32])),
         DeviceId::of(&IdentityPublic::from_bytes([1; 32]))
     );
+}
+
+#[test]
+fn layout_constants_are_exact() {
+    // Mutation-gate finding: the constants were only compared with
+    // themselves. Pin them to the documented layout (protocol.md §3.2).
+    assert_eq!(CERT_FIXED_LEN, 137);
+    assert_eq!(CERT_MAX_LEN, 201);
+    let id = IdentityKeypair::generate(&mut OsRng);
+    let max = id
+        .sign_cert(&noise_key(1), &"n".repeat(64), 1)
+        .unwrap()
+        .encode();
+    assert_eq!(max.len(), 201);
+    assert!(IdentityCert::decode(&max).is_ok());
+    let mut over = max.clone();
+    over.push(0);
+    assert_eq!(IdentityCert::decode(&over).unwrap_err(), CertError::TooLong);
 }

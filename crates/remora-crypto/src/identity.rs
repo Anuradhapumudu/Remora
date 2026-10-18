@@ -17,7 +17,8 @@
 //! signature         64   Ed25519 over CERT_CONTEXT ‖ noise_static_pub ‖ name_len ‖ device_name ‖ created_unix
 //! ```
 
-use ed25519_dalek::SigningKey;
+use blake2::{Blake2s256, Digest};
+use ed25519_dalek::{Signature, Signer, SigningKey, VerifyingKey};
 use rand_core::{CryptoRng, RngCore};
 
 use remora_proto::limits::DEVICE_NAME_MAX;
@@ -77,8 +78,13 @@ pub struct DeviceId(pub(crate) [u8; DEVICE_ID_LEN]);
 impl DeviceId {
     /// The device ID of `key`.
     pub fn of(key: &IdentityPublic) -> Self {
-        let _ = key;
-        todo!()
+        let mut d = Blake2s256::new();
+        d.update(DEVICE_ID_CONTEXT);
+        d.update(key.0);
+        let full = d.finalize();
+        let mut id = [0u8; DEVICE_ID_LEN];
+        id.copy_from_slice(&full[..DEVICE_ID_LEN]);
+        Self(id)
     }
 
     /// The raw 10 bytes (as carried in `HostHello`).
@@ -122,8 +128,15 @@ impl IdentityKeypair {
         device_name: &str,
         created_unix: u64,
     ) -> Result<IdentityCert, CertError> {
-        let _ = (noise_static, device_name, created_unix);
-        todo!()
+        let name_len = name_len(device_name)?;
+        let msg = signed_message(noise_static, name_len, device_name.as_bytes(), created_unix);
+        Ok(IdentityCert {
+            identity: self.public(),
+            noise_static: *noise_static,
+            device_name: device_name.to_owned(),
+            created_unix,
+            signature: self.0.sign(&msg).to_bytes(),
+        })
     }
 }
 
@@ -184,18 +197,101 @@ impl IdentityCert {
 
     /// Encodes the fixed layout above.
     pub fn encode(&self) -> Vec<u8> {
-        todo!()
+        let name = self.device_name.as_bytes();
+        let mut b = Vec::with_capacity(CERT_FIXED_LEN + name.len());
+        b.extend_from_slice(&self.identity.0);
+        b.extend_from_slice(&self.noise_static.0);
+        b.extend_from_slice(&self.created_unix.to_be_bytes());
+        // sign_cert/decode guarantee ≤ 64 bytes, so this always fits a u8.
+        b.push(u8::try_from(name.len()).unwrap_or(u8::MAX));
+        b.extend_from_slice(name);
+        b.extend_from_slice(&self.signature);
+        b
     }
 
     /// Parses an encoded cert. Checks lengths before allocating; does **not**
     /// verify the signature (call [`IdentityCert::verify`]).
     pub fn decode(bytes: &[u8]) -> Result<Self, CertError> {
-        let _ = bytes;
-        todo!()
+        // Every length is checked before anything is allocated.
+        if bytes.len() > CERT_MAX_LEN {
+            return Err(CertError::TooLong);
+        }
+        if bytes.len() < CERT_FIXED_LEN {
+            return Err(CertError::Truncated);
+        }
+        let name_len = usize::from(bytes[NAME_LEN_AT]);
+        if name_len > DEVICE_NAME_MAX {
+            return Err(CertError::NameTooLong);
+        }
+        let expected = CERT_FIXED_LEN + name_len;
+        if bytes.len() < expected {
+            return Err(CertError::Truncated);
+        }
+        if bytes.len() > expected {
+            return Err(CertError::TooLong);
+        }
+        let name_end = NAME_LEN_AT + 1 + name_len;
+        let device_name = std::str::from_utf8(&bytes[NAME_LEN_AT + 1..name_end])
+            .map_err(|_| CertError::NameNotUtf8)?
+            .to_owned();
+        Ok(IdentityCert {
+            identity: IdentityPublic(array(&bytes[0..32])),
+            noise_static: NoiseStaticPublic(array(&bytes[32..64])),
+            created_unix: u64::from_be_bytes(array(&bytes[64..72])),
+            device_name,
+            signature: array(&bytes[name_end..]),
+        })
     }
 
     /// Checks the signature with `verify_strict`.
     pub fn verify(&self) -> Result<(), CertError> {
-        todo!()
+        let key =
+            VerifyingKey::from_bytes(&self.identity.0).map_err(|_| CertError::BadIdentityKey)?;
+        let name_len = name_len(&self.device_name)?;
+        let msg = signed_message(
+            &self.noise_static,
+            name_len,
+            self.device_name.as_bytes(),
+            self.created_unix,
+        );
+        // verify_strict, never verify: also rejects small-order keys and
+        // non-canonical signatures (C7).
+        key.verify_strict(&msg, &Signature::from_bytes(&self.signature))
+            .map_err(|_| CertError::SignatureInvalid)
     }
+}
+
+/// Offset of `name_len` in the encoding.
+const NAME_LEN_AT: usize = 72;
+
+/// The name's length as the one-byte field, or `NameTooLong`.
+fn name_len(device_name: &str) -> Result<u8, CertError> {
+    let len = device_name.len();
+    if len > DEVICE_NAME_MAX {
+        return Err(CertError::NameTooLong);
+    }
+    u8::try_from(len).map_err(|_| CertError::NameTooLong)
+}
+
+/// `CERT_CONTEXT ‖ noise_static ‖ name_len ‖ name ‖ u64_be(created_unix)`.
+fn signed_message(
+    noise_static: &NoiseStaticPublic,
+    name_len: u8,
+    name: &[u8],
+    created_unix: u64,
+) -> Vec<u8> {
+    let mut m = Vec::with_capacity(CERT_CONTEXT.len() + 32 + 1 + name.len() + 8);
+    m.extend_from_slice(CERT_CONTEXT);
+    m.extend_from_slice(&noise_static.0);
+    m.push(name_len);
+    m.extend_from_slice(name);
+    m.extend_from_slice(&created_unix.to_be_bytes());
+    m
+}
+
+/// Copies a slice whose length the caller has already checked.
+fn array<const N: usize>(s: &[u8]) -> [u8; N] {
+    let mut a = [0u8; N];
+    a.copy_from_slice(s);
+    a
 }
