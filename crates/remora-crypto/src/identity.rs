@@ -454,20 +454,38 @@ pub enum DeviceKeysError {
 impl DeviceKeys {
     /// Fresh keys from `rng`.
     pub fn generate<R: RngCore + CryptoRng>(rng: &mut R) -> Self {
-        let _ = rng;
-        todo!()
+        Self {
+            identity: IdentityKeypair::generate(rng),
+            noise: crate::noise::NoiseStaticKeypair::generate(rng),
+        }
     }
 
     /// `MAGIC ‖ ed25519_secret ‖ x25519_secret`, in a buffer that is wiped
     /// when dropped.
     pub fn encode(&self) -> zeroize::Zeroizing<Vec<u8>> {
-        todo!()
+        let mut out = zeroize::Zeroizing::new(Vec::with_capacity(DEVICE_KEYS_LEN));
+        out.extend_from_slice(DEVICE_KEYS_MAGIC);
+        out.extend_from_slice(&zeroize::Zeroizing::new(self.identity.0.to_bytes())[..]);
+        out.extend_from_slice(&self.noise.secret);
+        out
     }
 
     /// Parses [`DeviceKeys::encode`] output. Checks the length first.
     pub fn decode(bytes: &[u8]) -> Result<Self, DeviceKeysError> {
-        let _ = bytes;
-        todo!()
+        if bytes.len() != DEVICE_KEYS_LEN {
+            return Err(DeviceKeysError::WrongLength);
+        }
+        if &bytes[..8] != DEVICE_KEYS_MAGIC {
+            return Err(DeviceKeysError::BadMagic);
+        }
+        let mut id = zeroize::Zeroizing::new([0u8; 32]);
+        id.copy_from_slice(&bytes[8..40]);
+        let mut noise = zeroize::Zeroizing::new([0u8; 32]);
+        noise.copy_from_slice(&bytes[40..72]);
+        Ok(Self {
+            identity: IdentityKeypair(SigningKey::from_bytes(&id)),
+            noise: crate::noise::NoiseStaticKeypair::from_secret(*noise),
+        })
     }
 
     /// A cert binding the identity to the Noise key (for this session).

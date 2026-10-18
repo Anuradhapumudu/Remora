@@ -4,7 +4,9 @@
 use std::path::PathBuf;
 
 use rand_core::RngCore;
-use remora_app::keystore::{KeyStoreError, Role, default_path, load, load_or_create};
+use remora_app::keystore::{
+    KeyStoreError, Os, Role, config_dir_for, default_path, load, load_or_create,
+};
 use remora_testkit::{CountingAlloc, count_allocations};
 
 #[global_allocator]
@@ -122,4 +124,100 @@ fn write_owner_only(p: &std::path::Path, bytes: &[u8]) {
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(p, std::fs::Permissions::from_mode(0o600)).unwrap();
     }
+}
+
+// ------------------------------------------- mutation-gate findings ----
+
+#[test]
+fn default_path_is_absolute_and_under_this_os_config_dir() {
+    let h = default_path(Role::Host).unwrap();
+    assert!(h.is_absolute(), "{h:?}");
+    let dir = config_dir_for(Os::current(), |k| std::env::var_os(k)).unwrap();
+    assert_eq!(h, dir.join("Remora").join("host-identity.key"));
+}
+
+#[test]
+fn config_dir_rule_for_every_os() {
+    use std::ffi::OsString;
+    let env = |pairs: &'static [(&'static str, &'static str)]| {
+        move |k: &str| {
+            pairs
+                .iter()
+                .find(|(n, _)| *n == k)
+                .map(|(_, v)| OsString::from(v))
+        }
+    };
+    let home = if cfg!(windows) {
+        "C:\\Users\\u"
+    } else {
+        "/home/u"
+    };
+    let _ = home;
+    // macOS
+    let mac = config_dir_for(Os::MacOs, env(&[("HOME", "/Users/u")])).unwrap();
+    assert_eq!(
+        mac,
+        std::path::Path::new("/Users/u")
+            .join("Library")
+            .join("Application Support")
+    );
+    // Linux: XDG wins, else ~/.config
+    let xdg = config_dir_for(
+        Os::OtherUnix,
+        env(&[("XDG_CONFIG_HOME", "/x"), ("HOME", "/home/u")]),
+    )
+    .unwrap();
+    assert_eq!(xdg, PathBuf::from("/x"));
+    let dot = config_dir_for(Os::OtherUnix, env(&[("HOME", "/home/u")])).unwrap();
+    assert_eq!(dot, std::path::Path::new("/home/u").join(".config"));
+    // Missing, empty or RELATIVE values are never used (a key file must not
+    // land relative to the working directory).
+    assert_eq!(config_dir_for(Os::MacOs, env(&[])), None);
+    assert_eq!(config_dir_for(Os::OtherUnix, env(&[("HOME", "")])), None);
+    assert_eq!(
+        config_dir_for(
+            Os::OtherUnix,
+            env(&[("XDG_CONFIG_HOME", "rel"), ("HOME", "rel2")])
+        ),
+        None
+    );
+    assert_eq!(
+        config_dir_for(Os::MacOs, env(&[("HOME", "relative/home")])),
+        None
+    );
+    #[cfg(unix)]
+    assert_eq!(
+        config_dir_for(Os::Windows, env(&[("APPDATA", "/appdata")])),
+        Some(PathBuf::from("/appdata"))
+    );
+    assert_eq!(config_dir_for(Os::Windows, env(&[])), None);
+}
+
+#[cfg(unix)]
+#[test]
+fn the_key_directory_is_created_owner_only() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tmp_dir().join("fresh-config").join("Remora");
+    load_or_create(&dir.join("k.key")).unwrap();
+    let mode = std::fs::metadata(&dir).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode, 0o700);
+}
+
+#[cfg(unix)]
+#[test]
+fn a_creation_error_is_reported_as_itself_not_as_a_missing_file() {
+    // Only "already exists" means "load the existing file"; any other error
+    // creating the file (here: no write permission on the directory) must
+    // surface as that error.
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tmp_dir().join("readonly");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o500)).unwrap();
+    match load_or_create(&dir.join("k.key")) {
+        Err(KeyStoreError::Io(e)) => {
+            assert_eq!(e.kind(), std::io::ErrorKind::PermissionDenied, "{e}")
+        }
+        other => panic!("{other:?}"),
+    }
+    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
 }

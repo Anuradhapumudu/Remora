@@ -103,6 +103,7 @@ accepted by the owner) before v0.1:
 | No formal model of the handshake composition; `spake2` crate unaudited (python-spake2 compatible, not RFC 9382) | Out of scope for tests (phase3-criteria.md §6) | External review / ProVerif-Tamarin model before v1.0 |
 | **v1.0 review question:** replace SPAKE2 (python-spake2 variant) with CPace (IRTF CFRG draft) or an RFC 9382 implementation — crypto-claims-audit.md §1 | Swap is prepared by the `Pake` abstraction | Before v1.0 |
 | **Decay risk: INV11 is partly manual** (session indicator) — manual checks get skipped | No UI yet | Phase 4: automated CLI indicator check; Phase 7: automated GUI test (indicator visible for the whole `Active` period, button reaches `Closed` within 1 s) |
+| **Device keys are in a file, not the OS keychain** (owner decision 2026-10-19, D31): 0600 on Unix and refused if others can read it; on Windows only the profile directory's default ACL protects it (no permission check) | Phase 3 needed persistent keys for trusted mode and A19 | Before v0.1: move to the OS keychain (keyring 4.x, re-verify its API) |
 | Remove the dev signing identity + RemoraDev screen-recording grant (phase2-criteria.md §7) — kept by owner decision while developing | Still needed for development | End of Phase 4 |
 | Host must restart capture after −3815 (display sleep, lid close, display removed) — measured in Phase 2, not implemented yet | Phase 2 only measured it | Phase 4 (streaming) / 6 |
 
