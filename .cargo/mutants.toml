@@ -24,6 +24,8 @@ examine_globs = [
     "crates/remora-net/src/host.rs",
     "crates/remora-net/src/wire.rs",
     "crates/remora-net/src/lib.rs",
+    # Device key file: owner-only creation and refusal rules are a control.
+    "crates/remora-app/src/keystore.rs",
 ]
 
 # Test-only modules inside src/ (they ARE the tests; mutating them is noise).

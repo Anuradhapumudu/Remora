@@ -417,3 +417,62 @@ impl std::fmt::Display for ShortCode {
         Ok(())
     }
 }
+
+/// Magic prefix of an encoded [`DeviceKeys`] (format version 1).
+pub const DEVICE_KEYS_MAGIC: &[u8; 8] = b"REMORAK1";
+/// Encoded size: magic + Ed25519 secret + X25519 secret.
+pub const DEVICE_KEYS_LEN: usize = 8 + 32 + 32;
+
+/// A device's two long-term secrets: its Ed25519 identity key and its
+/// Noise (X25519) static key. Wiped on drop; `Debug` prints `[redacted]`.
+pub struct DeviceKeys {
+    /// Identity (signing) key.
+    pub identity: IdentityKeypair,
+    /// Noise static key.
+    pub noise: crate::noise::NoiseStaticKeypair,
+}
+
+impl std::fmt::Debug for DeviceKeys {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("[redacted]")
+    }
+}
+
+impl zeroize::ZeroizeOnDrop for DeviceKeys {}
+
+/// Why stored device keys were refused.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum DeviceKeysError {
+    /// Not exactly [`DEVICE_KEYS_LEN`] bytes.
+    #[error("device key data has the wrong length")]
+    WrongLength,
+    /// Does not start with [`DEVICE_KEYS_MAGIC`].
+    #[error("not a Remora device key file (bad magic)")]
+    BadMagic,
+}
+
+impl DeviceKeys {
+    /// Fresh keys from `rng`.
+    pub fn generate<R: RngCore + CryptoRng>(rng: &mut R) -> Self {
+        let _ = rng;
+        todo!()
+    }
+
+    /// `MAGIC ‖ ed25519_secret ‖ x25519_secret`, in a buffer that is wiped
+    /// when dropped.
+    pub fn encode(&self) -> zeroize::Zeroizing<Vec<u8>> {
+        todo!()
+    }
+
+    /// Parses [`DeviceKeys::encode`] output. Checks the length first.
+    pub fn decode(bytes: &[u8]) -> Result<Self, DeviceKeysError> {
+        let _ = bytes;
+        todo!()
+    }
+
+    /// A cert binding the identity to the Noise key (for this session).
+    pub fn cert(&self, device_name: &str, created_unix: u64) -> Result<IdentityCert, CertError> {
+        self.identity
+            .sign_cert(self.noise.public(), device_name, created_unix)
+    }
+}

@@ -1,0 +1,23 @@
+[package]
+name = "remora-app"
+description = "Remora application support shared by the host and viewer: device key storage and CLI helpers."
+version.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+license = "GPL-3.0-or-later"
+
+[dependencies]
+remora-crypto = { workspace = true }
+rand_core = { workspace = true }
+thiserror = { workspace = true }
+zeroize = { workspace = true }
+
+[dev-dependencies]
+remora-testkit = { workspace = true }
+
+[lints]
+workspace = true

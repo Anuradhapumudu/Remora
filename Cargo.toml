@@ -27,6 +27,7 @@ remora-capture = { path = "crates/remora-capture" }
 remora-codec = { path = "crates/remora-codec" }
 remora-input = { path = "crates/remora-input" }
 remora-testkit = { path = "crates/remora-testkit" }
+remora-app = { path = "crates/remora-app" }
 
 # async + network
 tokio = { version = "1.53", default-features = false }
