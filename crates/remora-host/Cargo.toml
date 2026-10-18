@@ -11,8 +11,15 @@ publish.workspace = true
 license = "GPL-3.0-or-later"
 
 [dependencies]
+remora-app = { workspace = true }
+remora-crypto = { workspace = true }
+remora-net = { workspace = true }
+remora-proto = { workspace = true }
+remora-session = { workspace = true }
 anyhow = { workspace = true }
 clap = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync", "time"] }
+tracing-subscriber = { workspace = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 remora-capture = { workspace = true }

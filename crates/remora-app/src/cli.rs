@@ -30,20 +30,28 @@ pub enum CliError {
 
 /// A safety code as people read it aloud: `123 456`.
 pub fn format_sas(sas: Sas) -> String {
-    let _ = sas;
-    todo!()
+    let s = sas.to_string(); // always six digits
+    format!("{} {}", &s[..3], &s[3..])
 }
 
 /// An identity key as 64 lowercase hex digits.
 pub fn identity_hex(key: &IdentityPublic) -> String {
-    let _ = key;
-    todo!()
+    key.as_bytes().iter().map(|b| format!("{b:02x}")).collect()
 }
 
 /// Parses 64 hex digits (either case) into an identity key.
 pub fn parse_identity(text: &str) -> Result<IdentityPublic, CliError> {
-    let _ = text;
-    todo!()
+    let bytes = text.as_bytes();
+    if bytes.len() != 64 || !bytes.iter().all(u8::is_ascii_hexdigit) {
+        return Err(CliError::BadIdentity);
+    }
+    let mut key = [0u8; 32];
+    for (i, b) in key.iter_mut().enumerate() {
+        let pair =
+            std::str::from_utf8(&bytes[2 * i..2 * i + 2]).map_err(|_| CliError::BadIdentity)?;
+        *b = u8::from_str_radix(pair, 16).map_err(|_| CliError::BadIdentity)?;
+    }
+    Ok(IdentityPublic::from_bytes(key))
 }
 
 /// The device short code of an identity key.
@@ -68,18 +76,22 @@ pub fn offer_code(
     now: u64,
     ttl_secs: u64,
 ) -> String {
-    let _ = (
-        addr,
-        identity,
+    use rand_core::RngCore;
+    let mut ice_ufrag = [0u8; 4];
+    let mut ice_pwd = [0u8; 16];
+    rand_core::OsRng.fill_bytes(&mut ice_ufrag);
+    rand_core::OsRng.fill_bytes(&mut ice_pwd);
+    ConnectionCode {
+        kind: CodeKind::Offer,
+        expires_at: u32::try_from(now.saturating_add(ttl_secs)).unwrap_or(u32::MAX),
         nonce,
-        now,
-        ttl_secs,
-        Candidate {
+        identity_key: *identity.as_bytes(),
+        ice_ufrag,
+        ice_pwd,
+        candidates: vec![Candidate {
             kind: CandidateKind::Host,
             addr,
-        },
-        CodeKind::Offer,
-    );
-    let _: Option<ConnectionCode> = None;
-    todo!()
+        }],
+    }
+    .encode()
 }

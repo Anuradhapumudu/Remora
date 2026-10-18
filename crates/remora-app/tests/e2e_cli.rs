@@ -367,8 +367,8 @@ fn a19_pinned_host_whose_key_changed_is_a_hard_failure() {
 
 // ------------------------------------------------------------------ A22 --
 
-#[test]
-fn a22_two_pending_sessions_accepting_one_activates_only_it() {
+/// Two viewers pending on one host; returns (host, [(viewer, id)] x 2).
+fn two_pending() -> (Host, Vec<(App, String)>) {
     let dir = tmp_dir();
     let mut host = start_host(&dir, &[]);
     let mut a = connect_viewer(&dir, &host.code, &["--password", &host.password]);
@@ -382,20 +382,40 @@ fn a22_two_pending_sessions_accepting_one_activates_only_it() {
     let (id_b, _) = parse_prompt(&host.app.expect("prompt ", 15));
     b.expect("safety code:", 15);
     assert_ne!(id_a, id_b);
-    host.app.send(&format!("accept {id_a}"));
-    host.app.expect(&format!("SESSION ACTIVE {id_a}"), 10);
-    a.expect("SESSION ACTIVE", 10);
-    assert!(
-        !b.sees_within("SESSION ACTIVE", 1500),
-        "B must stay pending"
-    );
-    assert!(
-        !host
-            .app
-            .seen
-            .iter()
-            .any(|l| l.starts_with(&format!("SESSION ACTIVE {id_b}")))
-    );
+    (host, vec![(a, id_a), (b, id_b)])
+}
+
+#[test]
+fn a22_two_pending_sessions_accepting_one_activates_only_it() {
+    // Chosen ADVERSARIALLY: once the session with the smaller id, once the
+    // larger. A bug that approves by order (largest / smallest / first /
+    // last) instead of by the id typed is then caught every time; with
+    // random ids a single fixed choice would let such a bug pass whenever
+    // its pick happened to coincide (found by planting exactly that bug).
+    for pick_larger in [false, true] {
+        let (mut host, mut viewers) = two_pending();
+        let larger = usize::from(
+            viewers[1].1.parse::<u64>().unwrap() > viewers[0].1.parse::<u64>().unwrap(),
+        );
+        let chosen = if pick_larger { larger } else { 1 - larger };
+        let other = 1 - chosen;
+        let chosen_id = viewers[chosen].1.clone();
+        let other_id = viewers[other].1.clone();
+        host.app.send(&format!("accept {chosen_id}"));
+        host.app.expect(&format!("SESSION ACTIVE {chosen_id}"), 10);
+        viewers[chosen].0.expect("SESSION ACTIVE", 10);
+        assert!(
+            !viewers[other].0.sees_within("SESSION ACTIVE", 1500),
+            "the other session must stay pending"
+        );
+        assert!(
+            !host
+                .app
+                .seen
+                .iter()
+                .any(|l| l.starts_with(&format!("SESSION ACTIVE {other_id}")))
+        );
+    }
 }
 
 #[test]

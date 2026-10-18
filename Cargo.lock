@@ -1213,8 +1213,15 @@ dependencies = [
  "anyhow",
  "clap",
  "objc2-foundation",
+ "remora-app",
  "remora-capture",
  "remora-codec",
+ "remora-crypto",
+ "remora-net",
+ "remora-proto",
+ "remora-session",
+ "tokio",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -1277,6 +1284,17 @@ dependencies = [
 [[package]]
 name = "remora-viewer"
 version = "0.0.1"
+dependencies = [
+ "anyhow",
+ "clap",
+ "remora-app",
+ "remora-crypto",
+ "remora-net",
+ "remora-proto",
+ "remora-session",
+ "tokio",
+ "tracing-subscriber",
+]
 
 [[package]]
 name = "ring"
