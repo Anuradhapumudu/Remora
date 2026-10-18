@@ -31,7 +31,26 @@ jobs:
       - name: Install cargo-mutants 27.1.0
         run: cargo install --locked cargo-mutants@27.1.0
       - name: Run (fails if any in-scope mutant survives)
-        run: cargo mutants --no-shuffle -o mutants-out
+        # cargo-mutants exit codes: 0 all caught, 2 some MISSED, 3 some timed
+        # out (none missed), 4 baseline tests failed. A timeout is a mutant
+        # that makes the code hang, so the tests never pass: it is detected
+        # (gate rule since the proto step). Pass on 0 and 3 only, and list the
+        # timeouts so nobody mistakes them for a clean run.
+        run: |
+          set +e
+          cargo mutants --no-shuffle -o mutants-out
+          code=$?
+          set -e
+          if [ "$code" -eq 3 ]; then
+            {
+              echo "### Mutants that timed out (counted as detected)"
+              echo '```'
+              cat mutants-out/mutants.out/timeout.txt
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          exit "$code"
       - name: Keep the report
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
