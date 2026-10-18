@@ -124,7 +124,7 @@ fn hello_carries_version_mode_nonce_and_device_id() {
     let vh = ViewerHello::decode(c.v2h[0].as_slice()).unwrap();
     assert_eq!(vh.versions, vec![1]);
     assert_eq!(vh.mode, 1);
-    assert_eq!(vh.nonce, vec![3; 16]);
+    assert_eq!(vh.nonce, c.nonce.to_vec());
     let hh = HostHello::decode(c.h2v[0].as_slice()).unwrap();
     assert_eq!(hh.version, 1);
     assert_eq!(

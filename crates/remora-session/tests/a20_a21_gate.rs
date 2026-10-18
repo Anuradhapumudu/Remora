@@ -77,6 +77,7 @@ fn a20_host_hello_and_spake_states_reject_plaintext_app_messages() {
         assert_eq!(host.state(id), Some(State::Closed));
         // Spake state: the app message instead of SpakeA.
         let mut host = host_with(&h, vec![]);
+        host.issue_nonce(NONCE, T0.plus(300_000));
         let id = host
             .accept_connection(ip(1), exporter(7), T0, &mut OsRng)
             .unwrap();

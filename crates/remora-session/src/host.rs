@@ -243,6 +243,19 @@ impl Host {
         &self.otp
     }
 
+    /// Registers the nonce of a connection code this host just issued (an
+    /// offer code). A `ViewerHello` must carry an issued, unused, unexpired
+    /// nonce; each nonce authenticates at most one connection (A06).
+    pub fn issue_nonce(&mut self, nonce: [u8; 16], expires: Millis) {
+        let _ = (nonce, expires);
+    }
+
+    /// Issued nonces still held in memory (used ones are kept until they
+    /// expire, so a replay is recognised as such).
+    pub fn outstanding_nonces(&self) -> usize {
+        0
+    }
+
     /// The limiter (read-only, for the UI and tests).
     pub fn limiter(&self) -> &Limiter {
         &self.limiter

@@ -48,6 +48,7 @@ pub struct EvilViewer {
 }
 
 pub fn evil_viewer_pending(host: &mut Host, viewer: &Device, otp: &Otp) -> EvilViewer {
+    host.issue_nonce(NONCE, T0.plus(300_000));
     let id = host
         .accept_connection(ip(66), exporter(7), T0, &mut OsRng)
         .unwrap();

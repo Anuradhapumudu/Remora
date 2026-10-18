@@ -40,6 +40,10 @@ impl Millis {
     }
 }
 
+/// Issued connection-code nonces the host keeps at once (A06); beyond this
+/// the oldest is dropped.
+pub const MAX_OUTSTANDING_NONCES: usize = 64;
+
 /// Protocol version this build speaks.
 pub const PROTOCOL_VERSION: u32 = 1;
 /// The handshake must reach the approval prompt within this time (A24).

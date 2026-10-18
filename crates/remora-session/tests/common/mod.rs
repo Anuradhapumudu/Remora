@@ -119,6 +119,8 @@ impl Log {
 /// A host and one connected viewer, pumped in memory.
 pub struct Conn {
     pub id: SessionId,
+    /// The connection-code nonce this connection's hello carries.
+    pub nonce: [u8; 16],
     pub viewer: ViewerSession,
     pub log: Log,
     pub now: Millis,
@@ -162,9 +164,15 @@ pub fn start(
     let id = host
         .accept_connection(from, exporter(7), now, &mut OsRng)
         .expect("admitted");
-    let (viewer, first) = ViewerSession::start(viewer_cfg(viewer, mode), [3; 16], exporter(7), now);
+    // Every connection uses a fresh nonce the host issued (A06: nonces are
+    // single-use, as with real connection codes).
+    let mut nonce = [0u8; 16];
+    rand_core::RngCore::fill_bytes(&mut OsRng, &mut nonce);
+    host.issue_nonce(nonce, now.plus(300_000));
+    let (viewer, first) = ViewerSession::start(viewer_cfg(viewer, mode), nonce, exporter(7), now);
     let c = Conn {
         id,
+        nonce,
         viewer,
         log: Log::default(),
         now,

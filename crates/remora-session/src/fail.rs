@@ -74,6 +74,12 @@ pub enum FailReason {
     /// Pending cap, per-IP limit or cool-down.
     #[error("rate limited")]
     RateLimited,
+    /// The connection-code nonce in `ViewerHello` was already used (A06).
+    #[error("connection code nonce already used")]
+    NonceReused,
+    /// The connection code's nonce has expired (A06/A07).
+    #[error("connection code expired")]
+    Expired,
     /// Handshake deadline passed.
     #[error("handshake timed out")]
     Timeout,
@@ -95,6 +101,9 @@ pub enum AuthDetail {
     /// mode with no trusted devices.
     #[error("mode not available")]
     ModeUnavailable,
+    /// `ViewerHello` carries a nonce this host never issued (A06).
+    #[error("unknown connection code nonce")]
+    UnknownNonce,
 }
 
 /// What was malformed or forbidden (local log only).
@@ -130,7 +139,9 @@ impl FailReason {
         match self {
             FailReason::AuthFailed(_)
             | FailReason::IdentityMismatch
-            | FailReason::IdentityChanged => CloseCode::AuthFailed,
+            | FailReason::IdentityChanged
+            | FailReason::NonceReused
+            | FailReason::Expired => CloseCode::AuthFailed,
             // A frame of the wrong length is a framing error; a well-sized
             // but invalid element is an authentication failure (A32).
             FailReason::ProtocolViolation(Violation::PakeElement(PakeError::WrongLength {
