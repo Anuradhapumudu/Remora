@@ -38,7 +38,7 @@ once a workspace member actually uses it.
 |---|---|---|---|---|
 | tokio | 1.53 | 1.53.2 (1.53.3 < 14 days) | net, signal, apps | Async runtime; quinn requires it |
 | quinn | 0.11.12 | 0.11.12 (quinn-proto 0.11.19) | net | QUIC: datagrams, streams, migration, pluggable socket + congestion control |
-| rustls | 0.23.46 (`ring`) | 0.23.46 | net | quinn's TLS. Newest is 0.24.0-dev (pre-release) — not used |
+| rustls | 0.23.46 (`ring`) | 0.23.46 — **security-fix exception** (released 2026-10-14; RUSTSEC-2026-0346/0347/0348/0349 affect ≤ 0.23.45). This table listed it on 2026-10-17 without noticing it was < 14 days old (third slip, found by the crate-age job) | net | quinn's TLS. Newest is 0.24.0-dev (pre-release) — not used |
 | snow | 0.10.0 (`risky-raw-split` only if needed) | 0.10.0 | crypto | Noise Protocol Framework |
 | spake2 | 0.4.0 | 0.4.0 | crypto | PAKE. **Not independently audited** (threat model §9). 0.5.0-pre exists — not used |
 | ed25519-dalek | 2.2 | 2.2.0 | crypto | Identity keys. 3.0.0 exists but is on the next RustCrypto generation (D3) |
@@ -57,6 +57,7 @@ once a workspace member actually uses it.
 | protox | 0.9.1 | 0.9.1 (0.10.0 < 14 days) | proto (build) | Pure-Rust `.proto` compiler, so contributors don't need `protoc` |
 | reed-solomon-simd | 3.1.0 | 3.1.0 | net | FEC for video datagrams |
 | bytes | 1 | — | proto, net | Zero-copy buffers (quinn's buffer type) |
+| rcgen | 0.14.10, default features **off**, `crypto` + `ring` | 0.14.10 (2026-08-28) | net | Throw-away self-signed certificate per QUIC endpoint. TLS is untrusted plumbing (D1): authentication is Noise + the exporter binding, so the certificate only has to exist. From the rustls organisation; no PEM, no aws-lc-rs (D8). Pulls in `time` → `deranged` locked to **0.5.8** and `powerfmt` to **0.2.0** (newer ones < 14 days) |
 | objc2 | 0.6.4 | 0.6.4 (0.6.5 < 14 days) | capture, codec, input (macOS) | Objective-C runtime bindings; `define_class!` implements `SCStreamOutput` |
 | objc2-foundation, -core-foundation, -core-graphics, -screen-capture-kit, -video-toolbox, -core-media, -core-video | 0.3.2, default features **off** | 0.3.2 | capture, codec (macOS) | Generated Apple framework bindings; only the features we call (defaults pull in AVFoundation, Metal, OpenGL) |
 | block2 / dispatch2 | 0.6.2 / 0.3.1 | — | capture (macOS) | Objective-C completion blocks; ScreenCaptureKit's dispatch queue |
@@ -79,6 +80,18 @@ crates.io release date. Three were < 14 days old and were locked to the
 previous release, in both `Cargo.lock` and `fuzz/Cargo.lock`:
 `cc` 1.8.0 → **1.6.0** (1.7.0 was also < 14 days), `libc` 0.2.191 →
 **0.2.190**, `zeroize` 1.9.1 → **1.9.0**.
+
+**Security-fix exceptions.** A release younger than 14 days may be adopted
+only when it is the **first patched release** for RustSec advisories that
+affect the version we would otherwise use — staying on a known-vulnerable
+version to satisfy a supply-chain delay is the worse risk (priorities:
+security first). Each exception is one line in
+`.cargo/crate-age-exceptions.txt` (`crate version RUSTSEC-ID…`) and is
+**verified by the CI check against the RustSec advisory database** (same
+package, version listed as a `>=` patched bound), never trusted. Exceptions
+are reported as stale once the release is 14 days old. Current: `rustls
+0.23.46` (RUSTSEC-2026-0346…0349). Owner approval of this mechanism: pending
+(2026-10-18).
 
 **Remembering the rule was not enough.** When the check first ran over the
 phase-3 branch it found five more violations that earlier steps had locked
