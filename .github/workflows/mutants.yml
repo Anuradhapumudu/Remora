@@ -20,9 +20,35 @@ permissions:
   contents: read
 
 jobs:
+  # One job per crate in scope (phase3-criteria §7), derived from
+  # .cargo/mutants.toml so no crate can be left out by hand. This job also
+  # proves the per-crate lists add up to the whole-workspace list and that
+  # no crate has 0 mutants (a glob that matches nothing).
+  matrix:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    outputs:
+      crates: ${{ steps.scope.outputs.crates }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: rustup toolchain install
+      - name: Install cargo-mutants 27.1.0
+        run: cargo install --locked cargo-mutants@27.1.0
+      - name: Derive and verify the per-crate scope
+        id: scope
+        run: echo "crates=$(python3 -I scripts/ci/mutants-matrix.py --verify-lists)" >> "$GITHUB_OUTPUT"
+
   mutants:
+    needs: matrix
+    name: mutants (${{ matrix.crate }})
     runs-on: ubuntu-24.04
     timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        crate: ${{ fromJSON(needs.matrix.outputs.crates) }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -36,14 +62,22 @@ jobs:
         # that makes the code hang, so the tests never pass: it is detected
         # (gate rule since the proto step). Pass on 0 and 3 only, and list the
         # timeouts so nobody mistakes them for a clean run.
+        env:
+          CRATE: ${{ matrix.crate }}
         run: |
           set +e
-          cargo mutants --no-shuffle -o mutants-out
+          cargo mutants --no-shuffle -p "$CRATE" -o mutants-out
           code=$?
           set -e
+          tested=$(python3 -I -c "import json; print(json.load(open('mutants-out/mutants.out/outcomes.json'))['total_mutants'])")
+          echo "$CRATE: $tested mutants tested, exit $code"
+          if [ "$tested" -eq 0 ]; then
+            echo "::error::$CRATE: 0 mutants tested - scope matches nothing"
+            exit 1
+          fi
           if [ "$code" -eq 3 ]; then
             {
-              echo "### Mutants that timed out (counted as detected)"
+              echo "### $CRATE: mutants that timed out (counted as detected)"
               echo '```'
               cat mutants-out/mutants.out/timeout.txt
               echo '```'
@@ -55,5 +89,21 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: mutants-report
+          name: mutants-report-${{ matrix.crate }}
           path: mutants-out/mutants.out
+
+  # One stable check name for branch protection: green only if the scope
+  # was verified and every per-crate job passed.
+  gate:
+    needs: [matrix, mutants]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: All per-crate mutation jobs passed
+        env:
+          MATRIX: ${{ needs.matrix.result }}
+          MUTANTS: ${{ needs.mutants.result }}
+        run: |
+          echo "matrix: $MATRIX, mutants: $MUTANTS"
+          [ "$MATRIX" = success ] && [ "$MUTANTS" = success ]

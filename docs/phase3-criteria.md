@@ -308,6 +308,14 @@ Consequences for Phase 3:
   `remora-net`, and the validators in `remora-proto`.
 * **When:** a scheduled nightly workflow, and on pull requests that change those
   crates (path filter) — **not on every PR**.
+* **How (since 2026-10-18):** one CI job **per crate**, in parallel. The job
+  list is derived from `examine_globs` by `scripts/ci/mutants-matrix.py`, so a
+  crate added to the scope gets a job automatically. A setup job proves the
+  per-crate mutant lists add up exactly to the whole-workspace list and that
+  no crate has 0 mutants; each job fails if it tested 0 mutants; one `gate`
+  job is green only if all of them are. Same rule as before: 0 missed.
+  (Why: the single job took 62 of its 120 minutes before remora-net joined —
+  a gate that times out gets ignored, then disabled.)
 * **Pass: 100 % kill rate.** Every surviving mutant must be either killed by a
   new test, or individually justified in **one line** in a committed survivors
   file (the `exclude_re` list in `.cargo/mutants.toml`, one comment per entry) — e.g. *equivalent mutant: replaces `<` with
