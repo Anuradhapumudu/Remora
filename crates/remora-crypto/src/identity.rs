@@ -319,8 +319,9 @@ pub const DAMM_TABLE: [[u8; 10]; 10] = [
 
 /// The Damm check digit of `digits` (each 0–9).
 pub fn damm_check_digit(digits: &[u8]) -> u8 {
-    let _ = digits;
-    todo!()
+    digits.iter().fold(0u8, |interim, &d| {
+        DAMM_TABLE[usize::from(interim % 10)][usize::from(d % 10)]
+    })
 }
 
 /// A device's user-facing short code (protocol.md §3.2, D27): 11 digits
@@ -351,7 +352,17 @@ impl DeviceId {
     /// This device's short code: the first 64 bits of the ID (big-endian)
     /// mod 10¹¹, as 11 digits, plus the Damm check digit.
     pub fn short_code(&self) -> ShortCode {
-        todo!()
+        let mut first8 = [0u8; 8];
+        first8.copy_from_slice(&self.0[..8]);
+        // Taking the 11 least significant decimal digits IS "mod 10^11".
+        let mut n = u64::from_be_bytes(first8);
+        let mut code = [0u8; SHORT_CODE_DIGITS + 1];
+        for d in code[..SHORT_CODE_DIGITS].iter_mut().rev() {
+            *d = (n % 10) as u8;
+            n /= 10;
+        }
+        code[SHORT_CODE_DIGITS] = damm_check_digit(&code[..SHORT_CODE_DIGITS]);
+        ShortCode(code)
     }
 }
 
@@ -359,22 +370,50 @@ impl ShortCode {
     /// Parses what a user typed. Spaces and dashes are ignored; anything
     /// else must be a digit; the check digit must match.
     pub fn parse(text: &str) -> Result<Self, ShortCodeError> {
-        let _ = text;
-        todo!()
+        let mut code = [0u8; SHORT_CODE_DIGITS + 1];
+        let mut n = 0usize;
+        for c in text.chars() {
+            match c {
+                ' ' | '-' => continue,
+                '0'..='9' => {
+                    // Count before storing: overlong input is refused
+                    // without growing anything.
+                    if n == code.len() {
+                        return Err(ShortCodeError::WrongLength);
+                    }
+                    code[n] = c as u8 - b'0';
+                    n += 1;
+                }
+                _ => return Err(ShortCodeError::NotDigit),
+            }
+        }
+        if n != code.len() {
+            return Err(ShortCodeError::WrongLength);
+        }
+        if damm_check_digit(&code) != 0 {
+            return Err(ShortCodeError::CheckDigit);
+        }
+        Ok(ShortCode(code))
     }
 
     /// Whether this code is the short code of `id` (the viewer checks the
     /// host's cert key against the code it was given).
     pub fn matches(&self, id: &DeviceId) -> bool {
-        let _ = id;
-        todo!()
+        id.short_code() == *self
     }
 }
 
 impl std::fmt::Display for ShortCode {
     /// `DDDD DDD DDDD-C`.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let _ = f;
-        todo!()
+        for (i, d) in self.0.iter().enumerate() {
+            match i {
+                4 | 7 => f.write_str(" ")?,
+                SHORT_CODE_DIGITS => f.write_str("-")?,
+                _ => {}
+            }
+            write!(f, "{d}")?;
+        }
+        Ok(())
     }
 }

@@ -16,6 +16,10 @@ fn interim(ds: &[u8]) -> u8 {
 }
 
 #[test]
+#[allow(
+    clippy::needless_range_loop,
+    reason = "row r and column r are read side by side; indices state the property most plainly"
+)]
 fn damm_table_is_a_weakly_totally_antisymmetric_quasigroup_with_zero_diagonal() {
     for r in 0..10 {
         let mut row: Vec<u8> = DAMM_TABLE[r].to_vec();
