@@ -16,6 +16,13 @@ Usage:
 * The release time comes from the crates.io API (`created_at` of that exact
   version). Requests are spaced 1 s apart (crates.io crawler policy).
 * Fails CLOSED: if a version cannot be looked up, that is a failure, not a pass.
+* **Security-fix exceptions** (`.cargo/crate-age-exceptions.txt`, one line per
+  exception: `name version RUSTSEC-ID...`): a too-new release may be adopted
+  only if it is the first patched release for RustSec advisories that affect
+  the previous one. Each exception is VERIFIED, not trusted: every listed
+  advisory is fetched from the RustSec advisory database and must name the
+  same package with `">= <version>"` among its patched bounds. An exception
+  whose version is already >= 14 days old is reported as stale (remove it).
 
 Stdlib only (runs on the runners' system Python 3.10, so no tomllib).
 """
@@ -65,8 +72,58 @@ def fetch_created_at(name, version):
     raise RuntimeError(f"could not look up {name} {version}: {last}")
 
 
-def check(entries, fetch, now, pause=1.0):
+ADVISORY_URL = "https://raw.githubusercontent.com/rustsec/advisory-db/main/crates/{name}/{id}.md"
+
+
+def load_exceptions(path):
+    """{(name, version): [advisory ids]} from the exceptions file."""
+    out = {}
+    try:
+        with open(path, encoding="utf-8") as f:
+            lines = f.read().splitlines()
+    except FileNotFoundError:
+        return out
+    for n, line in enumerate(lines, 1):
+        line = line.split("#", 1)[0].strip()
+        if not line:
+            continue
+        parts = line.split()
+        if len(parts) < 3 or not all(re.fullmatch(r"RUSTSEC-\d{4}-\d{4}", p) for p in parts[2:]):
+            sys.exit(f"{path}:{n}: expected `name version RUSTSEC-YYYY-NNNN...`")
+        out[(parts[0], parts[1])] = parts[2:]
+    return out
+
+
+def fetch_advisory(name, advisory_id):
+    url = ADVISORY_URL.format(name=name, id=advisory_id)
+    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            return resp.read().decode("utf-8")
+    except urllib.error.URLError as e:
+        raise RuntimeError(f"could not fetch {advisory_id}: {e}") from e
+
+
+def exception_holds(name, version, ids, fetch_adv):
+    """None if every advisory names this package and patches exactly at
+    `version`; otherwise the reason it does not."""
+    for advisory_id in ids:
+        try:
+            text = fetch_adv(name, advisory_id)
+        except RuntimeError as e:
+            return str(e)
+        if f'package = "{name}"' not in text:
+            return f"{advisory_id} is not an advisory for {name}"
+        patched = re.search(r"^patched\s*=\s*\[(.*?)\]", text, re.M | re.S)
+        bounds = re.findall(r'">=\s*([^"]+)"', patched.group(1)) if patched else []
+        if version not in [b.strip() for b in bounds]:
+            return f"{advisory_id} does not name {version} as a first patched release ({bounds})"
+    return None
+
+
+def check(entries, fetch, now, pause=1.0, exceptions=None, fetch_adv=None):
     """Return a list of failure messages for entries younger than MIN_AGE."""
+    exceptions = exceptions or {}
     failures = []
     for i, (name, version) in enumerate(sorted(entries)):
         if i and pause:
@@ -77,6 +134,16 @@ def check(entries, fetch, now, pause=1.0):
             failures.append(f"UNVERIFIED {name} {version}: {e}")
             continue
         age = now - created
+        ids = exceptions.get((name, version))
+        if ids and age >= MIN_AGE:
+            print(f"STALE     exception for {name} {version} ({age.days} days old): remove it")
+        if ids and age < MIN_AGE:
+            why_not = exception_holds(name, version, ids, fetch_adv or fetch_advisory)
+            if why_not is None:
+                print(f"EXCEPTED  {name} {version} ({age.days} days): security fix for {', '.join(ids)}")
+                continue
+            failures.append(f"BAD EXCEPTION {name} {version}: {why_not}")
+            continue
         if age < MIN_AGE:
             failures.append(
                 f"TOO NEW   {name} {version}: released {created:%Y-%m-%d}, "
@@ -116,10 +183,30 @@ def self_test():
     flagged = sorted(re.match(r"(?:TOO NEW|UNVERIFIED) +(\S+)", f).group(1) for f in failures)
     assert flagged == ["edge-new", "fresh", "missing"], failures
     assert all(f.startswith(("TOO NEW", "UNVERIFIED")) for f in failures)
+    # Exceptions: verified against (fake) advisories, never trusted blindly.
+    advisories = {
+        ("fresh", "RUSTSEC-2026-0001"): 'package = "fresh"\npatched = [">= 2.0.0"]\n',
+        ("fresh", "RUSTSEC-2026-0002"): 'package = "other"\npatched = [">= 2.0.0"]\n',
+        ("fresh", "RUSTSEC-2026-0003"): 'package = "fresh"\npatched = [">= 1.9.0"]\n',
+    }
+
+    def fake_adv(name, advisory_id):
+        if (name, advisory_id) not in advisories:
+            raise RuntimeError("404")
+        return advisories[(name, advisory_id)]
+
+    def run(ids):
+        return check(entries, fake, now, pause=0, exceptions={("fresh", "2.0.0"): ids}, fetch_adv=fake_adv)
+
+    ok = sorted(re.match(r"(?:TOO NEW|UNVERIFIED) +(\S+)", f).group(1) for f in run(["RUSTSEC-2026-0001"]))
+    assert ok == ["edge-new", "missing"], ok
+    for bad_ids in (["RUSTSEC-2026-0002"], ["RUSTSEC-2026-0003"], ["RUSTSEC-2026-0009"],
+                    ["RUSTSEC-2026-0001", "RUSTSEC-2026-0002"]):
+        assert any(f.startswith("BAD EXCEPTION fresh") for f in run(bad_ids)), bad_ids
     # Diffing: an entry present at the base is not re-checked.
     base = lock.split("[[package]]\nname = \"fresh\"")[0]
     assert ("fresh", "2.0.0") in registry_entries(lock) - registry_entries(base)
-    print("self-test: ok (planted too-new, edge and unverifiable entries all caught)")
+    print("self-test: ok (planted too-new, edge, unverifiable entries and bad exceptions all caught)")
 
 
 def main():
@@ -142,7 +229,8 @@ def main():
             head -= registry_entries(lock_at(args.base, path))
         entries |= head
     print(f"checking {len(entries)} newly locked registry package(s)")
-    failures = check(entries, fetch_created_at, dt.datetime.now(dt.timezone.utc))
+    exceptions = load_exceptions(".cargo/crate-age-exceptions.txt")
+    failures = check(entries, fetch_created_at, dt.datetime.now(dt.timezone.utc), exceptions=exceptions)
     for f in failures:
         print(f, file=sys.stderr)
     if failures:
