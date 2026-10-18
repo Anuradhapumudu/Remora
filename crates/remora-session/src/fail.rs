@@ -127,6 +127,9 @@ pub enum Violation {
     /// A datagram before `Active`.
     #[error("datagram before approval")]
     DatagramBeforeActive,
+    /// The transport reported a bad length prefix or oversized frame (A26).
+    #[error("bad framing")]
+    Framing,
     /// A transport frame failed to decrypt (A10).
     #[error("transport frame failed to authenticate")]
     TransportAuth,

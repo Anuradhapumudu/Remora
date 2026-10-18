@@ -530,6 +530,29 @@ impl Host {
         out
     }
 
+    /// The transport could not frame the stream (bad length prefix,
+    /// oversized frame): the session ends as a protocol violation.
+    pub fn framing_error(&mut self, id: SessionId) -> Vec<HostAction> {
+        let mut out = Vec::new();
+        let Some(sess) = self.sessions.get(&id) else {
+            return out;
+        };
+        if matches!(sess.state, HostSessionState::Closed) {
+            return out;
+        }
+        let step = sess.state.step();
+        let prompt_open = matches!(sess.state, HostSessionState::Pending { .. });
+        self.fail(
+            id,
+            FailReason::ProtocolViolation(Violation::Framing),
+            step,
+            None,
+            prompt_open,
+            &mut out,
+        );
+        out
+    }
+
     /// The state of session `id`, if it exists.
     pub fn state(&self, id: SessionId) -> Option<State> {
         self.sessions.get(&id).map(|s| s.state.public())

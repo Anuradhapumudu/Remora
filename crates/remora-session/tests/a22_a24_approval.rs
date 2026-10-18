@@ -428,3 +428,44 @@ fn debug_output_shows_state_but_never_the_password() {
     let vd = format!("{:?}", c.viewer);
     assert!(vd.contains("PendingApproval"), "{vd}");
 }
+
+#[test]
+fn a26_framing_error_from_the_transport_ends_the_session_as_a_protocol_violation() {
+    // remora-net reports an oversized / malformed length prefix (A26); the
+    // session must end exactly like any other malformed message: one
+    // Failed, prompt withdrawn if open, PROTOCOL_VIOLATION, slot freed.
+    let (h, v) = (device("host"), device("viewer"));
+    let mut host = host_with(&h, vec![]);
+    let c = to_prompt(&mut host, &v, ip(1));
+    let acts = host.framing_error(c.id);
+    assert!(acts.iter().any(|a| matches!(
+        a,
+        HostAction::Failed {
+            reason: FailReason::ProtocolViolation(remora_session::Violation::Framing),
+            ..
+        }
+    )));
+    assert!(acts.contains(&HostAction::PromptClosed { id: c.id }));
+    assert!(acts.contains(&HostAction::Close {
+        id: c.id,
+        code: CloseCode::ProtocolViolation
+    }));
+    assert_eq!(host.state(c.id), Some(State::Closed));
+    assert_eq!(host.limiter().pending(), 0);
+    assert!(host.framing_error(c.id).is_empty(), "nothing after close");
+    // In an earlier state there is no prompt to withdraw.
+    let mut host = host_with(&h, vec![]);
+    let id = host
+        .accept_connection(ip(2), exporter(7), T0, &mut OsRng)
+        .unwrap();
+    let acts = host.framing_error(id);
+    assert!(
+        !acts
+            .iter()
+            .any(|a| matches!(a, HostAction::PromptClosed { .. }))
+    );
+    assert!(acts.contains(&HostAction::Close {
+        id,
+        code: CloseCode::ProtocolViolation
+    }));
+}
