@@ -369,15 +369,19 @@ the §7 mutation counts, fuzz hours per target, and the gaps carried forward.
 
 ## 11. Changes to criteria
 
-**Proposed 2026-10-18, awaiting owner approval (not yet in effect):**
+**2026-10-18 — A20 at the Noise steps (owner-approved).**
+New wording: *"`ProtocolViolation` where the frame is recognisable (plaintext
+Hello/Spake states, every encrypted state); `AuthFailed` at the Noise steps
+(host waiting for msg1 / msg3, viewer waiting for msg2). In every state:
+closed, never processed, injector/renderer count 0."*
 
-* **A20 at the Noise steps.** A20 requires `ProtocolViolation` for an
-  application message in every pre-`Active` state. At the Noise steps (host
-  waiting for msg1 / msg3, viewer waiting for msg2) a frame is only ever
-  decrypted as a handshake message, so an application message cannot be told
-  apart from a corrupted handshake message: it fails as one, with
-  `AuthFailed` (and, at msg1, counts as a password attempt). Proposed
-  wording: *"`ProtocolViolation` where the frame is recognisable (plaintext
-  Hello/Spake states, every encrypted state); `AuthFailed` at the Noise
-  steps. In every state: closed, never processed, injector/renderer count 0."*
-  The session tests (tests/a20_a21_gate.rs) are written to this wording.
+**Why — read this before "fixing" a test that expects `AuthFailed` for an
+unauthorized message.** At a Noise step the only thing the receiver may do
+with a frame is try to authenticate it as the next handshake message. An
+application message sent there fails that authentication exactly like a
+corrupted handshake message, and **that is the truthful outcome**: to report
+`ProtocolViolation` instead, the receiver would have to inspect the frame's
+content before authenticating it — decrypt-before-authenticate, which is
+worse. At msg1 such a frame also counts as a password attempt, like any
+msg1 that fails to authenticate. Tests: tests/a20_a21_gate.rs in
+remora-session.

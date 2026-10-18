@@ -152,8 +152,39 @@ matches.
   SAS. Codes may be shared, printed, and enumerated without harming security.
 * Without a routing service (copy-paste connection codes) the short code
   plays no part: the connection code carries the full 32-byte identity key.
-* Length, check digit and collision handling: **proposed 2026-10-18, awaiting
-  owner approval** — not implemented.
+
+**Short-code scheme (owner-approved 2026-10-18; not implemented yet):**
+
+* **Format:** 11 decimal digits derived from the full ID, plus 1 check
+  digit, e.g. `4829 135 5731-6`. One length for everyone: no short tier
+  that early adopters keep while later devices get longer codes. 11 digits
+  hold ~36.5 bits: collisions reach 50 % only around ~370 000 registered
+  devices, and grinding a key to match a given code costs ~10¹¹ tries
+  (~100× more than 9 digits).
+* **Derivation:** the first 64 bits of the full ID (big-endian) mod 10¹¹;
+  bias < 10⁻⁸.
+* **Check digit:** Damm algorithm (intended: detects every single-digit error
+  and every adjacent transposition, which Luhn does not). **Unverified —
+  must be checked against a primary source before it is implemented.**
+* **Collisions (routing service only):** the first device to register a code
+  keeps it permanently; a later device whose code is taken is told at
+  registration to show 2 more digits (the next digits of its own ID), and so
+  on. Every code stays derived from the key, so the viewer can check it.
+* **Proof of key ownership at registration:** the device signs a fresh
+  server challenge with its identity key; a code is never registered for a
+  key the registrant does not hold.
+* **What the code protects, honestly:** when a viewer connects by short code,
+  the routing service's answer is checked only against the code, so the
+  "wrong device" check (A16) is as strong as the code (~2³⁶ grinding), not
+  80 bits. The compensating controls are the password and the safety code.
+  After the first session whose safety code the user confirmed, the viewer
+  **pins the full identity key**; from then on A16/A19 compare the full key.
+* **UI requirement (Phase 7, owner):** on a first connection, until the
+  safety code has been confirmed, the viewer must **clearly mark the device
+  as unverified** (not just show the code): the safety code is the control
+  that compensates for squatting and grinding, so the UI must make
+  confirming it the obvious step. A device becomes "verified" only by that
+  confirmation, never by the short code matching.
 
 (80 bits: forging an ID for *someone else's* key needs ~2⁸⁰ work; two keys of
 the *same* attacker can collide after ~2⁴⁰, which is harmless because IDs only
