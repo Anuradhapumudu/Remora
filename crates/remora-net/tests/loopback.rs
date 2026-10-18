@@ -292,3 +292,52 @@ async fn debug_output_names_the_type_and_holds_no_secrets() {
     assert!(format!("{rx:?}").starts_with("FrameReceiver"));
     drop(conn);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn host_disconnect_ends_an_active_session_over_quic() {
+    // CI mutation-gate finding: HostServer::disconnect was exercised only by
+    // the CLI tests in remora-app, which the remora-net job does not run.
+    let (h, v) = (device("host"), device("viewer"));
+    let mut host = start_host(&h, vec![]).await;
+    let nonce = host.server.issue_nonce(Duration::from_secs(300));
+    let (_client, mut vev) = connect(
+        host.addr,
+        viewer_cfg(&v, password(&host.server.otp())),
+        nonce,
+    )
+    .await
+    .unwrap();
+    let Some(HostEvent::Prompt { id, sas, .. }) = host
+        .wait_for(5, |e| matches!(e, HostEvent::Prompt { .. }))
+        .await
+    else {
+        panic!("no prompt")
+    };
+    host.server.approve(id, sas).unwrap();
+    assert!(
+        viewer_wait(&mut vev, 5, |e| *e == ViewerEvent::Active)
+            .await
+            .is_some()
+    );
+    host.server.disconnect(id);
+    assert!(
+        host.wait_for(5, |e| *e
+            == HostEvent::Closed {
+                id,
+                code: CloseCode::Normal
+            })
+        .await
+        .is_some()
+    );
+    let closed = viewer_wait(&mut vev, 5, |e| matches!(e, ViewerEvent::Closed { .. })).await;
+    assert!(
+        matches!(
+            closed,
+            Some(ViewerEvent::Closed {
+                remote: Some(CloseCode::Normal),
+                ..
+            })
+        ),
+        "{closed:?}"
+    );
+}
