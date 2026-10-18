@@ -295,3 +295,86 @@ fn array<const N: usize>(s: &[u8]) -> [u8; N] {
     a.copy_from_slice(s);
     a
 }
+
+/// Number of digits derived from the device ID (owner decision, D27).
+pub const SHORT_CODE_DIGITS: usize = 11;
+
+/// The Damm algorithm's operation table: a totally anti-symmetric
+/// quasigroup of order 10. A check digit built with it detects every
+/// single-digit error and every adjacent transposition. Those properties
+/// are **proven by our own exhaustive test** (`tests/short_code.rs`), not
+/// taken from a citation.
+pub const DAMM_TABLE: [[u8; 10]; 10] = [
+    [0, 3, 1, 7, 5, 9, 8, 6, 4, 2],
+    [7, 0, 9, 2, 1, 5, 4, 8, 6, 3],
+    [4, 2, 0, 6, 8, 7, 1, 3, 5, 9],
+    [1, 7, 5, 0, 9, 8, 3, 4, 2, 6],
+    [6, 1, 2, 3, 0, 4, 5, 9, 7, 8],
+    [3, 6, 7, 4, 2, 0, 9, 5, 8, 1],
+    [5, 8, 6, 9, 7, 2, 0, 1, 3, 4],
+    [8, 9, 4, 5, 3, 6, 2, 0, 1, 7],
+    [9, 4, 3, 8, 6, 1, 7, 2, 0, 5],
+    [2, 5, 8, 1, 4, 3, 6, 7, 9, 0],
+];
+
+/// The Damm check digit of `digits` (each 0–9).
+pub fn damm_check_digit(digits: &[u8]) -> u8 {
+    let _ = digits;
+    todo!()
+}
+
+/// A device's user-facing short code (protocol.md §3.2, D27): 11 digits
+/// derived from the full 80-bit [`DeviceId`] plus a Damm check digit,
+/// shown as `4829 135 5731-6`.
+///
+/// **An address, not a credential.** The protocol never compares short
+/// codes; it compares full IDs and keys. Security comes from the one-time
+/// password and the safety code.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ShortCode(pub(crate) [u8; SHORT_CODE_DIGITS + 1]);
+
+/// Why a typed short code was refused.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum ShortCodeError {
+    /// Not 12 digits (after removing spaces and dashes).
+    #[error("a device code has 12 digits")]
+    WrongLength,
+    /// A character other than digits, spaces and dashes.
+    #[error("a device code contains only digits")]
+    NotDigit,
+    /// The check digit does not match (a typo).
+    #[error("device code check digit does not match (typo?)")]
+    CheckDigit,
+}
+
+impl DeviceId {
+    /// This device's short code: the first 64 bits of the ID (big-endian)
+    /// mod 10¹¹, as 11 digits, plus the Damm check digit.
+    pub fn short_code(&self) -> ShortCode {
+        todo!()
+    }
+}
+
+impl ShortCode {
+    /// Parses what a user typed. Spaces and dashes are ignored; anything
+    /// else must be a digit; the check digit must match.
+    pub fn parse(text: &str) -> Result<Self, ShortCodeError> {
+        let _ = text;
+        todo!()
+    }
+
+    /// Whether this code is the short code of `id` (the viewer checks the
+    /// host's cert key against the code it was given).
+    pub fn matches(&self, id: &DeviceId) -> bool {
+        let _ = id;
+        todo!()
+    }
+}
+
+impl std::fmt::Display for ShortCode {
+    /// `DDDD DDD DDDD-C`.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let _ = f;
+        todo!()
+    }
+}
