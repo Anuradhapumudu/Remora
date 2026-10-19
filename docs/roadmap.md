@@ -86,26 +86,38 @@ against the design, not the design itself):
    **Close by:** before v1.0 (target: alongside Phase 5, so it does not drift).
 3. Trusted-device (password-less) mode and identity pinning.
 
-## Known gaps before v0.1
+## Deferred items (the one tracked list)
 
-Things that could not be verified yet and must be closed (or explicitly
-accepted by the owner) before v0.1:
+Everything we know is not done yet, in **one** place (owner, 2026-10-19).
+Phase documents point here instead of keeping their own lists. **This list
+is reported, row by row, at the end of every phase** (CLAUDE.md) so nothing
+drifts quietly; a row leaves only when it is closed (with the evidence) or
+the owner accepts it.
 
-| Gap | Why open | Close by |
-|---|---|---|
-| MSI install / uninstall / upgrade-in-place on real Windows | No Windows machine yet | Phase 6.5 |
-| Windows spike on real hardware: hardware encoders (NVENC/QuickSync/AMF), GPU-memory frames, multi-monitor, DPI/HDR, ACCESS_LOST recovery, UIPI | GitHub runner has only Microsoft's software display driver | Phase 6.5 (needs a real Windows PC) |
-| macOS signing + notarization path | No Apple Developer ID yet | Before first public release |
-| Per-chip encoder floors for Intel Mac, NVENC, QuickSync, AMF | Only measured on Apple M4 | Phases 6.5 / 9 |
-| **Open question: unexplained ~2 ms benchmark drift.** The same capture+encode configuration measured C2 p50 ≈ 9.0 ms at 02:56–02:59 and ≈ 7.05 ms from 03:05 on (2026-10-17, M4), no thermal/performance warning. ~2 ms is ~10 % of the 20 ms budget. | Not reproduced or explained yet; machine state is now recorded with every run and disagreements > 1 ms are flagged | Phase 4 checks whether it reappears |
-| Physical display hotplug and the other untested Q4 cases (external monitor unplug/replug, clamshell, mirroring, arrangement, aspect/refresh/HDR changes, lock screen, fast user switching) — list in phase2-criteria.md §5.4 | No external display available; single-display subset tested | Phase 9 (or earlier if a monitor is available) |
-| Threat-model invariants not testable in Phase 3: INV2 on the real media path, INV9 (no pixels logged/written), INV10 (keys/buttons released), INV11 (session indicator, partly manual) — phase3-criteria.md §5 | No media/input path yet | INV2/INV9/INV11 in Phase 4, INV10 in Phase 6 |
-| No formal model of the handshake composition; `spake2` crate unaudited (python-spake2 compatible, not RFC 9382) | Out of scope for tests (phase3-criteria.md §6) | External review / ProVerif-Tamarin model before v1.0 |
-| **v1.0 review question:** replace SPAKE2 (python-spake2 variant) with CPace (IRTF CFRG draft) or an RFC 9382 implementation — crypto-claims-audit.md §1 | Swap is prepared by the `Pake` abstraction | Before v1.0 |
-| **Decay risk: INV11 is partly manual** (session indicator) — manual checks get skipped | No GUI yet | ~~Phase 4: automated CLI indicator check~~ **done in Phase 3** (end-to-end CLI tests); Phase 7: automated GUI test (indicator visible for the whole `Active` period, button reaches `Closed` within 1 s) |
-| **Device keys are in a file, not the OS keychain** (owner decision 2026-10-19, D31): 0600 on Unix and refused if others can read it; on Windows only the profile directory's default ACL protects it (no permission check) | Phase 3 needed persistent keys for trusted mode and A19 | Before v0.1: move to the OS keychain (keyring 4.x, re-verify its API) |
-| Remove the dev signing identity + RemoraDev screen-recording grant (phase2-criteria.md §7) — kept by owner decision while developing | Still needed for development | End of Phase 4 |
-| Host must restart capture after −3815 (display sleep, lid close, display removed) — measured in Phase 2, not implemented yet | Phase 2 only measured it | Phase 4 (streaming) / 6 |
+**Kind:** **BLOCKER** = must be closed before the named release/phase can
+be called done; *nice-to-have* = wanted, but its absence does not block it.
+
+| # | Item | Kind | Blocks / close by | Why it is deferred |
+|---|---|---|---|---|
+| D-1 | **INV2** — no media or input without encryption, tested on the **real media path** (loopback capture: UDP payload never plaintext) | **BLOCKER** | Phase 4 | No media path existed in Phase 3; only the media AEAD was tested (A11–A13) |
+| D-2 | **INV9** — no screen pixels logged or written to disk by the streaming path | **BLOCKER** | Phase 4 | No pixels flowed in Phase 3 |
+| D-3 | **INV10** — keys and mouse buttons released when a session ends for any reason | **BLOCKER** | Phase 6 | No input injection until Phase 6 |
+| D-4 | **INV11** — session indicator: automated **GUI** test (visible for the whole `Active` period; its button reaches `Closed` within 1 s). The CLI part is automated since Phase 3 | **BLOCKER** | Phase 7 | No GUI until Phase 7; a manual check decays |
+| D-5 | **Keychain migration** — device keys out of the 0600 file into the OS keychain (keyring 4.x, re-verify its API); on Windows the file has no permission check today (D31) | **BLOCKER** | **v0.1** | Phase 3 needed persistent keys for trusted mode / A19 |
+| D-6 | **Noise cross-implementation test vector** for `Noise_XXpsk0_25519_ChaChaPoly_BLAKE2s` (flynn/noise has three; C22, v1.0 list 2b) | **BLOCKER** | **v1.0** | snow's own suite does not contain our exact pattern |
+| D-7 | **Formal model of the safety-code commit-reveal scheme** (ProVerif/Tamarin; v1.0 list 1) and of the handshake composition (list 2) | **BLOCKER** | **v1.0** | Tests check the implementation, not the design; no published analysis covers our construction |
+| D-8 | Capture restart after −3815 (display sleep, lid close, display removed) — measured in Phase 2, not implemented | **BLOCKER** | Phase 4 (with the `Interrupted`/`Resumed` trait change, D17) | Phase 2 only measured it |
+| D-9 | Remove the dev signing identity and the RemoraDev screen-recording grant (phase2-criteria §7) | **BLOCKER** | End of Phase 4 (owner decision to keep it until then) | Still needed while developing capture |
+| D-10 | Unexplained ~2 ms capture+encode benchmark drift (C2 p50 9.0 vs 7.05 ms, 2026-10-17, M4) | **BLOCKER** (until explained or shown gone) | Phase 4 checks whether it reappears | Not reproduced yet; machine state is recorded with every run |
+| D-11 | MSI install / uninstall / upgrade on real Windows | **BLOCKER** | Phase 6.5 | No Windows machine yet |
+| D-12 | Windows on real hardware: NVENC/QuickSync/AMF, GPU-memory frames, multi-monitor, DPI/HDR, ACCESS_LOST, UIPI | **BLOCKER** | Phase 6.5 | The CI runner has only a software display driver |
+| D-13 | macOS signing + notarization | **BLOCKER** | First public release | No Apple Developer ID yet |
+| D-14 | Replace SPAKE2 (python-spake2 port) with CPace or an RFC 9382 implementation — review question (crypto-claims-audit §1) | *nice-to-have* (decision needed) | Decide before v1.0 | The `Pake` abstraction prepares the swap; A32 hardens the current one |
+| D-15 | Per-chip encoder floors for Intel Mac, NVENC, QuickSync, AMF | *nice-to-have* | Phases 6.5 / 9 | Only measured on Apple M4 |
+| D-16 | Physical display hotplug and the other untested Q4 cases (phase2-criteria §5.4) | *nice-to-have* | Phase 9 (earlier if a monitor is available) | No external display available |
+
+**Release view:** blocks **v0.1** — D-1…D-5, D-8…D-13 (D-6/D-7 block
+**v1.0**). Phase 3 closed nothing on this list except the CLI half of INV11.
 
 ## Progress log
 

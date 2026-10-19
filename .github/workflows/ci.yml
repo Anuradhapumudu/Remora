@@ -100,30 +100,23 @@ jobs:
           fi
 
   # The A04 timing claim rests ONLY on the 200-sample "A04 timing" workflow
-  # (phase3-criteria §3.1a); the 3-sample run inside the mutation gate checks
-  # the floor exists but proves nothing statistical. If the 200-sample job
-  # is skipped, disabled or broken, everything else stays green - so this
-  # job turns CI red when that workflow has no successful run in 48 hours.
+  # (phase3-criteria §3.1a). Every other A04 run checks only that the floor
+  # exists. This fails loudly if that workflow is disabled, has no success
+  # in 48 h, or skipped the latest merge to main (6 h grace). Also runs
+  # every 6 hours from the Evidence workflow.
   a04-evidence-fresh:
-    name: A04 timing evidence is fresh (< 48 h)
+    name: A04 timing evidence is present
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
       actions: read
+      contents: read
     steps:
-      - name: Latest successful 200-sample A04 run
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Check the A04 timing evidence
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
-        run: |
-          last=$(gh run list --repo "$REPO" --workflow timing.yml --status success --limit 1 --json createdAt --jq '.[0].createdAt // empty')
-          if [ -z "$last" ]; then
-            echo "::error::no successful A04 timing run at all"
-            exit 1
-          fi
-          age_h=$(( ( $(date -u +%s) - $(date -u -d "$last" +%s) ) / 3600 ))
-          echo "last successful A04 timing run: $last ($age_h h ago)"
-          if [ "$age_h" -ge 48 ]; then
-            echo "::error::A04 timing evidence is $age_h h old (>= 48 h): the statistical job is not running"
-            exit 1
-          fi
+        run: bash scripts/ci/check-a04-evidence.sh

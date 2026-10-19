@@ -91,7 +91,15 @@ The requirement is therefore per step:
   ever exceeds 150 ms the host logs an anomaly (the floor would stop hiding it).
   Chosen over "measure and prove overlap" because a floor removes the signal by
   construction instead of hoping a measurement is sensitive enough.
-* **Which job carries this claim:** **only** the `A04 timing` workflow
+* **Which job carries this claim — exactly one:** workflow **`A04 timing`**,
+  job **`a04`** (`.github/workflows/timing.yml`). Nothing else may be cited
+  as A04 timing evidence. Its health is **checked, not assumed**
+  (`scripts/ci/check-a04-evidence.sh`, run by CI on every PR and by the
+  `Evidence` workflow every 6 hours and on every push to main): it fails
+  loudly if the workflow is disabled, has no successful run in 48 hours, or
+  the latest merge to main has no successful run of its own after 6 hours.
+  Planted failures for all three were seen failing (2026-10-19).
+* Details of that job: the `A04 timing` workflow
   (`.github/workflows/timing.yml`: 200 samples per type, release build,
   nightly and on PRs touching net/session/crypto). It checks its own output
   has 9 measurements of n = 200 and that the medians were compared. Every
@@ -510,6 +518,9 @@ redundant code; none was excluded for convenience.
 * The device-ID display could not hold 80 bits (C23 → D25/D27).
 
 ### 10.6 Gaps carried forward
+
+Tracked in **docs/roadmap.md → "Deferred items"** (the one list; D-1…D-7
+are the items below). Summary at the time of writing:
 
 INV2, INV9 (Phase 4), INV10 (Phase 6), the INV11 GUI part (Phase 7; the
 CLI part is now automated), A34's cross-implementation vector (v1.0 list

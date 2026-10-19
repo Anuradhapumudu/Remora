@@ -109,7 +109,9 @@ squash, rebase or reorder phase-3 commits into a tidier shape.
   Each crate directory carries its license file(s).
 - Small, focused commits; imperative subject ≤ 72 chars; body explains *why*.
 - After each phase: update `docs/roadmap.md` (status + progress log), give exact
-  manual test steps, measured numbers vs targets, and known limitations.
+  manual test steps, measured numbers vs targets, and known limitations — and
+  **report the "Deferred items" list in roadmap.md row by row** (what closed,
+  what moved, what is new). Deferred work lives only in that list.
 
 ## macOS development notes
 
