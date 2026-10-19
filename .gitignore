@@ -12,3 +12,4 @@
 *.mobileprovision
 .env
 /spikes/*/target/
+__pycache__/
