@@ -330,12 +330,18 @@ async fn host_disconnect_ends_an_active_session_over_quic() {
         .is_some()
     );
     let closed = viewer_wait(&mut vev, 5, |e| matches!(e, ViewerEvent::Closed { .. })).await;
+    // The host sends Goodbye, then closes the connection. Which the viewer
+    // sees first is a race (Windows CI saw the Goodbye first): either way
+    // the session must end NORMALLY - never as a failure.
     assert!(
         matches!(
             closed,
             Some(ViewerEvent::Closed {
                 remote: Some(CloseCode::Normal),
                 ..
+            }) | Some(ViewerEvent::Closed {
+                local: Some(CloseCode::Normal),
+                remote: None
             })
         ),
         "{closed:?}"
