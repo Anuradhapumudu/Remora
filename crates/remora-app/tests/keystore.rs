@@ -139,7 +139,16 @@ fn default_path_is_absolute_and_under_this_os_config_dir() {
 #[test]
 fn config_dir_rule_for_every_os() {
     use std::ffi::OsString;
-    let env = |pairs: &'static [(&'static str, &'static str)]| {
+    // An absolute path on THIS platform (on Windows "/x" has no drive and is
+    // not absolute - found on the Windows CI runner).
+    fn abs(p: &str) -> String {
+        if cfg!(windows) {
+            format!("C:{}", p.replace('/', "\\"))
+        } else {
+            p.to_owned()
+        }
+    }
+    let env = |pairs: Vec<(&'static str, String)>| {
         move |k: &str| {
             pairs
                 .iter()
@@ -147,50 +156,51 @@ fn config_dir_rule_for_every_os() {
                 .map(|(_, v)| OsString::from(v))
         }
     };
-    let home = if cfg!(windows) {
-        "C:\\Users\\u"
-    } else {
-        "/home/u"
-    };
-    let _ = home;
     // macOS
-    let mac = config_dir_for(Os::MacOs, env(&[("HOME", "/Users/u")])).unwrap();
+    let mac = config_dir_for(Os::MacOs, env(vec![("HOME", abs("/Users/u"))])).unwrap();
     assert_eq!(
         mac,
-        std::path::Path::new("/Users/u")
+        PathBuf::from(abs("/Users/u"))
             .join("Library")
             .join("Application Support")
     );
-    // Linux: XDG wins, else ~/.config
+    // Other Unix: XDG wins, else ~/.config
     let xdg = config_dir_for(
         Os::OtherUnix,
-        env(&[("XDG_CONFIG_HOME", "/x"), ("HOME", "/home/u")]),
+        env(vec![
+            ("XDG_CONFIG_HOME", abs("/x")),
+            ("HOME", abs("/home/u")),
+        ]),
     )
     .unwrap();
-    assert_eq!(xdg, PathBuf::from("/x"));
-    let dot = config_dir_for(Os::OtherUnix, env(&[("HOME", "/home/u")])).unwrap();
-    assert_eq!(dot, std::path::Path::new("/home/u").join(".config"));
+    assert_eq!(xdg, PathBuf::from(abs("/x")));
+    let dot = config_dir_for(Os::OtherUnix, env(vec![("HOME", abs("/home/u"))])).unwrap();
+    assert_eq!(dot, PathBuf::from(abs("/home/u")).join(".config"));
+    // Windows
+    let win = config_dir_for(Os::Windows, env(vec![("APPDATA", abs("/appdata"))])).unwrap();
+    assert_eq!(win, PathBuf::from(abs("/appdata")));
     // Missing, empty or RELATIVE values are never used (a key file must not
     // land relative to the working directory).
-    assert_eq!(config_dir_for(Os::MacOs, env(&[])), None);
-    assert_eq!(config_dir_for(Os::OtherUnix, env(&[("HOME", "")])), None);
+    assert_eq!(config_dir_for(Os::MacOs, env(vec![])), None);
+    assert_eq!(config_dir_for(Os::Windows, env(vec![])), None);
+    assert_eq!(
+        config_dir_for(Os::OtherUnix, env(vec![("HOME", String::new())])),
+        None
+    );
     assert_eq!(
         config_dir_for(
             Os::OtherUnix,
-            env(&[("XDG_CONFIG_HOME", "rel"), ("HOME", "rel2")])
+            env(vec![
+                ("XDG_CONFIG_HOME", "rel".into()),
+                ("HOME", "rel2".into())
+            ])
         ),
         None
     );
     assert_eq!(
-        config_dir_for(Os::MacOs, env(&[("HOME", "relative/home")])),
+        config_dir_for(Os::MacOs, env(vec![("HOME", "relative/home".into())])),
         None
     );
-    #[cfg(unix)]
-    assert_eq!(
-        config_dir_for(Os::Windows, env(&[("APPDATA", "/appdata")])),
-        Some(PathBuf::from("/appdata"))
-    );
-    assert_eq!(config_dir_for(Os::Windows, env(&[])), None);
 }
 
 #[cfg(unix)]
