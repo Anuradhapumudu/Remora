@@ -37,7 +37,7 @@ Each phase ends **runnable**, with tests and exact manual test steps.
 | 1.5 | Release pipeline (unsigned), CI | ✅ done 2026-10-17 — `v0.0.1` built all artifacts on GitHub; all verified |
 | 2 | macOS ScreenCaptureKit capture + VideoToolbox encode → file; benchmark; verify 4:4:4 / LTR / intra-refresh support | ✅ gate passed 2026-10-17 (C12, C3, C4, C5; C2 failed as written → measurement redesigned, see phase2-criteria.md §6) |
 | 2.5 | **Windows spike** (throwaway): capture one DXGI frame, inject one SendInput click; report trait changes | ✅ done 2026-10-17 on GitHub's Windows runner — capture and input both work; 4 trait changes proposed (docs/phase2.5-windows-spike.md). Real-PC confirmation open. |
-| 3 | Noise + SPAKE2 handshake over QUIC on localhost; safety code; CLI accept prompt; security tests; fuzz targets | |
+| 3 | Noise + SPAKE2 handshake over QUIC on localhost; safety code; CLI accept prompt; security tests; fuzz targets | ✅ all criteria met 2026-10-19, awaiting owner acceptance — results in phase3-criteria.md §10 |
 | 4 | Encrypted loopback streaming; wgpu viewer; stats overlay | |
 | 5 | STUN + ICE (`is`) + hole punching with offer/answer codes; test across two home networks | |
 | 6 | Remote mouse/keyboard + host-local override (macOS) | |
@@ -102,7 +102,7 @@ accepted by the owner) before v0.1:
 | Threat-model invariants not testable in Phase 3: INV2 on the real media path, INV9 (no pixels logged/written), INV10 (keys/buttons released), INV11 (session indicator, partly manual) — phase3-criteria.md §5 | No media/input path yet | INV2/INV9/INV11 in Phase 4, INV10 in Phase 6 |
 | No formal model of the handshake composition; `spake2` crate unaudited (python-spake2 compatible, not RFC 9382) | Out of scope for tests (phase3-criteria.md §6) | External review / ProVerif-Tamarin model before v1.0 |
 | **v1.0 review question:** replace SPAKE2 (python-spake2 variant) with CPace (IRTF CFRG draft) or an RFC 9382 implementation — crypto-claims-audit.md §1 | Swap is prepared by the `Pake` abstraction | Before v1.0 |
-| **Decay risk: INV11 is partly manual** (session indicator) — manual checks get skipped | No UI yet | Phase 4: automated CLI indicator check; Phase 7: automated GUI test (indicator visible for the whole `Active` period, button reaches `Closed` within 1 s) |
+| **Decay risk: INV11 is partly manual** (session indicator) — manual checks get skipped | No GUI yet | ~~Phase 4: automated CLI indicator check~~ **done in Phase 3** (end-to-end CLI tests); Phase 7: automated GUI test (indicator visible for the whole `Active` period, button reaches `Closed` within 1 s) |
 | **Device keys are in a file, not the OS keychain** (owner decision 2026-10-19, D31): 0600 on Unix and refused if others can read it; on Windows only the profile directory's default ACL protects it (no permission check) | Phase 3 needed persistent keys for trusted mode and A19 | Before v0.1: move to the OS keychain (keyring 4.x, re-verify its API) |
 | Remove the dev signing identity + RemoraDev screen-recording grant (phase2-criteria.md §7) — kept by owner decision while developing | Still needed for development | End of Phase 4 |
 | Host must restart capture after −3815 (display sleep, lid close, display removed) — measured in Phase 2, not implemented yet | Phase 2 only measured it | Phase 4 (streaming) / 6 |
@@ -111,5 +111,6 @@ accepted by the owner) before v0.1:
 
 | Date | Phase | v0.1 items open | Notes |
 |---|---|---|---|
+| 2026-10-19 | 3 | 9 / 10 | Encrypted, authenticated handshake over QUIC on loopback: SPAKE2 (python-spake2 port, hardened by our A32 validator) → Noise XXpsk0 / XX with the TLS exporter in the prologue, SAS commit-reveal as type-states, approval gate, attempt limiter, single-use codes and passwords; host/viewer CLI. 36 attacks + F1–F3 pass (§10). A04: AUTH_FAILED 200.4–202.2 ms (Linux CI, 1 800 samples); F2 handshake p50 0.95 ms / p95 2.64 ms; A17-stat 0 / 10 000; fuzz 9 × 10 min, 0 crashes. No v0.1 checklist item completes yet ("every invariant has its test" still waits for INV2/9/10). |
 | 2026-10-17 | 2 | 9 / 10 | Capture + hardware encode on M4: screen change → encoded 8.1 ms p95 (≤ 11), 60 fps, < 1 % CPU static, no memory growth. 4:4:4 only outside low-latency mode; display sleep/lid/unplug stop the stream (−3815). No v0.1 checklist item completes until streaming exists (Phase 4). |
 | 2026-10-17 | 1 + 1.5 | 9 / 10 | Docs, threat model, skeleton, CI and release workflows. `v0.0.1` pipeline release verified (MSI install on real Windows still to do). |

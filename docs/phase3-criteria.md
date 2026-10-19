@@ -94,9 +94,13 @@ The requirement is therefore per step:
 * **Which job carries this claim:** **only** the `A04 timing` workflow
   (`.github/workflows/timing.yml`: 200 samples per type, release build,
   nightly and on PRs touching net/session/crypto). It checks its own output
-  has 9 measurements of n = 200. The 3-sample run inside the mutation gate
-  only proves the floor exists (a missing floor shows in any sample) and
-  proves **nothing** statistical. Because everything else would stay green
+  has 9 measurements of n = 200 and that the medians were compared. Every
+  other run (regular CI at 20 samples, the mutation gate at 3) checks only
+  the 200–225 ms window on every sample — which proves the floor exists (a
+  missing floor shows in any sample) — and compares **no** medians: on
+  shared CI machines their noise exceeds the 1 ms being judged (observed:
+  1.07 ms at 3 samples on Linux, 1.14 ms at 20 on macOS, for types the
+  200-sample run puts 0.001 ms apart). Because everything else would stay green
   if that workflow stopped running, the CI job `a04-evidence-fresh` fails
   when it has no successful run in the last 48 hours.
 * **Test:** for each failure type of a step, 200 handshakes over loopback;
@@ -279,7 +283,7 @@ with the same code.
 | **INV8** no secrets in logs/Debug/panics; zeroized | A28 | **Full** for Phase 3 code | Crash reports / OS logs outside our process: not testable (§6) |
 | **INV9** no pixels logged / written to disk | — | **Gap** (no pixels flow in Phase 3) | Phase 4: test that the streaming path writes no file and logs no frame data; `bench-capture` stays the only writer (explicit `--out`) |
 | **INV10** keys/buttons released on session end | — | **Gap** (no input injection yet) | Phase 6: kill viewer / drop network / panic mid-keypress ⇒ mock-injector `release_all` called; then on a real OS |
-| **INV11** "session active" indicator + one-click end | Partial: state machine exposes `active` + `disconnect()` and a test that `disconnect()` from any state reaches `Closed` and stops all processing | **Partial** | **Decay risk** (manual checks get skipped): Phase 4 adds an automated check that the host CLI prints the indicator whenever the session is `Active`; Phase 7 automates the GUI part with a UI test asserting the indicator is visible for the whole `Active` period and that its button reaches `Closed` within 1 s. Until then: release-checklist item. |
+| **INV11** "session active" indicator + one-click end | `inv11_disconnect_from_every_state_reaches_closed_and_stops_processing`, `inv11_viewer_disconnect_from_every_state`; CLI end to end: `f1_password_mode_accept_makes_both_active_with_the_same_code` (host prints `SESSION ACTIVE <id>` for the session, `disconnect <id>` ends it) | **Partial → CLI part automated in Phase 3** (was scheduled for Phase 4) | Phase 7: GUI test that the indicator is visible for the whole `Active` period and its button reaches `Closed` within 1 s |
 | **INV12** 3 failures rotate OTP and notify | A02 | **Full** | — |
 | **INV13** unattended password ≥ 12 chars, NFKC | A30 (policy function) | **Full** for the policy | Unattended mode itself is post-v0.1; its use of the policy is tested then |
 | **INV14** no `unsafe` outside FFI; SAFETY comments | A31 + existing lints | **Full** | — |
@@ -397,7 +401,139 @@ the §7 mutation counts, fuzz hours per target, and the gaps carried forward.
 
 ## 10. Results
 
-*Not started — awaiting approval of this document.*
+**Status (2026-10-19): all criteria met, awaiting owner acceptance.** Built
+test-first in six steps (proto, crypto, session, net, CLI + key storage);
+each component's attack tests are committed before or with its
+implementation (git history, phase-3 branch — merge with a merge commit).
+324 tests in the six security crates (proto 33, crypto 130, session 88,
+net 25, app 24, testkit 24), green on macOS, Windows and Linux CI.
+
+### 10.1 Attacks
+
+| ID | Result | Observed failure (and where it is tested) |
+|---|---|---|
+| A01 | PASS | Wrong password ⇒ host `Msg1Auth`, `AUTH_FAILED`, attempt 1/3; host sent only HostHello + SpakeB (its identity never). crypto `a01_*`, session `a01_wrong_password_*`, net logging test |
+| A02 | PASS | 3rd failure rotates the OTP (old one fails afterwards), `OtpRotated`, cool-down 30 s doubling to 1 h, right new password during cool-down ⇒ `RATE_LIMITED` before SPAKE2; trusted devices not locked out. session `limiter.rs`, `a02_a03_host.rs` |
+| A03 | PASS | 50 connections ⇒ 4 admitted, 46 `RATE_LIMITED` before any crypto; attempts global per OTP across connections; 10/min/IP with a sliding window and bounded memory |
+| A04 | PASS | Bytes: one `AUTH_FAILED`, empty reason (net `a04_bytes_*`). Timing (200-sample workflow, Linux CI): all 9 × 200 closes in 200.43–202.15 ms, A/A medians 0.001 ms apart, every step's medians < 1 ms apart; local M4: 200.54–208.22 ms. Planted removal of the floor ⇒ "close after 0.15 ms < 200 ms" |
+| A05 | PASS | Recorded handshake replayed with a fresh nonce ⇒ `AUTH_FAILED` at msg1 (new exporter); exact replay ⇒ `NonceReused` at the hello |
+| A06 | PASS | Reused / unknown / expired nonce ⇒ refused before SPAKE2, `AUTH_FAILED`, nothing sent, no attempt counted |
+| A07 | PASS | Expired / future-dated codes refused by remora-proto before any traffic (exact second boundaries) |
+| A08 | PASS | Edited hellos ⇒ prologue mismatch (msg1 / msg2); boundary shift caught by length prefixes (D22); genuine unknown version ⇒ `VERSION_UNSUPPORTED` |
+| A09 | PASS | Every bit of every handshake message flipped (crypto, exhaustive): 0 sessions; in flight over QUIC: never a prompt |
+| A10 | PASS | Flip / truncate / replay after Active ⇒ `PROTOCOL_VIOLATION`, only the untampered input delivered |
+| A11 | PASS | Every bit of a media datagram flipped ⇒ dropped and counted, session continues, forgeries do not burn counters |
+| A12 | PASS | Duplicate / too-old dropped, far-ahead accepted once; model-based test of the 4096 window; a forged far-ahead counter does not slide it |
+| A13 | PASS | No (key, counter) repeat over random sequences; refuse after 2³² packets; a key id is never reinstalled |
+| A14 | PASS | TLS-terminating MITM with the right password ⇒ `AUTH_FAILED` at msg1 (password mode) / no session (trusted) |
+| A15 | PASS | Cert for another Noise key / another device's genuine cert ⇒ `CertKeyMismatch`; `verify_strict` rejects the small-order-key forgery (planted `verify` accepts it) and malleated signatures |
+| A16 | PASS | Device ID X answered with key Y ⇒ `IdentityMismatch` before any SAS (crypto, session); CLI `--device` with another code ⇒ refused before connecting, exit 3, the host never prompts |
+| A17 | PASS | Structural S1–S5 (type-states D21; every bit of a wrong `n_r` caught; malformed msg2 rejected before `n_i` exists; one RNG draw per side); SAS binds the handshake hash. A17-stat: **0 matches in 10 000** MITM runs (INVESTIGATE at 1, FAIL ≥ 2); planted constant SAS ⇒ 10 000 matches |
+| A18 | PASS | A18-stat: χ²(999) below the 10⁻⁶ critical value 1226.1 over 10⁶ initiator nonces with the responder's inputs fixed |
+| A19 | PASS | Pinned key changed ⇒ `IdentityChanged`, never a password fallback (crypto, session); CLI: refused before connecting, exit 3 |
+| A20 | PASS | Every pre-Active state × every application message: closed, injector/renderer count 0 (`ProtocolViolation`; `AuthFailed` at the Noise steps — §11) |
+| A21 | PASS | Host-only messages from the viewer / input from the host ⇒ `WrongRole` |
+| A22 | PASS | Approval bound to session ID and SAS (session); CLI: accepting the smaller and the larger of two pending IDs activates exactly that one (a planted "approve the largest" bug is caught) |
+| A23 | PASS | Approve refused in every earlier state; the prompt appears only after the reveal is verified |
+| A24 | PASS | Slowloris ⇒ `TIMEOUT` at 10 s (QUIC, measured 9.9–11 s); prompt 60 s ⇒ `Rejected` (reason 2); slots freed |
+| A25-T | PASS | Trusted mode keeps signature, pinning, binding, commit-reveal, the accept prompt and rate limits; refuses without a pin |
+| A26 | PASS | Oversized input refused before proportional allocation (counting allocator): frames, codes, certs, passwords, key files |
+| A27 | PASS | 9 targets × 10 min locally, 0 crashes (≈ 618 M runs; §10.4); 60 s per target in CI on every relevant PR and nightly |
+| A28 | PASS | Debug redaction per type; TRACE-level scan of real QUIC sessions (667 lines, 6 canaries): no leak; a planted log line is found |
+| A29 | PASS | Rejection sampling proven with an injected RNG; χ² secondary |
+| A30 | PASS | NFKC, combining marks not counted, control chars, common list, input size before normalising |
+| A31 | PASS | Policy scanner (mutation-gated): `unsafe` only in FFI modules + D19 |
+| A32 | PASS | All 14 encodings of the 8 small-order points (independently computed), torsion components, off-curve, wrong side — refused by our validator and by `finish()` |
+| A33 | PASS | M, N, S re-derived from python-spake2's seed procedure (Rust and independent Python) = the crate's constants |
+| A34 | PASS (with gap) | snow's vector suite passes; it covers our `XX` pattern but **not** `XXpsk0` (C22) — cross-implementation vector is v1.0 list item 2b (flynn/noise has three) |
+| A35 | PASS | `spake2` / `snow` named only in the wrapper modules (scanner) |
+| A36 | PASS | One-time password: reuse after success, concurrently, and after a denied prompt all fail at msg1 (INV15) |
+
+### 10.2 Functional
+
+| ID | Result |
+|---|---|
+| F1 | PASS — `remora-host serve` / `remora-viewer connect` on 127.0.0.1: same 6-digit SAS on both, accept ⇒ `SESSION ACTIVE`, deny ⇒ rejected (exit 2); password and trusted mode (end-to-end tests drive the real binaries) |
+| F2 | connect → SAS shown, 100 runs over QUIC loopback (M4, release): **p50 0.95 ms, p95 2.64 ms**, max 4.88 ms (information only) |
+| F3 | PASS — CI green on macOS 15, Windows 2025, Ubuntu 22.04 |
+
+### 10.3 Mutation gate (§7)
+
+CI run on `678cf96` (cargo-mutants 27.1.0, one job per crate, scope
+verified to cover all mutants):
+
+| Crate (scope) | Mutants | Caught | Missed | Unviable | Timeouts (detected: the mutant hangs) |
+|---|---|---|---|---|---|
+| remora-testkit (policy check) | 58 | 56 | **0** | 2 | 0 |
+| remora-proto (validators) | 166 | 145 | **0** | 16 | 5 |
+| remora-crypto (all) | 358 | 270 | **0** | 86 | 2 |
+| remora-session (all) | 141 | 100 | **0** | 40 | 1 |
+| remora-net (handshake driver) | 50 | 33 | **0** | 16 | 1 |
+| remora-app (key file) | 20 | 15 | **0** | 5 | 0 |
+| **Total** | **793** | **619** | **0** | **165** | **9** |
+
+Justified exclusions (`.cargo/mutants.toml`), both **equivalent**: `|` → `^`
+in `ConnectionCode::encode` (disjoint bits) and in `ReplayWindow::shift`
+(disjoint bits). Every survivor found on the way became a test or removed
+redundant code; none was excluded for convenience.
+
+### 10.4 Fuzzing (A27)
+
+| Target | Runs in 10 min (M4) | Crashes / panics / timeouts |
+|---|---|---|
+| connection_code | 186.4 M | 0 |
+| frame_decoder | 70.8 M | 0 |
+| messages | 41.2 M | 0 |
+| datagram_header | 201.8 M | 0 |
+| identity_cert | 20.0 M | 0 |
+| pake_message | 6.8 M (corpus seeded with the A32 vectors) | 0 |
+| handshake_payload | 54.1 M | 0 |
+| media_open | 33.0 M | 0 |
+| session_host | 4.0 M (reaches Hello/Spake only: random bytes cannot pass Noise) | 0 |
+
+### 10.5 Found during Phase 3 (recorded)
+
+* SPAKE2: a subgroup check **lost in the port** (C20), restored by A32.
+* snow's vectors do not include our `XXpsk0` pattern (C22).
+* The "one-time" password was not one-time (INV15, A36).
+* Connection-code nonces were not single-use (A06 enforced in session).
+* The 14-day dependency rule was broken three times while believed to
+  hold; now a CI check with verified, expiring security exceptions (D24,
+  D28, D30).
+* The CI mutation gate had been failing on timeouts; then split per crate
+  (32 instead of 62 minutes).
+* Tests that passed for the wrong reason were caught by planted failures:
+  A22 (random IDs let a wrong-session bug pass half the time) and a
+  3-sample A04 median.
+* The device-ID display could not hold 80 bits (C23 → D25/D27).
+
+### 10.6 Gaps carried forward
+
+INV2, INV9 (Phase 4), INV10 (Phase 6), the INV11 GUI part (Phase 7; the
+CLI part is now automated), A34's cross-implementation vector (v1.0 list
+2b), the formal model of the commitment scheme (v1.0 list 1), device keys
+in a file instead of the keychain (before v0.1), and everything Phase 5
+adds (real NAT traversal, STUN parser fuzzing, QUIC retry).
+
+### 10.7 Manual test steps (two terminals, one machine)
+
+1. Terminal 1: `cargo run -p remora-host -- serve` — note `device:`,
+   `code:` and `password:` (first run creates the key file in the
+   per-user config directory).
+2. Terminal 2: `cargo run -p remora-viewer -- connect '<code>'
+   --password <password>` (or omit `--password` to be asked).
+3. Both terminals show the **same** `safety code`. In terminal 1 type
+   `accept <id>` (the id from the `prompt` line): both print `SESSION
+   ACTIVE`. Type `disconnect <id>` to end it.
+4. Wrong password: repeat with a wrong `--password` ⇒ viewer prints
+   `failed:` and exits 4; host logs one `handshake_failed` WARN on stderr.
+5. Deny: `deny <id>` ⇒ viewer prints `rejected` and exits 2; a retry needs
+   the new `code:` / `password:` the host printed.
+6. Trusted mode: `cargo run -p remora-viewer -- identity` prints the
+   viewer's `identity:`; start the host with `serve --trust <that key>`,
+   then connect with `--pin <host identity>` instead of `--password`.
+7. Wrong device: connect with `--device <some other device code>` ⇒
+   `identity mismatch`, exit 3, and the host never prompts.
 
 ## 11. Changes to criteria
 
