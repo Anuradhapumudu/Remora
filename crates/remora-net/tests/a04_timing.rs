@@ -26,12 +26,15 @@ use remora_net::{AUTH_FAILURE_FLOOR, TIMING_ANOMALY, floor_deadline};
 use remora_session::{CloseCode, Identity, ViewerMode};
 
 const LOW_MS: f64 = 200.0;
-/// Below this many samples per type, medians are dominated by single
-/// noisy samples (seen on a busy 2-core CI runner with 3 samples: a 1.07 ms
-/// "difference" between two types that the 200-sample run puts 0.001 ms
-/// apart), so they are not compared. The window check still runs on every
-/// sample, and that is what catches a missing floor.
-const MIN_SAMPLES_FOR_MEDIANS: usize = 20;
+/// Medians are compared only at the criteria's sample size, i.e. only in
+/// the "A04 timing" workflow (release build, nothing else running). In the
+/// regular test runs the noise of a shared machine is larger than the 1 ms
+/// being judged: with 3 samples a busy Linux runner showed a 1.07 ms
+/// "difference" and with 20 samples a busy macOS runner 1.14 ms (A/A 0.68
+/// ms), between failure types the 200-sample run puts 0.001 ms apart. The
+/// window check runs on every sample in every run - that is what catches a
+/// missing floor.
+const MIN_SAMPLES_FOR_MEDIANS: usize = 200;
 const HIGH_MS: f64 = 225.0;
 
 fn samples() -> usize {
