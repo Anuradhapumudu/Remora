@@ -112,6 +112,9 @@ squash, rebase or reorder phase-3 commits into a tidier shape.
   manual test steps, measured numbers vs targets, and known limitations — and
   **report the "Deferred items" list in roadmap.md row by row** (what closed,
   what moved, what is new). Deferred work lives only in that list.
+- **An owner approval of future work becomes a row in that list (or a
+  criteria item) in the same commit that records it.** Approved-but-unwritten
+  work is how the render spike slipped (roadmap "Process slips").
 
 ## macOS development notes
 

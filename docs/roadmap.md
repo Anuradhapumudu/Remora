@@ -100,6 +100,7 @@ be called done; *nice-to-have* = wanted, but its absence does not block it.
 | # | Item | Kind | Blocks / close by | Why it is deferred |
 |---|---|---|---|---|
 | D-1 | **INV2** — no media or input without encryption, tested on the **real media path** (loopback capture: UDP payload never plaintext) | **BLOCKER** | Phase 4 | No media path existed in Phase 3; only the media AEAD was tested (A11–A13) |
+| D-1b | **INV2 for input** — the same loopback-capture test over input events (pointer, keys) | **BLOCKER** | Phase 6 | Split from D-1 (2026-10-19): Phase 4 has no input path |
 | D-2 | **INV9** — no screen pixels logged or written to disk by the streaming path | **BLOCKER** | Phase 4 | No pixels flowed in Phase 3 |
 | D-3 | **INV10** — keys and mouse buttons released when a session ends for any reason | **BLOCKER** | Phase 6 | No input injection until Phase 6 |
 | D-4 | **INV11** — session indicator: automated **GUI** test (visible for the whole `Active` period; its button reaches `Closed` within 1 s). The CLI part is automated since Phase 3 | **BLOCKER** | Phase 7 | No GUI until Phase 7; a manual check decays |
@@ -114,10 +115,19 @@ be called done; *nice-to-have* = wanted, but its absence does not block it.
 | D-13 | macOS signing + notarization | **BLOCKER** | First public release | No Apple Developer ID yet |
 | D-14 | Replace SPAKE2 (python-spake2 port) with CPace or an RFC 9382 implementation — review question (crypto-claims-audit §1) | *nice-to-have* (decision needed) | Decide before v1.0 | The `Pake` abstraction prepares the swap; A32 hardens the current one |
 | D-15 | Per-chip encoder floors for Intel Mac, NVENC, QuickSync, AMF | *nice-to-have* | Phases 6.5 / 9 | Only measured on Apple M4 |
-| D-16 | Physical display hotplug and the other untested Q4 cases (phase2-criteria §5.4) | *nice-to-have* | Phase 9 (earlier if a monitor is available) | No external display available |
+| D-16 | Physical display hotplug and the other untested Q4 cases (phase2-criteria §5.4), including capture restart after **lid close** and **display removal** (phase4-criteria T3) | *nice-to-have* | Phase 9 (earlier if a monitor is available) | No external display available |
+| D-17 | How the Slint UI and our own video surface share a window (Slint always presents with vsync, D32): options include separate windows, a Slint overlay layer above our `CAMetalLayer`, or an upstream Slint present-mode setting | **BLOCKER** | Phase 7 | Found by the render spike (D32); Phase 4 needs no Slint (D33, if approved) |
+| D-18 | Zero-copy IOSurface → wgpu import on the viewer (works, D32; saves ≈ 0.3 ms p50) | *nice-to-have* | Phase 9, or earlier if the budget needs it | Needs `unsafe` wgpu-hal calls outside the three FFI crates → an unsafe-policy decision by the owner |
+| D-19 | Glass-to-glass effect of `Immediate` present in a composited macOS window (camera or photodiode measurement) | *nice-to-have* | Phase 4 report if equipment is available, else Phase 9 | Software timestamps cannot see the WindowServer compositor |
 
-**Release view:** blocks **v0.1** — D-1…D-5, D-8…D-13 (D-6/D-7 block
+**Release view:** blocks **v0.1** — D-1, D-1b, D-2…D-5, D-8…D-13, D-17 (D-6/D-7 block
 **v1.0**). Phase 3 closed nothing on this list except the CLI half of INV11.
+
+## Process slips (recorded so the list above stays trustworthy)
+
+| Date found | What slipped | How it happened | Fix |
+|---|---|---|---|
+| 2026-10-19 | **Slint + wgpu zero-copy render spike** — the owner approved it around 2026-10-17; it was never run | The approval was **never written into any tracked list**: no roadmap row, no criteria item, no decision-log entry. The only written trace was "zero-copy IOSurface → Metal import on the viewer is an optimization for later" (Phase 1 design, 2026-10-16). A search of docs/, git history and the session transcripts on this machine (2026-10-19) found no record of the approval itself, so the date is the owner's. With nothing pointing at it, the spike fell out as soon as the conversation moved on. First item to slip in this project. | Run the same day, before the Phase 4 criteria (architecture D32). Rule from now on (CLAUDE.md): **an approved item becomes a row in "Deferred items" (or a criteria item) in the same commit that records the approval** — anything not in a tracked list is assumed lost. |
 
 ## Progress log
 

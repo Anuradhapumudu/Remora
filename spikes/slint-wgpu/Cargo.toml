@@ -1,0 +1,23 @@
+# THROWAWAY spike (owner, 2026-10-19): does Slint 1.18 + wgpu 30 work the way
+# the architecture assumes, and can a VideoToolbox IOSurface be shown without
+# a CPU copy? Separate workspace: nothing here reaches the main crates.
+[package]
+name = "slint-wgpu-spike"
+version = "0.0.0"
+edition = "2024"
+publish = false
+license = "GPL-3.0-or-later"
+
+[workspace]
+
+[dependencies]
+slint = { version = "=1.18.1", default-features = false, features = ["std", "compat-1-2", "backend-winit", "renderer-femtovg-wgpu", "unstable-wgpu-30"] }
+wgpu = "=30.0.1"
+pollster = "0.4"
+winit = "=0.30.13"
+objc2 = "0.6"
+objc2-foundation = { version = "0.3.2", default-features = false, features = ["std"] }
+objc2-metal = { version = "0.3.2", default-features = false, features = ["std", "MTLDevice", "MTLTexture", "MTLResource", "MTLPixelFormat", "MTLTypes", "objc2-io-surface"] }
+objc2-io-surface = { version = "0.3.2", default-features = false, features = ["std", "IOSurfaceRef", "IOSurfaceTypes", "objc2-core-foundation", "objc2"] }
+objc2-core-foundation = { version = "0.3.2", default-features = false, features = ["std", "CFDictionary", "CFNumber", "CFString", "CFBase"] }
+objc2-core-video = { version = "0.3.2", default-features = false, features = ["std", "CVPixelBuffer", "CVPixelBufferIOSurface", "CVBuffer", "CVImageBuffer", "CVReturn", "CVBase", "objc2-io-surface"] }
