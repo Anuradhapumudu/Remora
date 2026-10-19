@@ -116,12 +116,21 @@ be called done; *nice-to-have* = wanted, but its absence does not block it.
 | D-14 | Replace SPAKE2 (python-spake2 port) with CPace or an RFC 9382 implementation — review question (crypto-claims-audit §1) | *nice-to-have* (decision needed) | Decide before v1.0 | The `Pake` abstraction prepares the swap; A32 hardens the current one |
 | D-15 | Per-chip encoder floors for Intel Mac, NVENC, QuickSync, AMF | *nice-to-have* | Phases 6.5 / 9 | Only measured on Apple M4 |
 | D-16 | Physical display hotplug and the other untested Q4 cases (phase2-criteria §5.4), including capture restart after **lid close** and **display removal** (phase4-criteria T3) | *nice-to-have* | Phase 9 (earlier if a monitor is available) | No external display available |
-| D-17 | How the Slint UI and our own video surface share a window (Slint always presents with vsync, D32): options include separate windows, a Slint overlay layer above our `CAMetalLayer`, or an upstream Slint present-mode setting | **BLOCKER** | Phase 7 | Found by the render spike (D32); Phase 4 needs no Slint (D33, if approved) |
+| D-17 | How the Slint UI and our own video surface share a window (Slint never owns the video, D34). **Examined 2026-10-19: solvable** (docs/d17-video-surface-options.md): A one window / two layers (best UX, unverified, needs `unsafe`), B child window, C two windows (no integration risk), D another toolkit. Proposed first step: a ≤ 2 h spike of A on macOS before Phase 7 design | **BLOCKER** | Phase 7 | Consequence of R1 (D34); Phase 4 needs no Slint |
 | D-18 | Zero-copy IOSurface → wgpu import on the viewer (works, D32; saves ≈ 0.3 ms p50) | *nice-to-have* | Phase 9, or earlier if the budget needs it | Needs `unsafe` wgpu-hal calls outside the three FFI crates → an unsafe-policy decision by the owner |
 | D-19 | Glass-to-glass effect of `Immediate` present in a composited macOS window (camera or photodiode measurement) | *nice-to-have* | Phase 4 report if equipment is available, else Phase 9 | Software timestamps cannot see the WindowServer compositor |
 
 **Release view:** blocks **v0.1** — D-1, D-1b, D-2…D-5, D-8…D-13, D-17 (D-6/D-7 block
 **v1.0**). Phase 3 closed nothing on this list except the CLI half of INV11.
+
+### Closed
+
+A deferred item is never deleted: when it is closed its row moves here with
+the evidence (CI `roadmap` job, `scripts/ci/check-roadmap.py`, fails if an ID
+disappears).
+
+| # | Item | Closed | Evidence |
+|---|---|---|---|
 
 ## Process slips (recorded so the list above stays trustworthy)
 

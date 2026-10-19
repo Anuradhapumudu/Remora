@@ -1,7 +1,8 @@
 # Phase 4 acceptance criteria — encrypted loopback streaming + wgpu viewer
 
-Status: **DRAFT for owner approval (2026-10-19). No Phase 4 implementation
-starts until it is approved.** Same gate rule as Phases 2 and 3:
+Status: **APPROVED by the owner 2026-10-19, with R1–R5 and two additions
+(§12).** Implementation waits only for the owner's Phase 3 walkthrough report.
+Same gate rule as Phases 2 and 3:
 
 * Thresholds are fixed **before** any code and are not changed after measuring.
 * If a threshold FAILS, work **stops** and the failure is reported with the
@@ -192,8 +193,22 @@ commit). Every "catch" test is first seen failing against its plant.
 Phase 4 must close: **D-1** (INV2, media), **D-2** (INV9), **D-8** (capture
 restart), **D-9** (remove the dev signing identity and the RemoraDev
 screen-recording grant, at the very end), **D-10** (benchmark drift: P8).
+Before Phase 4 finishes, D-17 must have been examined (done 2026-10-19:
+docs/d17-video-surface-options.md).
 The phase report lists the whole deferred list row by row (CLAUDE.md).
 
 ## 12. Changes to criteria
 
-(none yet)
+* **2026-10-19 — owner approval.** R1–R5 approved as proposed. R1 and R2 are
+  recorded as a measured constraint in architecture **D34** (R2's reason:
+  the CPU path's p95 is *steadier*, 0.75–0.80 vs 0.54–1.26 ms, and the budget
+  is judged at p95). Two additions, neither changes a threshold:
+  1. **D-17 examined before Phase 4 finishes** (≈ 30 min desk research):
+     done the same day, docs/d17-video-surface-options.md — solvable; options
+     A (one window, two layers; to spike before Phase 7), B (child window),
+     C (two windows), D (another toolkit).
+  2. **Roadmap guard:** CI `roadmap` job (architecture D35).
+* Standing question for every "catch" test in this phase (owner): *what would
+  this test still pass with, if the thing it checks were removed?* (The M1a /
+  M1b split is the example: a wire capture alone passes even with the media
+  seal removed, because QUIC encrypts too.) Each test's plant answers it.

@@ -99,6 +99,36 @@ jobs:
             python3 -I scripts/ci/check-crate-age.py --all Cargo.lock fuzz/Cargo.lock
           fi
 
+  # docs/roadmap.md's deferred-items list and progress log are what every
+  # phase is judged against, and they are hand-edited. On 2026-10-19 a
+  # scripted edit silently cut off everything after one row; this guard
+  # makes that, a deleted deferred item, or a malformed row fail CI.
+  roadmap:
+    name: roadmap tables intact
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Self-test (planted breakages must be caught)
+        run: python3 -I scripts/ci/check-roadmap.py --self-test
+      - name: Compare with the base version
+        env:
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          if [ "$EVENT" = "pull_request" ]; then
+            base=$(git merge-base HEAD "origin/$BASE_REF")
+          elif [ "$EVENT" = "push" ] && git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            base="$BEFORE"
+          else
+            base="HEAD~1"
+          fi
+          python3 -I scripts/ci/check-roadmap.py "$base"
+
   # The A04 timing claim rests ONLY on the 200-sample "A04 timing" workflow
   # (phase3-criteria §3.1a). Every other A04 run checks only that the floor
   # exists. This fails loudly if that workflow is disabled, has no success
