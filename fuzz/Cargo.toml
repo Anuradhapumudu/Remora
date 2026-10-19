@@ -1,0 +1,84 @@
+# Fuzz targets (phase3-criteria A27). Separate workspace: built with the pinned
+# nightly in fuzz/rust-toolchain.toml via `cargo fuzz`, never by the main build.
+[package]
+name = "remora-fuzz"
+version = "0.0.0"
+edition = "2024"
+publish = false
+license = "MIT OR Apache-2.0"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "=0.4.13"
+remora-proto = { path = "../crates/remora-proto" }
+remora-crypto = { path = "../crates/remora-crypto" }
+remora-session = { path = "../crates/remora-session" }
+rand_core = { version = "0.6", features = ["getrandom"] }
+
+[workspace]
+members = ["."]
+
+[[bin]]
+name = "connection_code"
+path = "fuzz_targets/connection_code.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "frame_decoder"
+path = "fuzz_targets/frame_decoder.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "messages"
+path = "fuzz_targets/messages.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "datagram_header"
+path = "fuzz_targets/datagram_header.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "identity_cert"
+path = "fuzz_targets/identity_cert.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "pake_message"
+path = "fuzz_targets/pake_message.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "handshake_payload"
+path = "fuzz_targets/handshake_payload.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "media_open"
+path = "fuzz_targets/media_open.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "session_host"
+path = "fuzz_targets/session_host.rs"
+test = false
+doc = false
+bench = false

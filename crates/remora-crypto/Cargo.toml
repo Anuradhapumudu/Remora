@@ -11,6 +11,24 @@ publish.workspace = true
 license = "MIT OR Apache-2.0"
 
 [dependencies]
+remora-proto = { workspace = true }
+snow = { workspace = true }
+spake2 = { workspace = true }
+ed25519-dalek = { workspace = true }
+curve25519-dalek = { workspace = true }
+chacha20poly1305 = { workspace = true }
+hkdf = { workspace = true }
+sha2 = { workspace = true }
+blake2 = { workspace = true }
+rand_core = { workspace = true }
+zeroize = { workspace = true }
+subtle = { workspace = true }
+thiserror = { workspace = true }
+unicode-normalization = { workspace = true }
+
+[dev-dependencies]
+remora-testkit = { workspace = true }
+prost = { workspace = true }
 
 [lints]
 workspace = true

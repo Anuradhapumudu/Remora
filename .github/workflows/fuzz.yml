@@ -1,0 +1,58 @@
+# Fuzzing (phase3-criteria A27): 60 s per target on PRs touching the parsers,
+# and nightly. Any crash, panic or timeout fails the job; the crashing input is
+# kept as an artifact. The committed corpus (fuzz/corpus) seeds every run.
+name: Fuzz
+
+on:
+  schedule:
+    - cron: "41 3 * * *"
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "crates/remora-proto/**"
+      - "crates/remora-crypto/**"
+      - "crates/remora-session/**"
+      - "fuzz/**"
+
+permissions:
+  contents: read
+
+jobs:
+  fuzz:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          [
+            connection_code,
+            frame_decoder,
+            messages,
+            datagram_header,
+            identity_cert,
+            pake_message,
+            handshake_payload,
+            media_open,
+            session_host,
+          ]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install the pinned nightly (fuzz/rust-toolchain.toml)
+        working-directory: fuzz
+        run: rustup toolchain install
+      - name: Install cargo-fuzz 0.13.2
+        run: cargo install --locked cargo-fuzz@0.13.2
+      - name: Fuzz ${{ matrix.target }} for 60 s
+        working-directory: fuzz
+        env:
+          TARGET: ${{ matrix.target }}
+        run: cargo fuzz run -O "$TARGET" -- -max_total_time=60 -timeout=10 -rss_limit_mb=2048
+      - name: Keep crashing inputs
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: fuzz-artifacts-${{ matrix.target }}
+          path: fuzz/artifacts

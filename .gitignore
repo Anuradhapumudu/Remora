@@ -1,7 +1,6 @@
 /target/
 /dist/
 /fuzz/target/
-/fuzz/corpus/
 /fuzz/artifacts/
 **/*.rs.bk
 .DS_Store

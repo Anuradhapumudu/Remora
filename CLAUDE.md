@@ -45,6 +45,49 @@ Local tools: `brew install cargo-deny cargo-audit actionlint zizmor`;
 - If something can't work reliably (e.g. P2P through symmetric NAT), say so plainly
   in docs and reports; never fake or silently skip it.
 
+## Verified vs asserted (every security claim cites what was read)
+
+Every security or cryptographic claim in our docs must cite the source that
+was **actually read** — crate source at the locked version (file), RFC section,
+or README — or be explicitly marked **unverified**. Never write a claim from
+memory. Why (docs/crypto-claims-audit.md):
+- **C14:** an audit of the dalek crates ("Quarkslab, 2019") was written from
+  memory and turned out not to be stated anywhere we could check — removed.
+- **C11:** "all secrets are zeroized" was asserted; `spake2` and `snow` don't use
+  `zeroize` at all.
+- **C12:** "VideoToolbox decodes out of process" was asserted, never checked.
+- The SPAKE2 crate was called "RFC 9382-style"; it is a python-spake2 port.
+
+**Rules we rely on for security are enforced by a check, not by memory.**
+The 14-day dependency rule was violated **three times** while we believed it
+was holding (zeroize 1.9.1, five transitive crates, rustls 0.23.46 — two of
+them written into dependencies.md as if compliant); only the mechanical
+`crate-age` CI check found them. Same class of failure as C14: a belief
+recorded as a fact. If a rule protects security, add the check that fails
+when it is broken.
+
+## Plant the real failure (test standard)
+
+When a test's job is to **catch** something, prove it can: plant the real
+failure (a real violation, a real bad input, a real bug), confirm the test
+fails and names it, then remove the plant. A test that has never been seen
+failing proves nothing — e.g. the first policy scanner "passed" while a
+mutation that made it scan nothing also passed. Back it with mutation testing
+for security controls (`.cargo/mutants.toml`).
+
+## Unsafe policy exceptions
+
+Only `src/sys/` FFI modules may use `unsafe`. The single exception is
+architecture.md **D19** (the test-only counting allocator). It is **not a
+precedent**: any other request makes its own case and needs its own approval.
+
+## Process evidence: don't rewrite phase-3 history
+
+Phase 3 is built test-first: each component's attack tests are committed
+before or with its implementation (phase3-criteria.md §7b). That commit order
+**is the evidence**. When the phase-3 PR merges, use a **merge commit** — never
+squash, rebase or reorder phase-3 commits into a tidier shape.
+
 ## Dependencies
 
 - Verify versions against the registry (`cargo info <crate>`), never from memory.

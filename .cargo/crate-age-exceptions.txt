@@ -1,0 +1,8 @@
+# Security-fix exceptions to the 14-day release-age rule (docs/dependencies.md).
+# One line: crate version RUSTSEC-ID... The version must be the FIRST patched
+# release for each listed advisory; scripts/ci/check-crate-age.py verifies that
+# against the RustSec advisory database. Remove a line once it is reported stale.
+
+# 2026-10-18: four advisories against rustls < 0.23.46 (secret-leaking Debug,
+# ECH data leak, Brotli 1 GiB pre-auth allocation, ServerHello KX downgrade).
+rustls 0.23.46 RUSTSEC-2026-0346 RUSTSEC-2026-0347 RUSTSEC-2026-0348 RUSTSEC-2026-0349

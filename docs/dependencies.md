@@ -9,6 +9,16 @@ plus a scratch build to detect duplicate crates), not taken from memory.
 1. **≥ 14 days old.** A release younger than 14 days is not adopted; we pin the
    previous one (`cargo update -p <crate> --precise <version>`). Gives the
    community time to notice a malicious or broken release.
+   **Enforced mechanically** since 2026-10-18 by the `crate-age` CI job
+   (`scripts/ci/check-crate-age.py`): every crates.io package newly locked in
+   `Cargo.lock` or `fuzz/Cargo.lock` (compared with the merge-base on `main`)
+   is looked up on the crates.io API and the build fails if it is < 14 days
+   old, or if it cannot be looked up (fails closed). The job first runs a
+   self-test with planted too-new entries. Why a script: cargo-deny 0.20.2 has
+   no release-age check, and cargo's `-Z min-publish-age` is nightly-only and
+   filters resolution instead of checking a lockfile — revisit when it is
+   stable. Run locally: `python3 scripts/ci/check-crate-age.py --base
+   $(git merge-base HEAD origin/main) Cargo.lock fuzz/Cargo.lock`.
 2. **No pre-releases** (`-alpha`, `-pre`, `-dev`) for anything security-relevant.
 3. **One RustCrypto generation.** All our crypto shares `curve25519-dalek 4`,
    `digest 0.10`, `rand_core 0.6` (decision D3 in architecture.md). cargo-deny
@@ -28,22 +38,26 @@ once a workspace member actually uses it.
 |---|---|---|---|---|
 | tokio | 1.53 | 1.53.2 (1.53.3 < 14 days) | net, signal, apps | Async runtime; quinn requires it |
 | quinn | 0.11.12 | 0.11.12 (quinn-proto 0.11.19) | net | QUIC: datagrams, streams, migration, pluggable socket + congestion control |
-| rustls | 0.23.46 (`ring`) | 0.23.46 | net | quinn's TLS. Newest is 0.24.0-dev (pre-release) — not used |
+| rustls | 0.23.46 (`ring`) | 0.23.46 — **security-fix exception** (released 2026-10-14; RUSTSEC-2026-0346/0347/0348/0349 affect ≤ 0.23.45). This table listed it on 2026-10-17 without noticing it was < 14 days old (third slip, found by the crate-age job) | net | quinn's TLS. Newest is 0.24.0-dev (pre-release) — not used |
 | snow | 0.10.0 (`risky-raw-split` only if needed) | 0.10.0 | crypto | Noise Protocol Framework |
 | spake2 | 0.4.0 | 0.4.0 | crypto | PAKE. **Not independently audited** (threat model §9). 0.5.0-pre exists — not used |
 | ed25519-dalek | 2.2 | 2.2.0 | crypto | Identity keys. 3.0.0 exists but is on the next RustCrypto generation (D3) |
 | chacha20poly1305 | 0.10 | 0.10.1 | crypto | Media AEAD (same version snow uses) |
+| curve25519-dalek | 4.1.3 | 4.1.3 | crypto | **Only** for validating received SPAKE2 elements (A32: decompress, canonical re-encoding, `is_small_order`, `is_torsion_free`) and X25519 public keys (`MontgomeryPoint::mul_base_clamped`). Already in the graph via spake2/ed25519-dalek/snow; same single version (D3). 5.0.0 is the next generation |
+| unicode-normalization | 0.1.25 | 0.1.25 (0.1.26 of 2026-10-16 < 14 days) | crypto | NFKC + `is_combining_mark` for the unattended-password policy (A30). License `(MIT OR Apache-2.0) AND Unicode-3.0` — both allowed |
 | hkdf / sha2 / blake2 | 0.12 / 0.10 / 0.10 | — | crypto | Key derivation, hashes |
 | rand_core | 0.6 (`getrandom`) | 0.6.4 | crypto | OS CSPRNG (`OsRng`) |
-| zeroize | 1.8 | 1.9.1 | crypto | Wipe secrets on drop |
+| zeroize | 1.8 | **1.9.0** (1.9.1 of 2026-10-06 was < 14 days old when first locked on 2026-10-18; this table previously said 1.9.1 — corrected) | crypto | Wipe secrets on drop |
 | subtle | 2.6 | 2.6.1 | crypto | Constant-time comparison |
 | keyring | 4.2 | 4.2.0 | crypto (key storage) | OS keychain. **v4 API differs from v3** (split into `keyring-core` + per-OS stores) — re-verify in Phase 3 |
 | is | 0.11.1 | 0.11.1 | net | Sans-IO ICE agent from str0m (nat-traversal.md §3). Pin exact minor; frequent breaking releases |
-| prost | 0.14.4 | 0.14.4 | proto | Protobuf runtime |
+| prost | 0.14.4 | 0.14.4 | proto | Protobuf runtime; messages written as Rust structs with `#[derive(prost::Message)]` (no code generator — decision D20) |
+| base64 | 0.23.1 | 0.23.1 | proto | Connection codes: `URL_SAFE_NO_PAD` requires no padding and rejects non-canonical trailing bits (verified: base64-0.23.1/src/engine/general_purpose/mod.rs:472, 499) |
 | prost-build | 0.14.4 | 0.14.4 | proto (build) | Code generation |
 | protox | 0.9.1 | 0.9.1 (0.10.0 < 14 days) | proto (build) | Pure-Rust `.proto` compiler, so contributors don't need `protoc` |
 | reed-solomon-simd | 3.1.0 | 3.1.0 | net | FEC for video datagrams |
 | bytes | 1 | — | proto, net | Zero-copy buffers (quinn's buffer type) |
+| rcgen | 0.14.10, default features **off**, `crypto` + `ring` | 0.14.10 (2026-08-28) | net | Throw-away self-signed certificate per QUIC endpoint. TLS is untrusted plumbing (D1): authentication is Noise + the exporter binding, so the certificate only has to exist. From the rustls organisation; no PEM, no aws-lc-rs (D8). Pulls in `time` → `deranged` locked to **0.5.8** and `powerfmt` to **0.2.0** (newer ones < 14 days) |
 | objc2 | 0.6.4 | 0.6.4 (0.6.5 < 14 days) | capture, codec, input (macOS) | Objective-C runtime bindings; `define_class!` implements `SCStreamOutput` |
 | objc2-foundation, -core-foundation, -core-graphics, -screen-capture-kit, -video-toolbox, -core-media, -core-video | 0.3.2, default features **off** | 0.3.2 | capture, codec (macOS) | Generated Apple framework bindings; only the features we call (defaults pull in AVFoundation, Metal, OpenGL) |
 | block2 / dispatch2 | 0.6.2 / 0.3.1 | — | capture (macOS) | Objective-C completion blocks; ScreenCaptureKit's dispatch queue |
@@ -58,6 +72,42 @@ once a workspace member actually uses it.
 | anyhow | 1.0 | — | binaries only | Error plumbing in `main` |
 | clap | 4.6 | — | binaries | CLI flags (`--test-pattern`, …) |
 | criterion | 0.8.2 | — | benches | Benchmarks |
+
+## Transitive locks (2026-10-18, remora-crypto landing)
+
+Adding remora-crypto resolved 70 new packages; each was checked against its
+crates.io release date. Three were < 14 days old and were locked to the
+previous release, in both `Cargo.lock` and `fuzz/Cargo.lock`:
+`cc` 1.8.0 → **1.6.0** (1.7.0 was also < 14 days), `libc` 0.2.191 →
+**0.2.190**, `zeroize` 1.9.1 → **1.9.0**.
+
+**Security-fix exceptions.** A release younger than 14 days may be adopted
+only when it is the **first patched release** for RustSec advisories that
+affect the version we would otherwise use — staying on a known-vulnerable
+version to satisfy a supply-chain delay is the worse risk (priorities:
+security first). Each exception is one line in
+`.cargo/crate-age-exceptions.txt` (`crate version RUSTSEC-ID…`) and is
+**verified by the CI check against the RustSec advisory database** (same
+package, version listed as a `>=` patched bound), never trusted. Exceptions
+**expire** once the release is 14 days old: the check then fails until the
+line is deleted, and it validates every exception on every run, not only
+crates in the current diff. Owner-approved 2026-10-18 (D30) on exactly these
+terms: per crate, per version, per advisory ID; never a standing "security
+fixes bypass the rule" flag.
+
+**Exception log** (every use, auditable):
+
+| Date | Crate | Version | Advisories fixed | Released | Expires (14 days) | Removed |
+|---|---|---|---|---|---|---|
+| 2026-10-18 | rustls | 0.23.46 | RUSTSEC-2026-0346, -0347, -0348, -0349 | 2026-10-14 | 2026-10-28 | — |
+
+**Remembering the rule was not enough.** When the check first ran over the
+phase-3 branch it found five more violations that earlier steps had locked
+by hand without noticing: `arbitrary` 1.5.0 → **1.4.2** (fuzz only),
+`either` 1.19.0 → **1.18.0**, `smallvec` 1.16.3 → **1.16.2**, `syn` 3.0.9 →
+**3.0.6**, `unicode-ident` 1.0.27 → **1.0.26** (the latter three are
+build-time / proc-macro crates). All locked to the newest release that was
+≥ 14 days old on 2026-10-18.
 
 ## Known duplicate versions (accepted)
 

@@ -11,6 +11,22 @@ publish.workspace = true
 license = "MIT OR Apache-2.0"
 
 [dependencies]
+remora-crypto = { workspace = true }
+remora-proto = { workspace = true }
+remora-session = { workspace = true }
+quinn = { workspace = true }
+rustls = { workspace = true }
+rcgen = { workspace = true }
+tokio = { workspace = true, features = ["rt", "sync", "time", "macros", "net"] }
+rand_core = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+remora-testkit = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time", "net", "sync"] }
+prost = { workspace = true }
+bytes = { workspace = true }
 
 [lints]
 workspace = true

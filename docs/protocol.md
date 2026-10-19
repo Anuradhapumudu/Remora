@@ -42,13 +42,13 @@ WebSocket and the user only types a device ID.
 |---|---|---|
 | format version | 1 | `0x01` |
 | kind | 1 | 0 = offer, 1 = answer |
-| expiry | 4 | Unix time in **minutes**, big-endian; offer valid ≤ 5 min |
+| expiry | 4 | Unix time in **seconds**, big-endian; valid until this time; at most 5 min (+ 30 s clock-skew allowance) in the future when parsed (seconds, not minutes, so the A07 boundaries are exact) |
 | nonce | 16 | Random; single-use on the host. The answer echoes the offer's nonce |
 | identity key | 32 | Ed25519 public key of the sender |
 | ICE ufrag | 4 | Random |
 | ICE password | 16 | Random (128 bits) |
 | candidate count | 1 | ≤ 8 |
-| candidates | 7 or 19 each | `kind:u8` (host/srflx) + IPv4 (4) or IPv6 (16) + port (2) |
+| candidates | 7 or 19 each | `kind:u8` = low nibble type (0 host, 1 server-reflexive) · high nibble family (4 = IPv4 → 4 address bytes, 6 = IPv6 → 16) + address + port (2, big-endian, ≠ 0) |
 | CRC-32 | 4 | **Typo detection only, not security** |
 
 Encoded as **base64url without padding**, prefixed `remora1:`. Typical size with two IPv4 and two
@@ -79,7 +79,7 @@ Viewer (initiator)                                       Host (responder)
  │ ◀─────── msg2: e, ee, s, es  + payload {IdentityCert_h, C_r}          │
  │    msg3: s, se + payload {IdentityCert_v, n_i}               ───────▶ │
  │ ◀─────── first transport msg: SasReveal {n_r}                         │
- │    viewer checks BLAKE2s(n_r) == C_r                                  │
+ │    viewer checks n_r against C_r (§3.3)                               │
  │    both display SAS                                                   │
  │ ◀─────── SessionPending (host shows accept prompt)                    │
  │ ◀─────── SessionAccept{role, media key announce} | SessionReject      │
@@ -90,35 +90,108 @@ Viewer (initiator)                                       Host (responder)
 
 ```
 exporter  = QUIC.export_keying_material(len = 32, label = "EXPORTER-remora/1", context = "")
-transcript= BLAKE2s(ViewerHello_bytes ‖ HostHello_bytes ‖ SpakeA ‖ SpakeB)
+hellos    = u32_be(len VH) ‖ ViewerHello_bytes ‖ u32_be(len HH) ‖ HostHello_bytes
+transcript= BLAKE2s(hellos ‖ SpakeA ‖ SpakeB)
 psk       = HKDF-SHA256(salt = exporter, ikm = K, info = "remora/1/noise-psk" ‖ transcript)
-prologue  = "remora/1" ‖ exporter ‖ BLAKE2s(ViewerHello_bytes ‖ HostHello_bytes)
+prologue  = "remora/1" ‖ exporter ‖ BLAKE2s(hellos)
 ```
 
-* **SPAKE2** (`spake2` crate, Ed25519 group): password = `"remora/1/otp:" ‖ six ASCII digits`;
+* **SPAKE2** behind Remora's own `Pake` abstraction (implementation: `spake2`
+  crate, python-spake2 compatible — **not** RFC 9382; crypto-claims-audit.md §1).
+  Before passing a received element to the crate, Remora checks its length and
+  side byte and rejects non-decompressible, identity and non-torsion-free points.
+  password = `"remora/1/otp:" ‖ six ASCII digits`;
   `id_a = "remora/1/viewer"`; `id_b = "remora/1/host:" ‖ host_device_id ‖ nonce`.
 * Binding the **exporter** into the prologue means a MITM at the QUIC layer
   (two different TLS sessions) produces different prologues → Noise fails.
-* Binding the **hellos** prevents tampering with version/mode selection.
+* Binding the **hellos** prevents tampering with version/mode selection. They
+  are **length-prefixed** so no byte can move from one hello to the other
+  without changing the hash (architecture.md D22; test A08).
 * `psk0` means a wrong password fails when the host decrypts message 1; the
   host never sends its identity to a peer that doesn't know the password.
 
 ### 3.2 Identity certificate (inside Noise msg2 / msg3 payloads)
 
-```
-IdentityCert { ed25519_pub: [u8;32], noise_static_pub: [u8;32],
-               device_name: string (≤ 64 bytes UTF-8), created_unix: u64,
-               sig: Ed25519(ed25519_priv, "remora/1/cert" ‖ noise_static_pub ‖ device_name ‖ created_unix) }
-```
+Fixed binary layout (architecture.md D22), at most 137 + 64 = 201 bytes:
+
+| Field | Size | Notes |
+|---|---|---|
+| `ed25519_pub` | 32 | signer |
+| `noise_static_pub` | 32 | X25519 key this cert vouches for |
+| `created_unix` | 8 | u64 big-endian, informational |
+| `name_len` | 1 | ≤ 64 |
+| `device_name` | `name_len` | UTF-8, display only (untrusted text) |
+| `sig` | 64 | Ed25519 over `"remora/1/cert" ‖ noise_static_pub ‖ name_len ‖ device_name ‖ u64_be(created_unix)` |
+
+The signed message does not repeat `ed25519_pub`: Ed25519 already hashes the
+public key into every signature. Parsing checks every length before
+allocating; a cert with trailing bytes is rejected.
+
+**Noise payloads:** msg2 = `IdentityCert_h ‖ C_r` (32 B), msg3 =
+`IdentityCert_v ‖ n_i` (32 B). The cert's `name_len` frames it; the payload
+must be exactly cert + 32 bytes, otherwise `ProtocolViolation`.
 
 The receiver verifies (a) the signature, (b) `noise_static_pub` equals the Noise
 remote static key just authenticated, (c) in Trusted mode, `ed25519_pub` is
 pinned, and (d) when connecting by device ID, that `DeviceId(ed25519_pub)`
 matches.
 
-**Device ID** = first 80 bits of `BLAKE2s("remora/1/device-id" ‖ ed25519_pub)`,
-shown as a 9-digit group code + checksum digit, e.g. `482 913 557-3`.
-(80 bits: second-preimage needs ~2⁸⁰ work.)
+**Device ID** = first 80 bits of `BLAKE2s("remora/1/device-id" ‖ ed25519_pub)`.
+
+**Full ID vs short code (owner decision 2026-10-18):**
+
+* The **full 80-bit ID is the only ID the protocol compares** (`HostHello`,
+  `PeerPolicy::DeviceId`, pinning). Nothing in the protocol ever treats the
+  short code as the device's identity.
+* Users see a **short code** derived from the full ID. It is used **only**
+  for display and for a routing lookup on remora-signal.
+* The short code is an **ADDRESS, not a credential.** Security comes from the
+  one-time password (Noise msg1) and the safety code — never from the code
+  being hard to guess. Someone who knows your code must gain nothing: they can
+  try to connect, which still needs your password and your approval of the
+  SAS. Codes may be shared, printed, and enumerated without harming security.
+* Without a routing service (copy-paste connection codes) the short code
+  plays no part: the connection code carries the full 32-byte identity key.
+
+**Short-code scheme (owner-approved 2026-10-18; not implemented yet):**
+
+* **Format:** 11 decimal digits derived from the full ID, plus 1 check
+  digit, e.g. `4829 135 5731-6`. One length for everyone: no short tier
+  that early adopters keep while later devices get longer codes. 11 digits
+  hold ~36.5 bits: collisions reach 50 % only around ~370 000 registered
+  devices, and grinding a key to match a given code costs ~10¹¹ tries
+  (~100× more than 9 digits).
+* **Derivation:** the first 64 bits of the full ID (big-endian) mod 10¹¹;
+  bias < 10⁻⁸.
+* **Check digit:** Damm algorithm (intended: detects every single-digit error
+  and every adjacent transposition, which Luhn does not). **Unverified —
+  must be checked against a primary source before it is implemented.**
+* **Collisions (routing service only):** the first device to register a code
+  keeps it permanently; a later device whose code is taken is told at
+  registration to show 2 more digits (the next digits of its own ID), and so
+  on. Every code stays derived from the key, so the viewer can check it.
+* **Proof of key ownership at registration:** the device signs a fresh
+  server challenge with its identity key; a code is never registered for a
+  key the registrant does not hold.
+* **What the code protects, honestly:** when a viewer connects by short code,
+  the routing service's answer is checked only against the code, so the
+  "wrong device" check (A16) is as strong as the code (~2³⁶ grinding), not
+  80 bits. The compensating controls are the password and the safety code.
+  After the first session whose safety code the user confirmed, the viewer
+  **pins the full identity key**; from then on A16/A19 compare the full key.
+* **UI requirement (Phase 7, owner):** on a first connection, until the
+  safety code has been confirmed, the viewer must **clearly mark the device
+  as unverified** (not just show the code): the safety code is the control
+  that compensates for squatting and grinding, so the UI must make
+  confirming it the obvious step. A device becomes "verified" only by that
+  confirmation, never by the short code matching.
+
+(80 bits: forging an ID for *someone else's* key needs ~2⁸⁰ work; two keys of
+the *same* attacker can collide after ~2⁴⁰, which is harmless because IDs only
+route and the full key is always verified.)
+
+Signatures are checked with `ed25519-dalek`'s **`verify_strict`** (rejects
+small-order keys and malleable signatures); plain `verify` is not used.
 
 ### 3.3 Safety code (SAS)
 
@@ -133,6 +206,7 @@ where `h` is the final Noise handshake hash. Rationale: threat model §6.3.
 | Wrong password | Host: Noise msg1 decryption fails → counts one attempt → closes connection with generic `AuthFailed`. No timing difference between "unknown device" and "wrong password" paths. |
 | 3rd failure | Password rotates; host UI notified; cool-down starts. |
 | Commitment mismatch | Viewer aborts with `ProtocolViolation`. |
+| Host user denies (or the prompt times out) | `SessionReject`. The one-time password was **already consumed** when the viewer proved it (INV15), so a retry needs a **fresh code** from the host. **UI requirement (Phase 7, owner):** both sides must say so plainly — viewer: "The host declined. Ask for a new code to try again."; host: show the new code — so it does not look like the old code is broken. |
 | Any message too large / malformed | Close with `ProtocolViolation`. |
 | Handshake not complete in 10 s | Close with `Timeout`. |
 | Host user does not answer prompt in 60 s | `SessionReject{reason = Timeout}`. |

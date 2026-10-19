@@ -11,6 +11,14 @@ publish.workspace = true
 license = "MIT OR Apache-2.0"
 
 [dependencies]
+remora-crypto = { workspace = true }
+remora-proto = { workspace = true }
+rand_core = { workspace = true }
+prost = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+remora-testkit = { workspace = true }
 
 [lints]
 workspace = true

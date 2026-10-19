@@ -1,0 +1,45 @@
+# Mutation-testing gate (phase3-criteria §7). Scope = security controls only.
+# A file joins this list when it lands. Every mutant in scope must be killed;
+# a mutant may only be excluded below with a one-line justification, and
+# equivalent mutants must be labelled "EQUIVALENT:". Unexplained survivors fail.
+examine_globs = [
+    # Policy checker: SECURITY CONTROL backing decision D19 (testkit never a
+    # normal dependency) and A31/A35. Last run: 56 caught, 0 missed, 2 unviable.
+    "crates/remora-testkit/src/policy.rs",
+    # remora-proto validators (phase3-criteria §7): every parser of untrusted bytes.
+    "crates/remora-proto/src/code.rs",
+    "crates/remora-proto/src/crc32.rs",
+    "crates/remora-proto/src/datagram.rs",
+    "crates/remora-proto/src/frame.rs",
+    "crates/remora-proto/src/messages.rs",
+    # remora-crypto: all of it (phase3-criteria §7), explicitly including the
+    # A32 element validator (src/pake/validate.rs) — a security control that
+    # compensates for a check the spake2 crate does not perform.
+    "crates/remora-crypto/src/**/*.rs",
+    # remora-session: state machine, approval gate, attempt limiter (§7).
+    "crates/remora-session/src/**/*.rs",
+    # remora-net: the handshake driver (§7) - host driver, stream framing /
+    # exporter / close codes, and the A04 timing floor. TLS setup and the
+    # viewer driver are plumbing whose failures the session layer catches.
+    "crates/remora-net/src/host.rs",
+    "crates/remora-net/src/wire.rs",
+    "crates/remora-net/src/lib.rs",
+    # Device key file: owner-only creation and refusal rules are a control.
+    "crates/remora-app/src/keystore.rs",
+]
+
+# Test-only modules inside src/ (they ARE the tests; mutating them is noise).
+exclude_globs = [
+    "crates/remora-crypto/src/pake/a33_constants.rs",
+    "crates/remora-crypto/src/noise/tests.rs",
+]
+
+# Justified exclusions (regex over mutant names), one line of reason each.
+exclude_re = [
+    # EQUIVALENT: in ConnectionCode::encode, `0x40 | kind` / `0x60 | kind` with
+    # kind ∈ {0, 1} and a zero low nibble — `|` and `^` always give the same byte.
+    'replace \| with \^ in ConnectionCode::encode',
+    # EQUIVALENT: in ReplayWindow::shift, `hi = w << bits` and
+    # `lo = w' >> (64 - bits)` never share a set bit, so `|` and `^` agree.
+    'replace \| with \^ in ReplayWindow::shift',
+]
