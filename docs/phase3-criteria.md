@@ -96,7 +96,9 @@ The requirement is therefore per step:
   nightly and on PRs touching net/session/crypto). It checks its own output
   has 9 measurements of n = 200 and that the medians were compared. Every
   other run (regular CI at 20 samples, the mutation gate at 3) checks only
-  the 200–225 ms window on every sample — which proves the floor exists (a
+  that every sample is ≥ 200 ms and below a loose 1 s ceiling (the strict
+  225 ms ceiling is part of the statistical claim too: a busy macOS runner
+  delayed one close to 229.6 ms) — which proves the floor exists (a
   missing floor shows in any sample) — and compares **no** medians: on
   shared CI machines their noise exceeds the 1 ms being judged (observed:
   1.07 ms at 3 samples on Linux, 1.14 ms at 20 on macOS, for types the
