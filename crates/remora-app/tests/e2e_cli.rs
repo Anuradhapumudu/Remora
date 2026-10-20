@@ -469,7 +469,7 @@ fn f_ux2_unencrypted_key_warning_on_every_run_of_both_apps() {
     };
     for run in 0..2 {
         // run 0 creates each key file, run 1 only loads it
-        let mut host = start_host(&dir, &[]);
+        let host = start_host(&dir, &[]);
         let mut all = host.app.seen.clone();
         all.extend(std::iter::from_fn(|| {
             host.app.lines.recv_timeout(Duration::from_millis(300)).ok()
@@ -508,8 +508,18 @@ fn f_ux1_prompts_are_numbered_from_one_and_never_reused() {
     assert_eq!(viewers[0].0.wait_exit(10), 2);
     host.app.expect("session ended 1", 10);
     // A third viewer after prompt 1 is gone: it gets 3, not the freed 1.
-    let code = value(&host.app.expect("code:", 10));
-    let password = value(&host.app.expect("password:", 10));
+    // (Denying prints no new pair: the one shown after prompt 2 is unused.)
+    let last = |p: &str| {
+        value(
+            host.app
+                .seen
+                .iter()
+                .rev()
+                .find(|l| l.starts_with(p))
+                .unwrap(),
+        )
+    };
+    let (code, password) = (last("code:"), last("password:"));
     let _third = connect_viewer(&tmp_dir(), &code, &["--password", &password]);
     let (id, _) = parse_prompt(&host.app.expect("prompt ", 15));
     assert_eq!(id, "3");
