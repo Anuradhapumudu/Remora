@@ -28,14 +28,17 @@ fn child() {
         .and_then(|v| v.parse().ok())
         .unwrap_or(0);
     let stdin = std::io::stdin();
-    let mut out = std::io::stdout().lock();
+    // Replies go to STDERR with a marker: the test harness writes its own
+    // text to stdout (e.g. "test p0_child_entry ... " with no newline, which
+    // the first reply would be glued onto).
+    let mut out = std::io::stderr().lock();
     for line in stdin.lock().lines() {
         let t2 = monotonic_ns().unwrap() + skew;
         if line.unwrap().is_empty() {
             break;
         }
         let t3 = monotonic_ns().unwrap() + skew;
-        writeln!(out, "{t2} {t3}").unwrap();
+        writeln!(out, "@@ {t2} {t3}").unwrap();
         out.flush().unwrap();
     }
 }
@@ -57,24 +60,33 @@ fn measure(skew_ns: u64) -> Result {
         .env(CHILD, "1")
         .env(SKEW, skew_ns.to_string())
         .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
         .spawn()
         .unwrap();
     let mut to = c.stdin.take().unwrap();
-    let mut from = BufReader::new(c.stdout.take().unwrap());
+    let mut from = BufReader::new(c.stderr.take().unwrap());
     let mut samples = Vec::with_capacity(ROUNDS);
     let mut line = String::new();
     while samples.len() < ROUNDS {
         let t1 = monotonic_ns().unwrap() as i64;
         writeln!(to, "x").unwrap();
         to.flush().unwrap();
-        line.clear();
-        from.read_line(&mut line).unwrap();
-        let t4 = monotonic_ns().unwrap() as i64;
-        // The test harness may print its own lines; only "<t2> <t3>" counts.
-        let mut it = line.split_whitespace().map(str::parse::<i64>);
-        let (Some(Ok(t2)), Some(Ok(t3)), None) = (it.next(), it.next(), it.next()) else {
-            continue;
+        // Only "@@ <t2> <t3>" lines are replies. Anything else is skipped
+        // WITHOUT sending again: every request must be paired with its own
+        // reply (a first version re-sent here, paired replies with the wrong
+        // requests and reported an impossible 166 ns round trip).
+        let (t2, t3, t4) = loop {
+            line.clear();
+            assert!(from.read_line(&mut line).unwrap() > 0, "child exited");
+            let t4 = monotonic_ns().unwrap() as i64;
+            let Some(rest) = line.trim_end().strip_prefix("@@ ") else {
+                continue;
+            };
+            let mut it = rest.split(' ').map(str::parse::<i64>);
+            if let (Some(Ok(t2)), Some(Ok(t3)), None) = (it.next(), it.next(), it.next()) {
+                break (t2, t3, t4);
+            }
         };
         let offset = ((t2 - t1) + (t3 - t4)) / 2;
         let rtt = (t4 - t1) - (t3 - t2);
@@ -91,6 +103,12 @@ fn measure(skew_ns: u64) -> Result {
         best_rtt_ns,
         median_abs_offset_ns: abs[abs.len() / 2],
     }
+}
+
+/// A pipe round trip between processes takes microseconds; anything under
+/// 1 us means requests and replies were mispaired, so the result is invalid.
+fn plausible(r: &Result) -> bool {
+    r.best_rtt_ns >= 1_000
 }
 
 fn passes(r: &Result) -> bool {
@@ -113,6 +131,11 @@ fn p0_two_processes_read_the_same_clock() {
         "P0: best offset {} ns at round trip {} ns; median |offset| {} ns",
         r.best_offset_ns, r.best_rtt_ns, r.median_abs_offset_ns
     );
+    assert!(
+        plausible(&r),
+        "round trip {} ns is impossible: samples mispaired",
+        r.best_rtt_ns
+    );
     assert!(passes(&r), "clocks disagree across processes");
 }
 
@@ -123,6 +146,11 @@ fn p0_detects_a_planted_one_millisecond_skew() {
     println!(
         "P0 plant: best offset {} ns at round trip {} ns",
         r.best_offset_ns, r.best_rtt_ns
+    );
+    assert!(
+        plausible(&r),
+        "round trip {} ns is impossible: samples mispaired",
+        r.best_rtt_ns
     );
     assert!(!passes(&r), "a 1 ms skew must fail P0");
     assert!(
