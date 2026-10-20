@@ -1,6 +1,8 @@
 [workspace]
 resolver = "3"
 members = ["crates/*", "spikes/*"]
+# Throwaway spikes with heavy dependencies keep their own workspace and lockfile.
+exclude = ["spikes/slint-wgpu"]
 
 [workspace.package]
 version = "0.0.1"

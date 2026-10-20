@@ -16,7 +16,9 @@ use std::sync::Arc;
 
 use anyhow::{Context, anyhow};
 use clap::{Parser, Subcommand};
-use remora_app::cli::{exit, format_sas, identity_hex, parse_identity, short_code_of, unix_now};
+use remora_app::cli::{
+    exit, format_sas, identity_hex, key_file_warning, parse_identity, short_code_of, unix_now,
+};
 use remora_app::keystore::{self, Role};
 use remora_crypto::identity::{DeviceId, IdentityPublic, ShortCode};
 use remora_crypto::secret::Otp;
@@ -98,6 +100,8 @@ fn identity(file: Option<PathBuf>) -> anyhow::Result<()> {
         None => keystore::default_path(Role::Viewer)?,
     };
     let (keys, _) = keystore::load_or_create(&path)?;
+    // F-UX2: on every run that loads the key file.
+    eprintln!("{}", key_file_warning(&path));
     let public = keys.identity.public();
     println!("identity: {}", identity_hex(&public));
     println!("device: {}", short_code_of(&public));
@@ -167,6 +171,8 @@ async fn run_connect(args: ConnectArgs) -> anyhow::Result<u8> {
         None => keystore::default_path(Role::Viewer)?,
     };
     let (keys, _) = keystore::load_or_create(&path)?;
+    // F-UX2: on every run that loads the key file.
+    eprintln!("{}", key_file_warning(&path));
     let cert = keys
         .cert(&args.name, unix_now())
         .context("--name is at most 64 bytes")?;
@@ -185,12 +191,18 @@ async fn run_connect(args: ConnectArgs) -> anyhow::Result<u8> {
     let mut outcome: Option<u8> = None;
     while let Some(ev) = events.recv().await {
         match ev {
-            ViewerEvent::ShowSas { sas, host } => println!(
-                "safety code: {} - compare it with the host's screen (host {:?}, device {})",
-                format_sas(sas),
-                host.device_name(),
-                short_code_of(host.identity())
-            ),
+            ViewerEvent::ShowSas { sas, host } => {
+                println!(
+                    "safety code: {} - compare it with the host's screen (host {:?}, device {})",
+                    format_sas(sas),
+                    host.device_name(),
+                    short_code_of(host.identity())
+                );
+                // F-UX4: the decision is made on the host, not here.
+                println!(
+                    "waiting for the person at the host to accept or deny (nothing to type here)"
+                );
+            }
             ViewerEvent::Active => println!("SESSION ACTIVE"),
             ViewerEvent::Deliver(_) => {}
             ViewerEvent::Failed { reason, .. } => outcome = Some(report_failure(&reason)),

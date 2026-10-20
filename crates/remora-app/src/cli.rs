@@ -1,6 +1,7 @@
 //! Helpers shared by the host and viewer command-line apps.
 
 use std::net::SocketAddr;
+use std::path::Path;
 
 use remora_crypto::identity::{IdentityPublic, ShortCode};
 use remora_crypto::sas::Sas;
@@ -26,6 +27,58 @@ pub enum CliError {
     /// An identity key is 64 hex digits.
     #[error("an identity key is 64 hexadecimal digits")]
     BadIdentity,
+}
+
+/// Printed to stderr on **every** run that loads the device key file
+/// (walkthrough finding F-UX2): while keys live in a plain file, the person
+/// running the app must see that, every time, so the file storage cannot
+/// quietly become the shipped behaviour (roadmap D-5: keychain before v0.1).
+pub fn key_file_warning(path: &Path) -> String {
+    format!(
+        "WARNING: this device's identity keys are stored UNENCRYPTED in {} - anyone who can read that file can impersonate this device. \
+         Development-stage storage, protected only by file permissions; Remora moves the keys to the OS keychain before v0.1.",
+        path.display()
+    )
+}
+
+/// What happened to the one-time password since it was last shown
+/// (walkthrough finding F-UX3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PasswordChange {
+    /// Same password as last shown.
+    Unchanged,
+    /// A viewer proved it, which uses it up (INV15).
+    UsedUp,
+    /// Replaced after 3 failed attempts (INV12).
+    ReplacedAfterFailures,
+}
+
+impl PasswordChange {
+    /// Classifies a change: `rotated` is whether the host reported a
+    /// replacement after failed attempts since the last time it was shown.
+    pub fn between(previous: &str, current: &str, rotated: bool) -> Self {
+        match (previous == current, rotated) {
+            (true, _) => Self::Unchanged,
+            (false, true) => Self::ReplacedAfterFailures,
+            (false, false) => Self::UsedUp,
+        }
+    }
+
+    /// The line printed before a new `code:` / `password:` pair, so it is
+    /// clear which pair is current and why a new one appeared.
+    pub fn note(self) -> &'static str {
+        match self {
+            Self::Unchanged => {
+                "note: new connection code for the next viewer (each code works for one attempt); the password is unchanged"
+            }
+            Self::UsedUp => {
+                "note: the previous code and password were used up when that viewer proved the password - each works for ONE connection. Give the next viewer these new ones:"
+            }
+            Self::ReplacedAfterFailures => {
+                "note: the password was replaced after 3 failed attempts and the old one no longer works. Give the next viewer these new ones:"
+            }
+        }
+    }
 }
 
 /// A safety code as people read it aloud: `123 456`.
@@ -94,4 +147,41 @@ pub fn offer_code(
         }],
     }
     .encode()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn key_file_warning_names_the_file_and_the_risk() {
+        let w = key_file_warning(Path::new("/x/host-identity.key"));
+        assert!(w.starts_with("WARNING: "), "{w}");
+        assert!(w.contains("/x/host-identity.key"), "{w}");
+        assert!(w.contains("UNENCRYPTED"), "{w}");
+        assert!(w.contains("impersonate"), "{w}");
+        assert!(w.contains("keychain"), "{w}");
+    }
+
+    #[test]
+    fn password_change_is_classified_and_explained() {
+        use PasswordChange::*;
+        assert_eq!(
+            PasswordChange::between("111111", "111111", false),
+            Unchanged
+        );
+        assert_eq!(PasswordChange::between("111111", "111111", true), Unchanged);
+        assert_eq!(PasswordChange::between("111111", "222222", false), UsedUp);
+        assert_eq!(
+            PasswordChange::between("111111", "222222", true),
+            ReplacedAfterFailures
+        );
+        assert!(Unchanged.note().contains("unchanged"));
+        assert!(UsedUp.note().contains("used up"));
+        assert!(UsedUp.note().contains("ONE connection"));
+        assert!(ReplacedAfterFailures.note().contains("3 failed attempts"));
+        for c in [Unchanged, UsedUp, ReplacedAfterFailures] {
+            assert!(c.note().starts_with("note: "));
+        }
+    }
 }

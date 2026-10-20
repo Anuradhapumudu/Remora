@@ -91,7 +91,15 @@ The requirement is therefore per step:
   ever exceeds 150 ms the host logs an anomaly (the floor would stop hiding it).
   Chosen over "measure and prove overlap" because a floor removes the signal by
   construction instead of hoping a measurement is sensitive enough.
-* **Which job carries this claim:** **only** the `A04 timing` workflow
+* **Which job carries this claim — exactly one:** workflow **`A04 timing`**,
+  job **`a04`** (`.github/workflows/timing.yml`). Nothing else may be cited
+  as A04 timing evidence. Its health is **checked, not assumed**
+  (`scripts/ci/check-a04-evidence.sh`, run by CI on every PR and by the
+  `Evidence` workflow every 6 hours and on every push to main): it fails
+  loudly if the workflow is disabled, has no successful run in 48 hours, or
+  the latest merge to main has no successful run of its own after 6 hours.
+  Planted failures for all three were seen failing (2026-10-19).
+* Details of that job: the `A04 timing` workflow
   (`.github/workflows/timing.yml`: 200 samples per type, release build,
   nightly and on PRs touching net/session/crypto). It checks its own output
   has 9 measurements of n = 200 and that the medians were compared. Every
@@ -511,6 +519,9 @@ redundant code; none was excluded for convenience.
 
 ### 10.6 Gaps carried forward
 
+Tracked in **docs/roadmap.md → "Deferred items"** (the one list; D-1…D-7
+are the items below). Summary at the time of writing:
+
 INV2, INV9 (Phase 4), INV10 (Phase 6), the INV11 GUI part (Phase 7; the
 CLI part is now automated), A34's cross-implementation vector (v1.0 list
 2b), the formal model of the commitment scheme (v1.0 list 1), device keys
@@ -521,21 +532,69 @@ adds (real NAT traversal, STUN parser fuzzing, QUIC retry).
 
 1. Terminal 1: `cargo run -p remora-host -- serve` — note `device:`,
    `code:` and `password:` (first run creates the key file in the
-   per-user config directory).
+   per-user config directory). **Every run** prints a `WARNING:` on
+   stderr that the identity keys are stored unencrypted (F-UX2).
 2. Terminal 2: `cargo run -p remora-viewer -- connect '<code>'
    --password <password>` (or omit `--password` to be asked).
 3. Both terminals show the **same** `safety code`. In terminal 1 type
-   `accept <id>` (the id from the `prompt` line): both print `SESSION
-   ACTIVE`. Type `disconnect <id>` to end it.
+   `accept 1` (the **prompt number** from the `prompt 1:` line; numbers
+   count 1, 2, 3 … and are never reused in a run): both print `SESSION
+   ACTIVE 1`. Type `disconnect 1` to end it. Right after the prompt the
+   host prints a `note:` explaining that the code and password were used
+   up, then the new pair for the next viewer (F-UX3).
 4. Wrong password: repeat with a wrong `--password` ⇒ viewer prints
    `failed:` and exits 4; host logs one `handshake_failed` WARN on stderr.
-5. Deny: `deny <id>` ⇒ viewer prints `rejected` and exits 2; a retry needs
+5. Deny: `deny <n>` ⇒ viewer prints `rejected` and exits 2; a retry needs
    the new `code:` / `password:` the host printed.
 6. Trusted mode: `cargo run -p remora-viewer -- identity` prints the
    viewer's `identity:`; start the host with `serve --trust <that key>`,
    then connect with `--pin <host identity>` instead of `--password`.
 7. Wrong device: connect with `--device <some other device code>` ⇒
    `identity mismatch`, exit 3, and the host never prompts.
+
+
+### 10.8 Owner walkthrough findings (2026-10-20, step 1 of §10.7)
+
+Happy path up to the prompt worked: QUIC on loopback, the safety codes
+matched on both terminals (306 260), device IDs in the approved
+`DDDD DDD DDDD-C` format. Three findings, all **fixed in the Phase 3 CLI**
+(tests first, each test seen failing against a planted regression):
+
+| ID | Finding | Kind | Fix (CLI, now) | Phase 7 GUI consequence |
+|---|---|---|---|---|
+| **F-UX1** | The prompt ID was the protocol's 19-digit random session ID, to be read and retyped | UX | Prompts are numbered `1, 2, 3 …` per run, **never reused** — reuse would let a stale `accept 1` approve a different viewer (security, unit + e2e test, `prompts.rs` in the mutation gate). Every mistyped line gets an explicit answer: unknown number lists the waiting prompts; missing / non-numeric numbers and unknown commands say what to type. (Before: `accept 999` printed "no pending session 999"; `accept abc` printed "unknown command" — not silent, but no help.) | A GUI selects a prompt by clicking it; numbers are not shown. The accept button stays bound to that prompt's safety code (A22) |
+| **F-UX2** | The dev key-storage warning was missing: only a first-run `note:` naming the file, nothing about it being unencrypted | **Missed approval condition** (roadmap "Process slips"), not only UX | Both apps print `WARNING: … identity keys are stored UNENCRYPTED in <path> - anyone who can read that file can impersonate this device …` to stderr on **every** run that loads the key file (`serve`, `connect`, `identity`) | Until D-5 (keychain) closes, the GUI shows the same warning persistently; after D-5 the warning disappears with the file |
+| **F-UX3** | After authentication the host printed a second code and password with no explanation (INV15 working, but it looked like an error) | UX | A `note:` line before every new pair says why: used up by the viewer that proved the password (each works for ONE connection), replaced after 3 failed attempts, or only the code is new and the password is unchanged | Same explanation in the GUI next to the code (and protocol.md's denied-prompt requirement: a retry needs the fresh code) |
+
+**A security find from a usability fix (F-UX1).** Replacing session IDs
+with short numbers created a new way to approve the wrong viewer: if a
+withdrawn prompt's number were handed to the *next* viewer, an `accept 1`
+typed for the old prompt would approve someone else — a **confused-deputy**
+bug, where the host user's authority is applied to a target they never saw.
+It was caught only because the change got its own attack test (number
+never reused, unit + e2e, planted reuse caught, mutation gate). **Rule:** a UX
+change to a security-relevant flow (approval, codes, passwords, identity
+display) is a new attack surface and needs its own attack test, even when
+the underlying protocol check (here A22) is unchanged.
+
+**Walkthrough results (owner, 2026-10-20, screenshots of both terminals):**
+
+| §10.7 step | Result |
+|---|---|
+| 3. Accept | ✅ safety codes matched (854 929); `accept 1` → `SESSION ACTIVE 1` on the host, `SESSION ACTIVE` on the viewer; the F-UX3 note explained the new pair. `disconnect 1` not shown in the screenshots |
+| 4. Wrong password | ✅ viewer `failed: authentication failed (wrong or used password, or not trusted)`; host one `handshake_failed` WARN (`attempt=1/3`), note "the password is unchanged", new code, same password |
+| 5. Deny | ✅ viewer `rejected by the host (a new attempt needs a fresh code and password)`; host `session ended 1 (Rejected)`; the typo `denny 1` got the explicit F-UX1 error |
+| 6. Trusted mode across restart | **not run by hand** — covered by the e2e tests `f1_trusted_mode_with_pinned_keys` and `a19_pinned_host_whose_key_changed_is_a_hard_failure` (real binaries) |
+| 7. Wrong device | **not run by hand** — covered by `a16_viewer_asking_for_device_x_refuses_a_code_for_device_y` |
+
+**F-UX4** (found in the deny run): the owner typed `deny 1` into the
+**viewer's** terminal — nothing there said that the decision is made at the
+host, so the line sat unread until the viewer exited and the shell ran it.
+Fixed: after the safety code the viewer prints `waiting for the person at
+the host to accept or deny (nothing to type here)` (e2e test
+`f_ux4_viewer_says_the_host_decides`, planted weaker wording caught).
+Phase 7 GUI: the viewer shows a "waiting for the host" state with no input
+that looks actionable.
 
 ## 11. Changes to criteria
 
