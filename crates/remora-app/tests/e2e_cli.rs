@@ -69,15 +69,27 @@ impl App {
             .env("RUST_LOG", "warn")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::inherit())
+            .stderr(Stdio::piped())
             .spawn()
             .unwrap();
         let stdout = child.stdout.take().unwrap();
+        let stderr = child.stderr.take().unwrap();
         let (tx, rx) = mpsc::channel();
+        // stdout and stderr both arrive on the channel, so a test can check
+        // warnings (stderr) as well as the normal output (F-UX2).
+        let tx_err = tx.clone();
         std::thread::spawn(move || {
             for line in BufReader::new(stdout).lines() {
                 let Ok(line) = line else { break };
                 if tx.send(line).is_err() {
+                    break;
+                }
+            }
+        });
+        std::thread::spawn(move || {
+            for line in BufReader::new(stderr).lines() {
+                let Ok(line) = line else { break };
+                if tx_err.send(line).is_err() {
                     break;
                 }
             }
@@ -424,11 +436,135 @@ fn unknown_command_or_session_id_changes_nothing() {
     let mut host = start_host(&dir, &[]);
     let mut viewer = connect_viewer(&dir, &host.code, &["--password", &host.password]);
     let (id, _) = parse_prompt(&host.app.expect("prompt ", 15));
+    // F-UX1: every mistake gets an explicit answer that says what to type.
     host.app.send("accept 999999");
-    host.app.expect("no pending session 999999", 10);
+    host.app
+        .expect(&format!("no pending prompt 999999 - waiting: {id}"), 10);
+    host.app.send("accept");
+    host.app
+        .expect("'accept' needs the prompt number shown on screen", 10);
+    host.app.send("accept abc");
+    host.app.expect("\"abc\" is not a prompt number", 10);
     host.app.send("launch-rockets");
     host.app.expect("unknown command", 10);
     assert!(!viewer.sees_within("SESSION ACTIVE", 1000));
     host.app.send(&format!("accept {id}"));
     viewer.expect("SESSION ACTIVE", 10);
+}
+
+// --------------------------------------------- walkthrough findings F-UX --
+
+/// F-UX2 (owner walkthrough, 2026-10-20): while keys are in a plain file,
+/// EVERY run that loads them warns, naming the file and the risk - not only
+/// the run that created it.
+#[test]
+fn f_ux2_unencrypted_key_warning_on_every_run_of_both_apps() {
+    let dir = tmp_dir();
+    let host_key = dir.join("host.key");
+    let viewer_key = dir.join("viewer.key");
+    let warned = |app: &mut App, path: &Path| {
+        let line = app.expect("WARNING: ", 10);
+        assert!(line.contains("UNENCRYPTED"), "{line}");
+        assert!(line.contains(path.to_str().unwrap()), "{line}");
+    };
+    for run in 0..2 {
+        // run 0 creates each key file, run 1 only loads it
+        let mut host = start_host(&dir, &[]);
+        let mut all = host.app.seen.clone();
+        all.extend(std::iter::from_fn(|| {
+            host.app.lines.recv_timeout(Duration::from_millis(300)).ok()
+        }));
+        assert!(
+            all.iter()
+                .any(|l| l.starts_with("WARNING: ") && l.contains("UNENCRYPTED")),
+            "host serve run {run} did not warn; saw:\n{}",
+            all.join("\n")
+        );
+        drop(host);
+        let mut id = App::spawn(
+            &bins().0,
+            &["identity", "--identity-file", host_key.to_str().unwrap()],
+        );
+        warned(&mut id, &host_key);
+        let mut vid = App::spawn(
+            &bins().1,
+            &["identity", "--identity-file", viewer_key.to_str().unwrap()],
+        );
+        warned(&mut vid, &viewer_key);
+    }
+    let host = start_host(&dir, &[]);
+    let mut viewer = connect_viewer(&dir, &host.code, &["--password", &host.password]);
+    warned(&mut viewer, &viewer_key);
+}
+
+/// F-UX1: prompts are numbered 1, 2, 3 ... and a number is never reused, so
+/// a stale 'accept 1' can never approve a different viewer.
+#[test]
+fn f_ux1_prompts_are_numbered_from_one_and_never_reused() {
+    let (mut host, mut viewers) = two_pending();
+    assert_eq!(viewers[0].1, "1");
+    assert_eq!(viewers[1].1, "2");
+    host.app.send("deny 1");
+    assert_eq!(viewers[0].0.wait_exit(10), 2);
+    host.app.expect("session ended 1", 10);
+    // A third viewer after prompt 1 is gone: it gets 3, not the freed 1.
+    let code = value(&host.app.expect("code:", 10));
+    let password = value(&host.app.expect("password:", 10));
+    let _third = connect_viewer(&tmp_dir(), &code, &["--password", &password]);
+    let (id, _) = parse_prompt(&host.app.expect("prompt ", 15));
+    assert_eq!(id, "3");
+    host.app.send("accept 1");
+    host.app.expect("no pending prompt 1 - waiting: 2, 3", 10);
+    // The prompt line tells the person exactly what to type.
+    let prompt_line = host
+        .app
+        .seen
+        .iter()
+        .find(|l| l.starts_with("prompt 3:"))
+        .unwrap()
+        .clone();
+    assert!(
+        prompt_line.contains("'accept 3'") && prompt_line.contains("'deny 3'"),
+        "{prompt_line}"
+    );
+    let _ = viewers.pop();
+}
+
+/// F-UX3: when the password is used up at authentication (INV15), the new
+/// code and password come with a line saying why, so two passwords on
+/// screen are not mistaken for an error.
+#[test]
+fn f_ux3_a_new_password_after_authentication_is_explained() {
+    let dir = tmp_dir();
+    let mut host = start_host(&dir, &[]);
+    let _viewer = connect_viewer(&dir, &host.code, &["--password", &host.password]);
+    host.app.expect("prompt ", 15);
+    let note = host.app.expect("note: ", 10);
+    assert!(
+        note.contains("used up") && note.contains("ONE connection"),
+        "{note}"
+    );
+    let code = value(&host.app.expect("code:", 10));
+    let password = value(&host.app.expect("password:", 10));
+    assert_ne!(code, host.code);
+    assert_ne!(password, host.password, "INV15: a new password");
+}
+
+/// F-UX3, the other branch: a wrong password does not use the password up,
+/// and the note says it is unchanged (only the code is new).
+#[test]
+fn f_ux3_after_a_failed_attempt_the_note_says_the_password_is_unchanged() {
+    let dir = tmp_dir();
+    let mut host = start_host(&dir, &[]);
+    let wrong = if host.password == "000000" {
+        "111111"
+    } else {
+        "000000"
+    };
+    let mut viewer = connect_viewer(&dir, &host.code, &["--password", wrong]);
+    assert_eq!(viewer.wait_exit(15), 4);
+    let note = host.app.expect("note: ", 10);
+    assert!(note.contains("password is unchanged"), "{note}");
+    let password = value(&host.app.expect("password:", 10));
+    assert_eq!(password, host.password);
 }
