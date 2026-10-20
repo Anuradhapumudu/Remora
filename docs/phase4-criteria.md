@@ -197,6 +197,17 @@ Before Phase 4 finishes, D-17 must have been examined (done 2026-10-19:
 docs/d17-video-surface-options.md).
 The phase report lists the whole deferred list row by row (CLAUDE.md).
 
+## 11b. Progress notes
+
+* **Step 1 (2026-10-20).** P0 passes on the M4: offset between two
+  processes ≤ 0.42 µs at a 3.4–3.75 µs round trip (3 runs; limits 50 µs /
+  200 µs); a planted 1 ms skew is measured as 0.9996–1.00002 ms and fails.
+  **CI probe:** GitHub's macOS runner (macos-15) **hardware-encodes**:
+  `VT_PROBE encode=ok frames=30/30 keyframes=1 dropped_or_failed=0`. So
+  §8's first branch applies: the media tests run in CI with VideoToolbox
+  (decode probed in step 5). The pass-through codec is not needed unless
+  the decode probe says otherwise.
+
 ## 12. Changes to criteria
 
 * **2026-10-19 — owner approval.** R1–R5 approved as proposed. R1 and R2 are

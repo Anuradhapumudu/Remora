@@ -11,13 +11,17 @@
 //! `p0_detects_a_planted_one_millisecond_skew`.
 #![allow(clippy::unwrap_used, clippy::expect_used)] // test code: a panic is how a test fails
 
-use std::io::{BufRead, BufReader, Write};
+#[cfg(target_os = "macos")]
+use std::io::BufReader;
+use std::io::{BufRead, Write};
+#[cfg(target_os = "macos")]
 use std::process::{Command, Stdio};
 
 use remora_app::clock::monotonic_ns;
 
 const CHILD: &str = "REMORA_P0_CHILD";
 const SKEW: &str = "REMORA_P0_SKEW_NS";
+#[cfg(target_os = "macos")]
 const ROUNDS: usize = 1000;
 
 /// The child side: for every line from the parent, answer with t2 and t3
@@ -43,12 +47,14 @@ fn child() {
     }
 }
 
+#[cfg(target_os = "macos")]
 struct Result {
     best_offset_ns: i64,
     best_rtt_ns: i64,
     median_abs_offset_ns: i64,
 }
 
+#[cfg(target_os = "macos")]
 fn measure(skew_ns: u64) -> Result {
     let mut c = Command::new(std::env::current_exe().unwrap())
         .args([
@@ -105,12 +111,14 @@ fn measure(skew_ns: u64) -> Result {
     }
 }
 
+#[cfg(target_os = "macos")]
 /// A pipe round trip between processes takes microseconds; anything under
 /// 1 us means requests and replies were mispaired, so the result is invalid.
 fn plausible(r: &Result) -> bool {
     r.best_rtt_ns >= 1_000
 }
 
+#[cfg(target_os = "macos")]
 fn passes(r: &Result) -> bool {
     r.best_offset_ns.abs() <= 50_000 && r.best_rtt_ns <= 200_000 && r.median_abs_offset_ns <= 50_000
 }
