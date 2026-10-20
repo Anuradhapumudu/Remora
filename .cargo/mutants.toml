@@ -8,6 +8,7 @@ examine_globs = [
     "crates/remora-testkit/src/policy.rs",
     # remora-proto validators (phase3-criteria §7): every parser of untrusted bytes.
     "crates/remora-proto/src/code.rs",
+    "crates/remora-proto/src/video.rs",
     "crates/remora-proto/src/crc32.rs",
     "crates/remora-proto/src/datagram.rs",
     "crates/remora-proto/src/frame.rs",
@@ -43,4 +44,12 @@ exclude_re = [
     # EQUIVALENT: in ReplayWindow::shift, `hi = w << bits` and
     # `lo = w' >> (64 - bits)` never share a set bit, so `|` and `^` agree.
     'replace \| with \^ in ReplayWindow::shift',
+    # EQUIVALENT: in packetize, `key | last` combines FLAG_KEYFRAME (bit 0) and
+    # FLAG_LAST (bit 1) - different bits, so `|` and `^` give the same flags.
+    'replace \| with \^ in packetize',
+    # EQUIVALENT: in Reassembler::abandon_older, open frame IDs are unique and
+    # the completed frame already left `open`, so no open ID equals
+    # `completed`: `<` == `<=`. It is that function's only comparison, so
+    # this pattern cannot hide any other mutant.
+    'replace < with <= in Reassembler::abandon_older',
 ]

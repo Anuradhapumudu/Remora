@@ -82,3 +82,10 @@ path = "fuzz_targets/session_host.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "video_reassembly"
+path = "fuzz_targets/video_reassembly.rs"
+test = false
+doc = false
+bench = false

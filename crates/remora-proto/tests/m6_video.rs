@@ -433,3 +433,164 @@ fn video_frame_debug_never_prints_the_payload() {
     );
     assert!(s.contains("bytes: 8"), "{s}");
 }
+
+// ---------------------------- found by mutation testing (step 3) --
+
+#[test]
+fn the_budget_evicts_other_frames_never_the_one_being_filled() {
+    // Five frames of ~7 MiB each, never complete: 35 MiB > 32 MiB budget.
+    let chunk = vec![5u8; 1_000];
+    let per_frame = 7 * 1024 * 1024 / chunk.len();
+    let count = per_frame as u16 + 1; // one fragment short of complete
+    let fill = |r: &mut Reassembler, id: u32, n: usize| {
+        let mut ev = Vec::new();
+        for i in 0..n as u16 {
+            ev.extend(push(r, header(id, i, count), &chunk));
+        }
+        ev
+    };
+    let mut r = Reassembler::new();
+    for id in 1..=4 {
+        fill(&mut r, id, per_frame);
+    }
+    assert_eq!(r.open_frames(), 4);
+    // Frame 1 is the OLDEST and is the one being filled: the budget must
+    // evict frame 2 (the oldest other frame), keep frame 1 and its new bytes.
+    let before = r.bytes_in_flight();
+    // Fill frame 5 to just under the budget (no eviction yet), so that
+    // frame 1's final fragment is the one that crosses it.
+    let room = (REASSEMBLY_BYTES_MAX - before) / chunk.len();
+    let ev = fill(&mut r, 5, room);
+    assert!(
+        !ev.iter()
+            .any(|e| matches!(e, ReassemblyEvent::Dropped { .. })),
+        "still under the budget"
+    );
+    assert!(r.bytes_in_flight() + chunk.len() > REASSEMBLY_BYTES_MAX);
+    let ev2 = push(&mut r, header(1, per_frame as u16, count), &chunk); // completes frame 1
+    let all: Vec<_> = ev.iter().chain(ev2.iter()).collect();
+    let evicted: Vec<u32> = all
+        .iter()
+        .filter_map(|e| match e {
+            ReassemblyEvent::Dropped {
+                frame_id,
+                reason: DropReason::OverBudget,
+            } => Some(*frame_id),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        !evicted.contains(&5),
+        "never the frame being filled: {evicted:?}"
+    );
+    assert!(
+        !evicted.contains(&1),
+        "frame 1 was not the victim: {evicted:?}"
+    );
+    assert_eq!(
+        evicted.first(),
+        Some(&2),
+        "the oldest OTHER frame goes first"
+    );
+    assert!(before > 0);
+    let done = frames(&ev2);
+    assert_eq!(done.len(), 1, "frame 1 completed with all its bytes");
+    assert_eq!(done[0].data.len(), (per_frame + 1) * chunk.len());
+}
+
+#[test]
+fn a_newer_incomplete_frame_survives_when_an_older_one_completes() {
+    let mut r = Reassembler::new();
+    push(&mut r, header(3, 0, 2), &[3; 10]); // newer, incomplete
+    push(&mut r, header(1, 0, 2), &[1; 10]); // older, incomplete
+    let ev = push(&mut r, header(2, 0, 1), &[2; 10]); // completes in between
+    assert!(ev.contains(&ReassemblyEvent::Dropped {
+        frame_id: 1,
+        reason: DropReason::Superseded
+    }));
+    assert!(
+        !ev.iter()
+            .any(|e| matches!(e, ReassemblyEvent::Dropped { frame_id: 3, .. }))
+    );
+    assert_eq!(r.open_frames(), 1);
+    assert_eq!(r.bytes_in_flight(), 10);
+    let ev = push(&mut r, header(3, 1, 2), &[4; 10]);
+    assert_eq!(frames(&ev)[0].frame_id, 3, "frame 3 can still complete");
+}
+
+#[test]
+fn a_dropped_frame_newer_than_a_later_delivery_stays_late() {
+    let mut r = Reassembler::new();
+    // Frame 9 is dropped as inconsistent (above the floor).
+    push(&mut r, header(9, 0, 2), &[1; 10]);
+    let ev = push(&mut r, header(9, 1, 3), &[1; 10]);
+    assert!(ev.contains(&ReassemblyEvent::Dropped {
+        frame_id: 9,
+        reason: DropReason::Inconsistent
+    }));
+    // Frame 6 completes afterwards; 9 is still above the floor.
+    push(&mut r, header(6, 0, 1), &[6; 10]);
+    // A stray fragment of 9 must stay late, not start a new partial.
+    let ev = push(&mut r, header(9, 0, 1), &[1; 10]);
+    assert_eq!(ev, vec![ReassemblyEvent::Late { frame_id: 9 }]);
+    assert_eq!(r.open_frames(), 0);
+}
+
+#[test]
+fn recently_dropped_frames_are_remembered_and_the_memory_is_bounded() {
+    let mut r = Reassembler::new();
+    let drop_inconsistent = |r: &mut Reassembler, id: u32| {
+        push(r, header(id, 0, 2), &[1; 4]);
+        push(r, header(id, 1, 3), &[1; 4]);
+    };
+    for id in 100..100 + 70 {
+        drop_inconsistent(&mut r, id);
+    }
+    // The last two dropped are both remembered (late)...
+    for id in [168, 169] {
+        assert_eq!(
+            push(&mut r, header(id, 0, 1), &[1]),
+            vec![ReassemblyEvent::Late { frame_id: id }],
+            "{id}"
+        );
+    }
+    // ...the memory holds 64: the oldest ones are forgotten, so a
+    // fragment for frame 100 now opens a partial instead of being late.
+    let ev = push(&mut r, header(100, 0, 2), &[1]);
+    assert!(ev.is_empty(), "{ev:?}");
+    assert_eq!(r.open_frames(), 1);
+}
+
+#[test]
+fn exactly_at_the_limits_is_accepted() {
+    // Exactly FRAME_MAX can be sent and reassembled; one byte more cannot
+    // (the `>` versus `>=` boundary, found by mutation testing).
+    let max_frame = vec![9u8; FRAME_MAX];
+    assert!(packetize(1, 0, true, &max_frame, 1_200).is_ok());
+    let mib = vec![4u8; 1024 * 1024];
+    let mut r = Reassembler::new();
+    let mut ev = Vec::new();
+    for i in 0..8u16 {
+        ev.extend(push(&mut r, header(1, i, 8), &mib));
+    }
+    assert_eq!(
+        frames(&ev)[0].data.len(),
+        FRAME_MAX,
+        "8 MiB exactly completes"
+    );
+    // Four 8 MiB frames waiting for a 9th fragment: exactly the 32 MiB
+    // budget, so nothing may be evicted.
+    let mut r = Reassembler::new();
+    let mut ev = Vec::new();
+    for id in 10..14u32 {
+        for i in 0..8u16 {
+            ev.extend(push(&mut r, header(id, i, 9), &mib));
+        }
+    }
+    assert_eq!(r.bytes_in_flight(), REASSEMBLY_BYTES_MAX);
+    assert!(
+        !ev.iter()
+            .any(|e| matches!(e, ReassemblyEvent::Dropped { .. })),
+        "nothing evicted at exactly the budget"
+    );
+}
