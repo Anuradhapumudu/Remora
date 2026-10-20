@@ -26,3 +26,15 @@ pub const CLOCK_SKEW_SECS: u64 = 30;
 pub const DATAGRAM_HEADER_LEN: usize = 16;
 /// Largest datagram we accept (one QUIC DATAGRAM frame on any sane path).
 pub const DATAGRAM_MAX: usize = 1500;
+/// Fragments of one video frame (protocol.md §7).
+pub const MAX_FRAGMENTS: usize = 8192;
+/// One reassembled video frame (protocol.md §7; dropped, not fatal).
+pub const FRAME_MAX: usize = 8 * 1024 * 1024;
+/// Video frames being reassembled at once; beyond this the oldest is dropped.
+pub const MAX_OPEN_FRAMES: usize = 16;
+/// All fragments held for reassembly together (Phase 4 addition: without
+/// it, 16 open frames of 8 MiB would allow 128 MiB from a malicious host,
+/// most of the viewer's 150 MB budget). Oldest frames are dropped first.
+pub const REASSEMBLY_BYTES_MAX: usize = 32 * 1024 * 1024;
+/// Plaintext header of a video-fragment body (protocol.md §6).
+pub const FRAGMENT_HEADER_LEN: usize = 18;
