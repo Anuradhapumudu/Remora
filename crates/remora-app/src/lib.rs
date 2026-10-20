@@ -7,10 +7,13 @@
 //!   measure:** the keys move to the OS keychain before v0.1 (roadmap D-5);
 //!   until then both apps print [`cli::key_file_warning`] on every run.
 //! * [`cli`] — formatting and parsing shared by the two command-line apps.
+//! * [`clock`] — the monotonic clock both apps stamp latency with (P0).
 //! * [`prompts`] — short prompt numbers and the commands typed at the host.
 
 #![forbid(unsafe_code)]
 
 pub mod cli;
+pub mod clock;
 pub mod keystore;
 pub mod prompts;
+mod sys;
