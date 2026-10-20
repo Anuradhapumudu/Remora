@@ -566,6 +566,17 @@ matched on both terminals (306 260), device IDs in the approved
 | **F-UX2** | The dev key-storage warning was missing: only a first-run `note:` naming the file, nothing about it being unencrypted | **Missed approval condition** (roadmap "Process slips"), not only UX | Both apps print `WARNING: … identity keys are stored UNENCRYPTED in <path> - anyone who can read that file can impersonate this device …` to stderr on **every** run that loads the key file (`serve`, `connect`, `identity`) | Until D-5 (keychain) closes, the GUI shows the same warning persistently; after D-5 the warning disappears with the file |
 | **F-UX3** | After authentication the host printed a second code and password with no explanation (INV15 working, but it looked like an error) | UX | A `note:` line before every new pair says why: used up by the viewer that proved the password (each works for ONE connection), replaced after 3 failed attempts, or only the code is new and the password is unchanged | Same explanation in the GUI next to the code (and protocol.md's denied-prompt requirement: a retry needs the fresh code) |
 
+**A security find from a usability fix (F-UX1).** Replacing session IDs
+with short numbers created a new way to approve the wrong viewer: if a
+withdrawn prompt's number were handed to the *next* viewer, an `accept 1`
+typed for the old prompt would approve someone else — a **confused-deputy**
+bug, where the host user's authority is applied to a target they never saw.
+It was caught only because the change got its own attack test (number
+never reused, unit + e2e, planted reuse caught, mutation gate). **Rule:** a UX
+change to a security-relevant flow (approval, codes, passwords, identity
+display) is a new attack surface and needs its own attack test, even when
+the underlying protocol check (here A22) is unchanged.
+
 Remaining §10.7 steps (accept/disconnect, wrong password, deny, trusted
 mode across restart, wrong device): **owner to run and report**.
 

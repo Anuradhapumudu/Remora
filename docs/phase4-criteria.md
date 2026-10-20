@@ -212,3 +212,7 @@ The phase report lists the whole deferred list row by row (CLAUDE.md).
   this test still pass with, if the thing it checks were removed?* (The M1a /
   M1b split is the example: a wire capture alone passes even with the media
   seal removed, because QUIC encrypts too.) Each test's plant answers it.
+* Standing rule (owner, 2026-10-20): **a UX change to a security-relevant
+  flow needs its own attack test** — phase3-criteria §10.8, the F-UX1
+  prompt-number confused-deputy case. Applies to the Phase 4 viewer window
+  and stats output wherever they touch codes, approval or identity.
