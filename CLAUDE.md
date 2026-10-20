@@ -115,6 +115,12 @@ squash, rebase or reorder phase-3 commits into a tidier shape.
 - **An owner approval of future work becomes a row in that list (or a
   criteria item) in the same commit that records it.** Approved-but-unwritten
   work is how the render spike slipped (roadmap "Process slips").
+- **Every owner gate ("don't proceed until X") becomes a row in roadmap.md
+  "Open gates" in the same commit that acknowledges it.** Before starting
+  each step, run `python3 scripts/ci/check-roadmap.py --open-gates` and stop
+  if a gate blocks it — gates are checked, not remembered. A gate is only
+  MET (with evidence) or WAIVED (with the owner's own words); "continue" is
+  not a waiver of a gate it does not name.
 
 ## macOS development notes
 

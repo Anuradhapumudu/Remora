@@ -149,7 +149,7 @@ pub enum InterruptReason { DisplayUnavailable, AccessLost, Other }
 |---|---|---|
 | T1 | Sans-IO, fake capture: every event in every session state | actions exactly as above; no media action while interrupted; mutation gate covers it |
 | T2 | macOS, real: `pmset displaysleepnow`, then wake (`caffeinate -u -t 2`); 5 cycles in one session | `Interrupted` ≤ 1 s after sleep; `Resumed` ≤ 2 s after wake; first frame after resume is a keyframe; same session throughout; no memory growth across cycles (≤ 2 MB) |
-| T3 | Lid close, display removal | **not testable** on this machine (needs an external display) → known gap, added to roadmap D-16 |
+| T3 | Lid close, display removal | Display removal: **not testable** on this machine (needs an external display) → roadmap D-16. **Lid close / open: testable** (correction 2026-10-20, §12) → run in step 7 with the owner closing the lid: `Interrupted` on close, `Resumed` ≤ 2 s after the display is back on open, same session (roadmap D-28) |
 | T4 | Policy rule: no `-3815`, `SCStream` or other OS names in remora-session / remora-net | scanner passes; plant fails |
 
 ## 8. Functional
@@ -237,6 +237,11 @@ The phase report lists the whole deferred list row by row (CLAUDE.md).
   this test still pass with, if the thing it checks were removed?* (The M1a /
   M1b split is the example: a wire capture alone passes even with the media
   seal removed, because QUIC encrypts too.) Each test's plant answers it.
+* **2026-10-20 — T3 correction (found in the deferred-list phase re-check).**
+  T3 said lid close was "not testable" on this machine; Phase 2 tested lid
+  close/open on it (phase2-criteria Q4, `hotplug-lid.log`). Lid close/open is
+  now a test (step 7, owner closes the lid); only display removal stays a gap.
+  This adds a test; no threshold changes.
 * Standing rule (owner, 2026-10-20): **a UX change to a security-relevant
   flow needs its own attack test** — phase3-criteria §10.8, the F-UX1
   prompt-number confused-deputy case. Applies to the Phase 4 viewer window

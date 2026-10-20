@@ -16,11 +16,15 @@ Rules (HEAD compared with a BASE version of the file):
     with the evidence; it is never deleted.
   * Progress log and process slips are append-only: every BASE row's key
     (first two cells) is still present in HEAD.
+  * Open gates (owner "don't proceed until X"): 5 cells, ID like G-1, status
+    starting OPEN, MET or WAIVED (MET/WAIVED with the evidence or the owner's
+    words); no gate ID ever disappears.
 
 Usage:
     check-roadmap.py [BASE_REF]     compare HEAD's file with BASE_REF's
                                     (default HEAD~1; no base = structure only)
     check-roadmap.py --self-test    run planted failures; each must be caught
+    check-roadmap.py --open-gates   list OPEN gates (run before every step)
 
 Stdlib only.
 """
@@ -31,6 +35,8 @@ import sys
 
 PATH = "docs/roadmap.md"
 ID_RE = re.compile(r"^D-\d+[a-z]?$")
+GATE_RE = re.compile(r"^G-\d+$")
+GATE_STATES = ("OPEN", "MET", "WAIVED")
 
 
 class RoadmapError(Exception):
@@ -68,7 +74,10 @@ def rows(body):
 
 def parse_base(text):
     """Keys of an older version; sections it does not have yet count as empty."""
-    out = {"ids": set(), "slips": set(), "log": set()}
+    out = {"ids": set(), "slips": set(), "log": set(), "gates": set()}
+    gates = section(text, "Open gates", required=False)
+    if gates is not None:
+        out["gates"] = {r[0] for r in rows(gates) if r and GATE_RE.match(r[0])}
     deferred = section(text, "Deferred items", required=False)
     if deferred is not None:
         open_part, _, closed_part = deferred.partition("### Closed")
@@ -107,6 +116,20 @@ def parse(text):
     dup = sorted({i for i in ids if ids.count(i) > 1})
     if dup:
         raise RoadmapError(f"deferred IDs listed twice: {dup}")
+    gates = {}
+    for r in rows(section(text, "Open gates")):
+        if len(r) != 5:
+            raise RoadmapError(f"gate row has {len(r)} cells, want 5: {r[:1]}")
+        if not GATE_RE.match(r[0]):
+            raise RoadmapError(f"bad gate ID {r[0]!r}")
+        state = r[4].split(" ", 1)[0].strip("*")
+        if state not in GATE_STATES:
+            raise RoadmapError(f"{r[0]}: status must start with OPEN, MET or WAIVED")
+        if state != "OPEN" and len(r[4]) < len(state) + 10:
+            raise RoadmapError(f"{r[0]}: {state} needs the evidence or the owner's words")
+        if r[0] in gates:
+            raise RoadmapError(f"gate listed twice: {r[0]}")
+        gates[r[0]] = r
     slips = rows(section(text, "Process slips"))
     log = rows(section(text, "Progress log"))
     if not log:
@@ -119,6 +142,7 @@ def parse(text):
         "ids": set(ids),
         "slips": {tuple(r[:2]) for r in slips},
         "log": {tuple(r[:2]) for r in log},
+        "gates": gates,
     }
 
 
@@ -130,6 +154,9 @@ def compare(base_text, head_text):
     lost = sorted(base["ids"] - head["ids"])
     if lost:
         raise RoadmapError(f"deferred items disappeared (close them, don't delete): {lost}")
+    lost_gates = sorted(base["gates"] - set(head["gates"]))
+    if lost_gates:
+        raise RoadmapError(f"gates disappeared (mark them MET or WAIVED, don't delete): {lost_gates}")
     for key, name in (("log", "progress log"), ("slips", "process slips")):
         gone = sorted(base[key] - head[key])
         if gone:
@@ -159,6 +186,18 @@ def self_test():
         "section heading renamed": good[:log_head] + "## Log" + good[log_head + len("## Progress log"):],
         "duplicate ID": good.replace(first_open, first_open + "\n" + first_open, 1),
     }
+    first_gate = next(l for l in good.splitlines() if l.startswith("| G-"))
+    gate_cells = first_gate.strip().strip("|").split("|")
+    def gate_status(status):
+        return "|" + "|".join(gate_cells[:4]) + f"| {status} |"
+    try:
+        compare(good, good.replace(first_gate, gate_status("MET 2026-10-21: owner reported every step"), 1))
+        print("allowed marking a gate MET with evidence")
+    except RoadmapError as e:
+        sys.exit(f"self-test FAILED: marking a gate MET properly was rejected: {e}")
+    plants["gate row deleted"] = good.replace(first_gate + "\n", "", 1)
+    plants["gate status invented"] = good.replace(first_gate, gate_status("DONE"), 1)
+    plants["gate met without evidence"] = good.replace(first_gate, gate_status("MET"), 1)
     failed = []
     # The legitimate way out must keep working: move a row to "Closed".
     rid = first_open.split("|")[1].strip()
@@ -191,6 +230,16 @@ def main():
     args = sys.argv[1:]
     if args == ["--self-test"]:
         self_test()
+        return
+    if args == ["--open-gates"]:
+        # Run before starting every step (CLAUDE.md): gates are checked,
+        # not remembered.
+        with open(PATH, encoding="utf-8") as f:
+            gates = parse(f.read())["gates"]
+        open_rows = [r for r in gates.values() if r[4].startswith("OPEN")]
+        for r in open_rows:
+            print(f"OPEN {r[0]}: blocks {r[3]} - {r[1][:160]}")
+        print(f"{len(open_rows)} open gate(s)")
         return
     base_ref = args[0] if args else "HEAD~1"
     with open(PATH, encoding="utf-8") as f:
