@@ -577,8 +577,24 @@ change to a security-relevant flow (approval, codes, passwords, identity
 display) is a new attack surface and needs its own attack test, even when
 the underlying protocol check (here A22) is unchanged.
 
-Remaining §10.7 steps (accept/disconnect, wrong password, deny, trusted
-mode across restart, wrong device): **owner to run and report**.
+**Walkthrough results (owner, 2026-10-20, screenshots of both terminals):**
+
+| §10.7 step | Result |
+|---|---|
+| 3. Accept | ✅ safety codes matched (854 929); `accept 1` → `SESSION ACTIVE 1` on the host, `SESSION ACTIVE` on the viewer; the F-UX3 note explained the new pair. `disconnect 1` not shown in the screenshots |
+| 4. Wrong password | ✅ viewer `failed: authentication failed (wrong or used password, or not trusted)`; host one `handshake_failed` WARN (`attempt=1/3`), note "the password is unchanged", new code, same password |
+| 5. Deny | ✅ viewer `rejected by the host (a new attempt needs a fresh code and password)`; host `session ended 1 (Rejected)`; the typo `denny 1` got the explicit F-UX1 error |
+| 6. Trusted mode across restart | **not run by hand** — covered by the e2e tests `f1_trusted_mode_with_pinned_keys` and `a19_pinned_host_whose_key_changed_is_a_hard_failure` (real binaries) |
+| 7. Wrong device | **not run by hand** — covered by `a16_viewer_asking_for_device_x_refuses_a_code_for_device_y` |
+
+**F-UX4** (found in the deny run): the owner typed `deny 1` into the
+**viewer's** terminal — nothing there said that the decision is made at the
+host, so the line sat unread until the viewer exited and the shell ran it.
+Fixed: after the safety code the viewer prints `waiting for the person at
+the host to accept or deny (nothing to type here)` (e2e test
+`f_ux4_viewer_says_the_host_decides`, planted weaker wording caught).
+Phase 7 GUI: the viewer shows a "waiting for the host" state with no input
+that looks actionable.
 
 ## 11. Changes to criteria
 

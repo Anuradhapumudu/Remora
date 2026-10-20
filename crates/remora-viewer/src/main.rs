@@ -191,12 +191,18 @@ async fn run_connect(args: ConnectArgs) -> anyhow::Result<u8> {
     let mut outcome: Option<u8> = None;
     while let Some(ev) = events.recv().await {
         match ev {
-            ViewerEvent::ShowSas { sas, host } => println!(
-                "safety code: {} - compare it with the host's screen (host {:?}, device {})",
-                format_sas(sas),
-                host.device_name(),
-                short_code_of(host.identity())
-            ),
+            ViewerEvent::ShowSas { sas, host } => {
+                println!(
+                    "safety code: {} - compare it with the host's screen (host {:?}, device {})",
+                    format_sas(sas),
+                    host.device_name(),
+                    short_code_of(host.identity())
+                );
+                // F-UX4: the decision is made on the host, not here.
+                println!(
+                    "waiting for the person at the host to accept or deny (nothing to type here)"
+                );
+            }
             ViewerEvent::Active => println!("SESSION ACTIVE"),
             ViewerEvent::Deliver(_) => {}
             ViewerEvent::Failed { reason, .. } => outcome = Some(report_failure(&reason)),

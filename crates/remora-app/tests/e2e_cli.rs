@@ -578,3 +578,19 @@ fn f_ux3_after_a_failed_attempt_the_note_says_the_password_is_unchanged() {
     let password = value(&host.app.expect("password:", 10));
     assert_eq!(password, host.password);
 }
+
+/// F-UX4 (owner walkthrough, 2026-10-20): the owner typed 'deny 1' into the
+/// VIEWER's terminal - nothing there said the decision is made on the host.
+/// After the safety code the viewer must say it is waiting for the host.
+#[test]
+fn f_ux4_viewer_says_the_host_decides() {
+    let dir = tmp_dir();
+    let host = start_host(&dir, &[]);
+    let mut viewer = connect_viewer(&dir, &host.code, &["--password", &host.password]);
+    viewer.expect("safety code:", 15);
+    let wait = viewer.expect("waiting", 10);
+    assert!(
+        wait.contains("host") && wait.contains("nothing to type here"),
+        "{wait}"
+    );
+}
