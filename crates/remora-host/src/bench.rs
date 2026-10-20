@@ -702,6 +702,14 @@ pub(crate) fn watch_capture(seconds: u64) -> Result<()> {
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |d| d.as_millis())
     };
+    // T2 also requires no memory growth across cycles: physical footprint
+    // (Activity Monitor's "Memory") at start, at every event and at the end.
+    let mem = || {
+        sysmon::footprint(std::process::id()).map_or_else(
+            || "mem ?".to_owned(),
+            |b| format!("mem {:.1} MB", b as f64 / 1e6),
+        )
+    };
     let mut capture = MacScreenCapture::main_display(CaptureConfig::default())?;
     let (tx, rx) = mpsc::channel::<String>();
     let frames = Arc::new(std::sync::atomic::AtomicU64::new(0));
@@ -722,12 +730,12 @@ pub(crate) fn watch_capture(seconds: u64) -> Result<()> {
             let _ = tx.send(format!("{} {line}", unix_ms()));
         }))
         .context("start capture")?;
-    println!("{} START watching for {seconds} s", unix_ms());
+    println!("{} START watching for {seconds} s, {}", unix_ms(), mem());
     let end = Instant::now() + Duration::from_secs(seconds);
     let mut last = 0;
     while Instant::now() < end {
         while let Ok(line) = rx.try_recv() {
-            println!("{line}");
+            println!("{line}, {}", mem());
         }
         std::thread::sleep(Duration::from_secs(1));
         let n = frames.load(Ordering::Relaxed);
@@ -738,7 +746,7 @@ pub(crate) fn watch_capture(seconds: u64) -> Result<()> {
     while let Ok(line) = rx.try_recv() {
         println!("{line}");
     }
-    println!("{} END", unix_ms());
+    println!("{} END, {}", unix_ms(), mem());
     Ok(())
 }
 

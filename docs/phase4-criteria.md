@@ -208,6 +208,20 @@ The phase report lists the whole deferred list row by row (CLAUDE.md).
   (decode probed in step 5). The pass-through codec is not needed unless
   the decode probe says otherwise.
 
+* **Step 2 (2026-10-20).** T1 (12 sans-IO tests) and T4 (policy rule,
+  planted OS names caught) pass; mutation testing of the new session
+  functions 22 mutants / 0 missed, policy.rs 61 / 0 missed. **T2 on the M4**
+  (`remora-host watch-capture` via RemoraDev.app, `pmset displaysleepnow` then
+  `caffeinate -u -t 2`, 5 cycles in one capture session):
+  Interrupted 75–87 ms after sleep (≤ 1 s), Resumed 325–334 ms after wake
+  (≤ 2 s), footprint 6.4 → 6.2 MB (no growth). A first run was disturbed by a
+  browser "Video Wake Lock" that turned the display back on early in cycles
+  1–3 (power log `pmset -g log`: off and on within 0–3 s); every Resumed still
+  came ≤ ~1.3 s after the display really turned on — Resumed is emitted on the
+  new stream's first callback, so it cannot precede real frames. **Still open
+  from T2:** "the first frame after resume is a keyframe" needs the streaming
+  host's encoder — checked in step 7.
+
 ## 12. Changes to criteria
 
 * **2026-10-19 — owner approval.** R1–R5 approved as proposed. R1 and R2 are
