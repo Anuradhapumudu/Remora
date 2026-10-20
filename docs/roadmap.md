@@ -37,8 +37,9 @@ Each phase ends **runnable**, with tests and exact manual test steps.
 | 1.5 | Release pipeline (unsigned), CI | ✅ done 2026-10-17 — `v0.0.1` built all artifacts on GitHub; all verified |
 | 2 | macOS ScreenCaptureKit capture + VideoToolbox encode → file; benchmark; verify 4:4:4 / LTR / intra-refresh support | ✅ gate passed 2026-10-17 (C12, C3, C4, C5; C2 failed as written → measurement redesigned, see phase2-criteria.md §6) |
 | 2.5 | **Windows spike** (throwaway): capture one DXGI frame, inject one SendInput click; report trait changes | ✅ done 2026-10-17 on GitHub's Windows runner — capture and input both work; 4 trait changes proposed (docs/phase2.5-windows-spike.md). Real-PC confirmation open. |
-| 3 | Noise + SPAKE2 handshake over QUIC on localhost; safety code; CLI accept prompt; security tests; fuzz targets | ✅ all criteria met 2026-10-19, awaiting owner acceptance — results in phase3-criteria.md §10 |
-| 4 | Encrypted loopback streaming; wgpu viewer; stats overlay | |
+| 3 | Noise + SPAKE2 handshake over QUIC on localhost; safety code; CLI accept prompt; security tests; fuzz targets | ✅ accepted by the owner 2026-10-19 (walkthrough 2026-10-20, phase3-criteria §10.8) — results in phase3-criteria.md §10 |
+| 4 | Encrypted loopback streaming; wgpu viewer; stats overlay | in progress (criteria approved 2026-10-19: phase4-criteria.md) |
+| 4.5 | **Small GUI** pulled forward from Phase 7 (owner, 2026-10-20): host Accept/Deny dialog and viewer connect form, so testing no longer needs the terminal. Criteria written and approved before code | planned (roadmap D-26) |
 | 5 | STUN + ICE (`is`) + hole punching with offer/answer codes; test across two home networks | |
 | 6 | Remote mouse/keyboard + host-local override (macOS) | |
 | 6.5 | **Full Windows backends** (capture, encode, input) | |
@@ -125,6 +126,7 @@ be called done; *nice-to-have* = wanted, but its absence does not block it.
 | D-23 | Stats overlay shows which chroma mode is **actually** in use (4:4:4 vs the low-latency 4:2:0 fallback), and Phase 7 measures the latency cost of Sharp text's 4:4:4 (quality.md §4:4:4, owner 2026-10-16) | **BLOCKER** | Phase 7 | Recorded only in quality.md until the 2026-10-20 audit |
 | D-24 | Phase 5 ICE: use str0m's ICE as the reference, or a sans-IO ICE crate, and document which behaviours we copied (nat-traversal.md, owner 2026-10-16) | **BLOCKER** | Phase 5 | Design input recorded in nat-traversal.md; listed so it cannot slip |
 | D-25 | "A benchmark that disagrees with a previous one by > ~1 ms is flagged, never averaged away" (owner 2026-10-16) is a **process rule with no check**; machine state is recorded (sysmon) but nothing compares runs | *nice-to-have* | Phase 4 (benchmark work) | Found by the 2026-10-20 audit; a rule we rely on should have a check |
+| D-26 | Phase 4.5 small GUI: host Accept/Deny dialog + viewer connect form (Slint for UI only, D34), carrying F-UX1–4 and D-20/D-21 into the GUI; criteria first | *nice-to-have* (planned work; the full GUI stays a Phase 7 item) | Phase 4.5, right after Phase 4 | Owner, 2026-10-20: "terminal makes testing hard" |
 
 **Release view:** blocks **v0.1** — D-1, D-1b, D-2…D-5, D-8…D-13, D-17, D-20…D-24 (D-6/D-7 block
 **v1.0**). Phase 3 closed nothing on this list except the CLI half of INV11.
