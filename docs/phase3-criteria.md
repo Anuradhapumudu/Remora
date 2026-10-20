@@ -532,21 +532,42 @@ adds (real NAT traversal, STUN parser fuzzing, QUIC retry).
 
 1. Terminal 1: `cargo run -p remora-host -- serve` — note `device:`,
    `code:` and `password:` (first run creates the key file in the
-   per-user config directory).
+   per-user config directory). **Every run** prints a `WARNING:` on
+   stderr that the identity keys are stored unencrypted (F-UX2).
 2. Terminal 2: `cargo run -p remora-viewer -- connect '<code>'
    --password <password>` (or omit `--password` to be asked).
 3. Both terminals show the **same** `safety code`. In terminal 1 type
-   `accept <id>` (the id from the `prompt` line): both print `SESSION
-   ACTIVE`. Type `disconnect <id>` to end it.
+   `accept 1` (the **prompt number** from the `prompt 1:` line; numbers
+   count 1, 2, 3 … and are never reused in a run): both print `SESSION
+   ACTIVE 1`. Type `disconnect 1` to end it. Right after the prompt the
+   host prints a `note:` explaining that the code and password were used
+   up, then the new pair for the next viewer (F-UX3).
 4. Wrong password: repeat with a wrong `--password` ⇒ viewer prints
    `failed:` and exits 4; host logs one `handshake_failed` WARN on stderr.
-5. Deny: `deny <id>` ⇒ viewer prints `rejected` and exits 2; a retry needs
+5. Deny: `deny <n>` ⇒ viewer prints `rejected` and exits 2; a retry needs
    the new `code:` / `password:` the host printed.
 6. Trusted mode: `cargo run -p remora-viewer -- identity` prints the
    viewer's `identity:`; start the host with `serve --trust <that key>`,
    then connect with `--pin <host identity>` instead of `--password`.
 7. Wrong device: connect with `--device <some other device code>` ⇒
    `identity mismatch`, exit 3, and the host never prompts.
+
+
+### 10.8 Owner walkthrough findings (2026-10-20, step 1 of §10.7)
+
+Happy path up to the prompt worked: QUIC on loopback, the safety codes
+matched on both terminals (306 260), device IDs in the approved
+`DDDD DDD DDDD-C` format. Three findings, all **fixed in the Phase 3 CLI**
+(tests first, each test seen failing against a planted regression):
+
+| ID | Finding | Kind | Fix (CLI, now) | Phase 7 GUI consequence |
+|---|---|---|---|---|
+| **F-UX1** | The prompt ID was the protocol's 19-digit random session ID, to be read and retyped | UX | Prompts are numbered `1, 2, 3 …` per run, **never reused** — reuse would let a stale `accept 1` approve a different viewer (security, unit + e2e test, `prompts.rs` in the mutation gate). Every mistyped line gets an explicit answer: unknown number lists the waiting prompts; missing / non-numeric numbers and unknown commands say what to type. (Before: `accept 999` printed "no pending session 999"; `accept abc` printed "unknown command" — not silent, but no help.) | A GUI selects a prompt by clicking it; numbers are not shown. The accept button stays bound to that prompt's safety code (A22) |
+| **F-UX2** | The dev key-storage warning was missing: only a first-run `note:` naming the file, nothing about it being unencrypted | **Missed approval condition** (roadmap "Process slips"), not only UX | Both apps print `WARNING: … identity keys are stored UNENCRYPTED in <path> - anyone who can read that file can impersonate this device …` to stderr on **every** run that loads the key file (`serve`, `connect`, `identity`) | Until D-5 (keychain) closes, the GUI shows the same warning persistently; after D-5 the warning disappears with the file |
+| **F-UX3** | After authentication the host printed a second code and password with no explanation (INV15 working, but it looked like an error) | UX | A `note:` line before every new pair says why: used up by the viewer that proved the password (each works for ONE connection), replaced after 3 failed attempts, or only the code is new and the password is unchanged | Same explanation in the GUI next to the code (and protocol.md's denied-prompt requirement: a retry needs the fresh code) |
+
+Remaining §10.7 steps (accept/disconnect, wrong password, deny, trusted
+mode across restart, wrong device): **owner to run and report**.
 
 ## 11. Changes to criteria
 
