@@ -149,7 +149,7 @@ pub enum InterruptReason { DisplayUnavailable, AccessLost, Other }
 |---|---|---|
 | T1 | Sans-IO, fake capture: every event in every session state | actions exactly as above; no media action while interrupted; mutation gate covers it |
 | T2 | macOS, real: `pmset displaysleepnow`, then wake (`caffeinate -u -t 2`); 5 cycles in one session | `Interrupted` ≤ 1 s after sleep; `Resumed` ≤ 2 s after wake; first frame after resume is a keyframe; same session throughout; no memory growth across cycles (≤ 2 MB) |
-| T3 | Lid close, display removal | Display removal: **not testable** on this machine (needs an external display) → roadmap D-16. **Lid close / open: testable** (correction 2026-10-20, §12) → run in step 7 with the owner closing the lid: `Interrupted` on close, `Resumed` ≤ 2 s after the display is back on open, same session (roadmap D-28) |
+| T3 | Lid close, captured display removed | Both **testable** (corrections 2026-10-20, §12), run in step 7. **Lid close / open** (owner closes the lid): `Interrupted` on close, `Resumed` ≤ 2 s after the display is back on open, same session. **Captured display removed** (a `CGVirtualDisplay` is captured, then destroyed — Phase 2's tooling; real hardware may differ): `Interrupted` ≤ 1 s, no crash, no CPU spin while absent; what happens if it never returns is decision D-29. Only **physical** monitor unplug stays untested (roadmap D-16) |
 | T4 | Policy rule: no `-3815`, `SCStream` or other OS names in remora-session / remora-net | scanner passes; plant fails |
 
 ## 8. Functional
@@ -242,6 +242,13 @@ The phase report lists the whole deferred list row by row (CLAUDE.md).
   close/open on it (phase2-criteria Q4, `hotplug-lid.log`). Lid close/open is
   now a test (step 7, owner closes the lid); only display removal stays a gap.
   This adds a test; no threshold changes.
+* **2026-10-20 — sweep of asserted limitations (owner).** Every "cannot /
+  not testable / unavailable" claim in the phase criteria, quality,
+  architecture, distribution and NAT docs was checked against earlier
+  phases' evidence. One more was contradicted: T3's "display removal not
+  testable" — Phase 2 removed the captured display with a virtual display
+  (phase2-criteria §5.4). T3 now tests it (see above); a new design
+  decision follows from it (roadmap D-29). All other claims stand.
 * Standing rule (owner, 2026-10-20): **a UX change to a security-relevant
   flow needs its own attack test** — phase3-criteria §10.8, the F-UX1
   prompt-number confused-deputy case. Applies to the Phase 4 viewer window

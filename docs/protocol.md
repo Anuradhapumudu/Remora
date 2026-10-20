@@ -323,6 +323,16 @@ Encrypted body (ChaCha20-Poly1305, 16-byte tag)
   network observers by QUIC's own encryption.
 * **FEC:** Reed–Solomon (reed-solomon-simd) over groups of fragments; repair
   ratio chosen by the rate controller from observed loss.
+* **Video fragment rules** (Phase 4, `remora_proto::video`): `frag_count`
+  1..=8192, `frag_index < frag_count`, at least one data byte; every fragment
+  of a frame carries the same `frag_count`, keyframe flag and
+  `capture_ts_us` (otherwise the frame is dropped); the last-fragment flag is
+  set exactly on `frag_index = frag_count − 1`. `frame_id` strictly increases
+  per stream. **Phase 4 sends no FEC**: `fec_group` must be 0 and `FecRepair`
+  datagrams are ignored (roadmap D-27).
+* **Never wait:** the viewer delivers a frame as soon as it is complete and
+  abandons every older incomplete frame; a frame that does not directly follow
+  the previous one is marked, so a P-frame after a gap waits for a keyframe.
 
 ## 7. Limits
 
@@ -340,6 +350,7 @@ Enforced before allocation; violations are `ProtocolViolation` unless noted.
 | Reassembled video frame | 8 MiB (dropped, not fatal) |
 | Fragments per frame | 8192 |
 | Frames in reassembly at once | 16 (oldest evicted) |
+| Bytes held for reassembly, all frames | 32 MiB (oldest frame evicted; Phase 4 addition — 16 × 8 MiB would be 128 MiB) |
 | Video resolution | ≤ negotiated `max_width × max_height`, ≤ 7680×4320 |
 | Pending handshakes on host | 4 |
 | Handshake attempts per source IP | 10 per minute |
