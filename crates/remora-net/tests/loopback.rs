@@ -347,3 +347,60 @@ async fn host_disconnect_ends_an_active_session_over_quic() {
         "{closed:?}"
     );
 }
+
+/// Phase 4 §7 over real QUIC (found by the mutation gate: the session tests
+/// covered `Host::capture_changed`, nothing covered the net wrapper). The
+/// viewer must SEE pause and resume, the host must be told to force a
+/// keyframe, and the session must stay active.
+#[tokio::test(flavor = "multi_thread")]
+async fn t1_capture_pause_and_resume_reach_the_viewer_over_quic() {
+    use remora_session::{CaptureStatus, PauseReason};
+    let (h, v) = (device("host"), device("viewer"));
+    let mut host = start_host(&h, vec![]).await;
+    let nonce = host.server.issue_nonce(Duration::from_secs(300));
+    let (client, mut vev) = connect(
+        host.addr,
+        viewer_cfg(&v, password(&host.server.otp())),
+        nonce,
+    )
+    .await
+    .unwrap();
+    let Some(HostEvent::Prompt { id, sas, .. }) = host
+        .wait_for(5, |e| matches!(e, HostEvent::Prompt { .. }))
+        .await
+    else {
+        panic!("no prompt")
+    };
+    host.server.approve(id, sas).unwrap();
+    assert!(
+        viewer_wait(&mut vev, 5, |e| *e == ViewerEvent::Active)
+            .await
+            .is_some()
+    );
+
+    host.server
+        .capture_changed(CaptureStatus::Interrupted(PauseReason::DisplayUnavailable));
+    assert_eq!(
+        viewer_wait(&mut vev, 5, |e| matches!(e, ViewerEvent::StreamPaused(_))).await,
+        Some(ViewerEvent::StreamPaused(PauseReason::DisplayUnavailable))
+    );
+    host.server.capture_changed(CaptureStatus::Running);
+    assert!(
+        viewer_wait(&mut vev, 5, |e| *e == ViewerEvent::StreamResumed)
+            .await
+            .is_some()
+    );
+    assert!(
+        host.wait_for(5, |e| *e == HostEvent::ForceKeyframe)
+            .await
+            .is_some(),
+        "the host app is told to force a keyframe"
+    );
+    // Still one live session: input still flows.
+    client.send_input(common_input());
+    assert!(
+        host.wait_for(5, |e| matches!(e, HostEvent::Deliver { .. }))
+            .await
+            .is_some()
+    );
+}
