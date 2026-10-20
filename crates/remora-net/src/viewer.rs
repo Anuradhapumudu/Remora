@@ -31,6 +31,10 @@ pub enum ViewerEvent {
     Active,
     /// An application message from the host.
     Deliver(AppMessage),
+    /// The host's capture paused (session stays active).
+    StreamPaused(remora_session::PauseReason),
+    /// The stream resumed.
+    StreamResumed,
     /// The session failed locally.
     Failed {
         /// Reason.
@@ -134,6 +138,12 @@ async fn drive(
                 }
                 ViewerAction::Deliver(msg) => {
                     let _ = events.send(ViewerEvent::Deliver(msg));
+                }
+                ViewerAction::StreamPaused(reason) => {
+                    let _ = events.send(ViewerEvent::StreamPaused(reason));
+                }
+                ViewerAction::StreamResumed => {
+                    let _ = events.send(ViewerEvent::StreamResumed);
                 }
                 ViewerAction::Failed { reason, step } => {
                     let _ = events.send(ViewerEvent::Failed { reason, step });

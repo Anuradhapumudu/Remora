@@ -142,6 +142,9 @@ pub enum HostAction {
         /// The session that used it.
         id: SessionId,
     },
+    /// Capture came back after an interruption: the next encoded frame must
+    /// be a keyframe (the viewer's decoder state is stale).
+    ForceKeyframe,
     /// Three failed attempts: a new password is in effect; tell the user
     /// ("3 failed attempts — new password") and show [`Host::otp`].
     OtpRotated {
@@ -216,6 +219,8 @@ pub struct Host {
     pub(crate) sessions: HashMap<SessionId, HostSession>,
     /// Issued connection-code nonces, oldest first (A06).
     pub(crate) nonces: VecDeque<IssuedNonce>,
+    /// What screen capture is doing (phase4-criteria §7).
+    pub(crate) capture: crate::CaptureStatus,
 }
 
 /// One nonce the host put in an offer code.
@@ -246,6 +251,7 @@ impl Host {
             limiter: Limiter::new(),
             sessions: HashMap::new(),
             nonces: VecDeque::new(),
+            capture: crate::CaptureStatus::Running,
         }
     }
 
@@ -568,6 +574,29 @@ impl Host {
             .collect();
         v.sort();
         v
+    }
+
+    /// Screen capture changed state (phase4-criteria §7). One capture serves
+    /// every session, so this applies to all of them:
+    ///
+    /// * `Interrupted` → every Active session is told `StreamState{paused}`;
+    ///   sessions stay Active. Repeating the same status does nothing.
+    /// * `Running` after an interruption → `StreamState{resumed}` to every
+    ///   Active session and [`HostAction::ForceKeyframe`].
+    /// * `Stopped` → every Active session closes with
+    ///   [`CloseCode::CaptureStopped`](crate::CloseCode::CaptureStopped).
+    ///
+    /// A session approved while capture is interrupted is told it is paused
+    /// right after `SessionAccept`; one approved while it is stopped closes
+    /// with `CaptureStopped`.
+    pub fn capture_changed(&mut self, status: crate::CaptureStatus) -> Vec<HostAction> {
+        let _ = status;
+        todo!("phase 4 step 2: written test-first")
+    }
+
+    /// What screen capture is doing, as last reported.
+    pub fn capture_status(&self) -> crate::CaptureStatus {
+        self.capture
     }
 
     /// Forgets a closed session entirely (call once its connection is gone,

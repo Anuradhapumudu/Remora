@@ -279,6 +279,12 @@ pub(crate) fn run(a: BenchArgs) -> Result<()> {
             CaptureEvent::Stopped(e) => {
                 let _ = ctx.send(Msg::Stopped(e.to_string()));
             }
+            // A benchmark measures one uninterrupted run: an interruption
+            // ends it (the numbers would mix two capture sessions).
+            CaptureEvent::Interrupted(reason) => {
+                let _ = ctx.send(Msg::Stopped(format!("capture interrupted ({reason:?})")));
+            }
+            CaptureEvent::Resumed => {}
         }))
         .context("start capture")?;
     } else if let (true, Some(enc)) = (a.synthetic, &encoder) {

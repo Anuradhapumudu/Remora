@@ -315,6 +315,15 @@ pub fn app_envelopes() -> Vec<(&'static str, Vec<u8>)> {
             "sas reveal",
             control(control::Kind::SasReveal(SasReveal { n_r: vec![1; 32] })),
         ),
+        // Phase 4 §7: host → viewer, Active only. Appended so the A20/A21
+        // loops put it through every state too.
+        (
+            "stream state",
+            control(control::Kind::StreamState(StreamState {
+                paused: true,
+                reason: 1,
+            })),
+        ),
     ]
 }
 

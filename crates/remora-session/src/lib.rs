@@ -79,3 +79,47 @@ pub enum AppMessage {
     /// Host → viewer: a media key to install.
     MediaKey(remora_proto::messages::MediaKeyAnnounce),
 }
+
+/// Why the stream paused (OS-neutral: each capture backend maps its own
+/// errors onto these; the session never learns which OS it runs on — D17).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum PauseReason {
+    /// The display is asleep, closed or gone (macOS: SCStream error −3815).
+    DisplayUnavailable,
+    /// The OS took the capture surface away (Windows: ACCESS_LOST).
+    AccessLost,
+    /// Anything else the backend expects to recover from.
+    Other,
+}
+
+impl PauseReason {
+    /// The value in `StreamState.reason` (protocol.md §5).
+    pub fn wire(self) -> u32 {
+        match self {
+            PauseReason::DisplayUnavailable => 1,
+            PauseReason::AccessLost => 2,
+            PauseReason::Other => 3,
+        }
+    }
+
+    /// From a paused `StreamState.reason` (non-zero; checked by the
+    /// envelope validator). Unknown values are a newer host's reason: other.
+    pub fn from_wire(v: u32) -> Self {
+        match v {
+            1 => PauseReason::DisplayUnavailable,
+            2 => PauseReason::AccessLost,
+            _ => PauseReason::Other,
+        }
+    }
+}
+
+/// What the host's screen capture is doing, as the session sees it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum CaptureStatus {
+    /// Frames flow.
+    Running,
+    /// Paused; the backend keeps trying and will report `Running` again.
+    Interrupted(PauseReason),
+    /// Gone until the user acts (e.g. permission revoked).
+    Stopped,
+}

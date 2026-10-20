@@ -72,6 +72,15 @@ fn planted_workspace() -> std::io::Result<PathBuf> {
         ), // skipped
         ("crates/remora-net/.hidden/x.rs", "fn i() { unsafe {} }\n"), // skipped
         ("crates/remora-net/README.md", "unsafe snow:: spake2::\n"),  // not code
+        // T4 (phase4-criteria §7): OS names in the OS-free layers.
+        (
+            "crates/remora-session/src/capture.rs",
+            "// SCStream -3815 in a comment is fine\nconst X: i64 = -3815;\nuse objc2::rc;\n",
+        ),
+        (
+            "crates/remora-capture/src/sys/macos.rs.extra.rs",
+            "const STOPPED: i64 = -3815;\n",
+        ), // allowed: the capture backend may name its OS
     ];
     for (path, content) in files {
         let p = root.join(path);
@@ -116,6 +125,16 @@ fn planted_violations_are_all_found_and_nothing_else() {
                 "crates/remora-net/src/lib.rs".to_owned(),
                 2,
                 "spake2/snow outside remora-crypto wrapper modules"
+            ),
+            (
+                "crates/remora-session/src/capture.rs".to_owned(),
+                2,
+                "OS-specific name in remora-session / remora-net"
+            ),
+            (
+                "crates/remora-session/src/capture.rs".to_owned(),
+                3,
+                "OS-specific name in remora-session / remora-net"
             ),
         ]
     );

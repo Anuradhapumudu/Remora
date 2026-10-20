@@ -67,6 +67,9 @@ pub enum HostEvent {
     },
     /// Three failures: a new password is in effect (show it).
     OtpRotated,
+    /// Capture resumed after an interruption: encode the next frame as a
+    /// keyframe.
+    ForceKeyframe,
     /// The password was used: a new one is in effect (INV15).
     OtpUsed {
         /// Session that used it.
@@ -163,6 +166,13 @@ impl HostServer {
     /// Deny the prompt for `id`.
     pub fn deny(&self, id: SessionId) {
         let actions = lock(&self.shared.host).deny(id);
+        self.shared.apply(actions, None);
+    }
+
+    /// Screen capture changed state (phase4-criteria §7); see
+    /// [`remora_session::Host::capture_changed`].
+    pub fn capture_changed(&self, status: remora_session::CaptureStatus) {
+        let actions = lock(&self.shared.host).capture_changed(status);
         self.shared.apply(actions, None);
     }
 
@@ -283,6 +293,9 @@ impl Shared {
                 }
                 HostAction::OtpUsed { id } => {
                     let _ = self.events.send(HostEvent::OtpUsed { id });
+                }
+                HostAction::ForceKeyframe => {
+                    let _ = self.events.send(HostEvent::ForceKeyframe);
                 }
             }
         }

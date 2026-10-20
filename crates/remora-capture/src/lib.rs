@@ -139,12 +139,32 @@ impl std::fmt::Debug for CapturedFrame {
     }
 }
 
+/// Why capture paused (OS-neutral; each backend maps its own errors here,
+/// so nothing above the trait needs to know the OS — architecture D17).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum InterruptReason {
+    /// The display is asleep, closed or gone.
+    DisplayUnavailable,
+    /// The OS took the capture surface away (Windows: ACCESS_LOST).
+    AccessLost,
+    /// Another interruption the backend expects to recover from.
+    Other,
+}
+
 /// Something the capture backend reports.
 #[derive(Debug)]
 pub enum CaptureEvent {
     /// A frame callback.
     Frame(CapturedFrame),
-    /// The OS stopped the stream (display unplugged, permission revoked, …).
+    /// Capture paused but is expected to come back: the backend keeps
+    /// retrying on its own and sends [`CaptureEvent::Resumed`] when frames
+    /// flow again.
+    Interrupted(InterruptReason),
+    /// Frames flow again after [`CaptureEvent::Interrupted`]. The next
+    /// encoded frame must be a keyframe.
+    Resumed,
+    /// Capture will not come back without user action (permission revoked,
+    /// the user stopped it from the system UI, …).
     Stopped(CaptureError),
 }
 

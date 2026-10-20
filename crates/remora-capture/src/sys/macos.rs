@@ -30,19 +30,42 @@ use objc2_core_video::{
 use objc2_foundation::{NSArray, NSError, NSObject, NSObjectProtocol};
 use objc2_screen_capture_kit::{
     SCCaptureResolutionType, SCContentFilter, SCDisplay, SCShareableContent, SCStream,
-    SCStreamConfiguration, SCStreamDelegate, SCStreamFrameInfoDirtyRects,
+    SCStreamConfiguration, SCStreamDelegate, SCStreamErrorCode, SCStreamFrameInfoDirtyRects,
     SCStreamFrameInfoDisplayTime, SCStreamFrameInfoStatus, SCStreamOutput, SCStreamOutputType,
 };
 
 use crate::{
-    CaptureConfig, CaptureError, CaptureEvent, CapturedFrame, EventSink, FrameStatus, Rect,
-    ScreenCapture, output_size,
+    CaptureConfig, CaptureError, CaptureEvent, CapturedFrame, EventSink, FrameStatus,
+    InterruptReason, Rect, ScreenCapture, output_size,
 };
 
 /// How long we wait for ScreenCaptureKit's asynchronous calls.
 const OS_TIMEOUT: Duration = Duration::from_secs(10);
 /// `SCStreamErrorUserDeclined`: the user denied screen-recording permission.
-const SC_ERROR_USER_DECLINED: i64 = -3801;
+const SC_ERROR_USER_DECLINED: i64 = SCStreamErrorCode::UserDeclined.0 as i64;
+
+/// What a stream-stop error means (phase4-criteria §7).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StopKind {
+    /// Retry until the stream starts again.
+    Interrupted(InterruptReason),
+    /// Give up: [`CaptureEvent::Stopped`].
+    Fatal,
+}
+
+/// Classifies an `SCStream` stop error code (objc2-screen-capture-kit 0.3.2
+/// `SCError.rs` names):
+///
+/// * `NoCaptureSource` (−3815): display asleep, lid closed, display removed —
+///   all three **measured** in Phase 2 (phase2-criteria Q4).
+/// * `SystemStoppedStream` (−3821): **unverified**, never observed; treated as
+///   recoverable because a wrong retry costs a paused stream while a wrong
+///   give-up kills the session.
+/// * Anything else (user declined, user stopped from the menu bar, …): fatal.
+fn classify_stop(code: i64) -> StopKind {
+    let _ = code;
+    todo!("phase 4 step 2: written test-first")
+}
 
 /// A retained, IOSurface-backed `CVPixelBuffer` holding one captured frame (NV12).
 /// Cloning adds a reference; it never copies pixels.
@@ -569,5 +592,28 @@ impl Drop for MacScreenCapture {
         if self.running.is_some() {
             let _ = self.stop();
         }
+    }
+}
+
+#[cfg(test)]
+mod stop_tests {
+    use super::*;
+
+    #[test]
+    fn display_gone_is_an_interruption_and_permission_loss_is_fatal() {
+        assert_eq!(
+            classify_stop(-3815),
+            StopKind::Interrupted(InterruptReason::DisplayUnavailable)
+        );
+        assert_eq!(
+            classify_stop(-3821),
+            StopKind::Interrupted(InterruptReason::Other)
+        );
+        for fatal in [-3801, -3802, -3817, 0, 1, i64::MIN] {
+            assert_eq!(classify_stop(fatal), StopKind::Fatal, "{fatal}");
+        }
+        // The names we rely on still mean the numbers Phase 2 measured.
+        assert_eq!(SCStreamErrorCode::NoCaptureSource.0, -3815);
+        assert_eq!(SCStreamErrorCode::SystemStoppedStream.0, -3821);
     }
 }

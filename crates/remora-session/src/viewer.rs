@@ -69,6 +69,11 @@ pub enum ViewerAction {
     Active,
     /// Deliver an application message (Active only).
     Deliver(AppMessage),
+    /// The host's screen capture paused: keep the session, show "paused"
+    /// with this reason (Active only).
+    StreamPaused(crate::PauseReason),
+    /// The stream resumed; a keyframe follows.
+    StreamResumed,
     /// The session failed (log it, tell the user).
     Failed {
         /// Precise local reason.
@@ -409,7 +414,7 @@ fn on_pending(
             }
             control::Kind::Reject(_) => Err(Some(FailReason::Rejected)),
             control::Kind::Bye(_) => Err(None),
-            control::Kind::MediaKey(_) => {
+            control::Kind::MediaKey(_) | control::Kind::StreamState(_) => {
                 Err(Some(FailReason::ProtocolViolation(Violation::BeforeActive)))
             }
             control::Kind::SasReveal(_) => {
@@ -439,6 +444,12 @@ fn on_active(
         Some(envelope::Msg::Control(Control {
             kind: Some(control::Kind::Bye(_)),
         })) => Err(None),
+        Some(envelope::Msg::Control(Control {
+            kind: Some(control::Kind::StreamState(st)),
+        })) => {
+            let _ = st;
+            todo!("phase 4 step 2: written test-first")
+        }
         _ => Err(Some(FailReason::ProtocolViolation(Violation::WrongRole))),
     }
 }

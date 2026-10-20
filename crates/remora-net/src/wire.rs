@@ -33,17 +33,9 @@ pub fn close_code_of(err: &quinn::ConnectionError) -> Option<CloseCode> {
     let quinn::ConnectionError::ApplicationClosed(c) = err else {
         return None;
     };
-    [
-        CloseCode::Normal,
-        CloseCode::AuthFailed,
-        CloseCode::ProtocolViolation,
-        CloseCode::VersionUnsupported,
-        CloseCode::Rejected,
-        CloseCode::Timeout,
-        CloseCode::RateLimited,
-    ]
-    .into_iter()
-    .find(|&code| to_varint(code) == c.error_code)
+    CloseCode::ALL
+        .into_iter()
+        .find(|&code| to_varint(code) == c.error_code)
 }
 
 /// Stream 0: `u16` big-endian length prefix, then the frame.

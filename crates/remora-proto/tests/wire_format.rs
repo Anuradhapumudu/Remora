@@ -7,7 +7,7 @@ use remora_proto::frame::{FrameDecoder, FrameError, encode_frame};
 use remora_proto::limits::HANDSHAKE_FRAME_MAX;
 use remora_proto::messages::{
     Control, Envelope, HostHello, Input, Key, MediaKeyAnnounce, MessageError, Mode, MouseButton,
-    SasReveal, SessionAccept, SessionReject, ViewerHello, control, decode_envelope,
+    SasReveal, SessionAccept, SessionReject, StreamState, ViewerHello, control, decode_envelope,
     decode_host_hello, decode_viewer_hello, envelope, input,
 };
 
@@ -302,4 +302,28 @@ fn an_envelope_of_exactly_the_limit_is_not_too_large() {
         decode_envelope(&exact),
         Err(MessageError::TooLarge { .. })
     ));
+}
+
+/// Phase 4 §7: `StreamState` (host → viewer pause / resume). Paused needs a
+/// reason; resumed must carry none. Unknown reason values are accepted (a
+/// newer host may add reasons; the viewer shows "other"), so only the two
+/// contradictory shapes are refused.
+#[test]
+fn stream_state_shapes() {
+    let ss = |paused, reason| ctl(control::Kind::StreamState(StreamState { paused, reason }));
+    for (paused, reason) in [(true, 1), (true, 2), (true, 3), (true, 99), (false, 0)] {
+        assert!(
+            decode_envelope(&ss(paused, reason)).is_ok(),
+            "{paused} {reason}"
+        );
+    }
+    for (paused, reason) in [(true, 0), (false, 1), (false, 99)] {
+        assert!(
+            matches!(
+                decode_envelope(&ss(paused, reason)),
+                Err(MessageError::Invalid(_))
+            ),
+            "{paused} {reason}"
+        );
+    }
 }

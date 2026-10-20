@@ -204,6 +204,13 @@ async fn run_connect(args: ConnectArgs) -> anyhow::Result<u8> {
                 );
             }
             ViewerEvent::Active => println!("SESSION ACTIVE"),
+            ViewerEvent::StreamPaused(reason) => {
+                println!(
+                    "stream paused ({}) - the session stays open",
+                    pause_text(reason)
+                )
+            }
+            ViewerEvent::StreamResumed => println!("stream resumed"),
             ViewerEvent::Deliver(_) => {}
             ViewerEvent::Failed { reason, .. } => outcome = Some(report_failure(&reason)),
             ViewerEvent::Closed { local, remote } => {
@@ -241,6 +248,17 @@ fn report_failure(reason: &FailReason) -> u8 {
     }
 }
 
+/// What a pause reason means, for a person.
+fn pause_text(reason: remora_session::PauseReason) -> &'static str {
+    match reason {
+        remora_session::PauseReason::DisplayUnavailable => {
+            "the host's display is asleep, closed or unavailable"
+        }
+        remora_session::PauseReason::AccessLost => "the host's system took the screen away",
+        remora_session::PauseReason::Other => "the host's screen capture was interrupted",
+    }
+}
+
 fn report_close(local: Option<CloseCode>, remote: Option<CloseCode>) -> u8 {
     match remote.or(local) {
         Some(CloseCode::Normal) => {
@@ -250,6 +268,10 @@ fn report_close(local: Option<CloseCode>, remote: Option<CloseCode>) -> u8 {
         Some(CloseCode::Rejected) => {
             println!("rejected by the host (a new attempt needs a fresh code and password)");
             exit::REJECTED
+        }
+        Some(CloseCode::CaptureStopped) => {
+            println!("failed: the host's screen capture stopped (it needs attention at the host)");
+            exit::ERROR
         }
         Some(CloseCode::AuthFailed) => {
             println!("failed: authentication failed (wrong or used password, or not trusted)");

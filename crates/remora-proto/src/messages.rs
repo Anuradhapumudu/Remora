@@ -82,6 +82,20 @@ pub struct MediaKeyAnnounce {
 #[derive(Clone, Copy, PartialEq, prost::Message)]
 pub struct Goodbye {}
 
+/// Host → viewer: the video stream paused or resumed because screen
+/// capture was interrupted (display asleep, …) and came back
+/// (phase4-criteria §7, protocol.md §5 tag 16).
+#[derive(Clone, Copy, PartialEq, prost::Message)]
+pub struct StreamState {
+    /// `true`: paused; `false`: resumed.
+    #[prost(bool, tag = "1")]
+    pub paused: bool,
+    /// When paused: 1 display unavailable, 2 access lost, 3 other (a
+    /// receiver treats unknown values as "other"). Must be 0 when resumed.
+    #[prost(uint32, tag = "2")]
+    pub reason: u32,
+}
+
 /// Mouse button press/release at normalised coordinates.
 #[derive(Clone, Copy, PartialEq, prost::Message)]
 pub struct MouseButton {
@@ -114,7 +128,7 @@ pub struct Key {
 #[derive(Clone, PartialEq, prost::Message)]
 pub struct Control {
     /// The message.
-    #[prost(oneof = "control::Kind", tags = "2, 3, 4, 5, 6, 14")]
+    #[prost(oneof = "control::Kind", tags = "2, 3, 4, 5, 6, 14, 16")]
     pub kind: Option<control::Kind>,
 }
 
@@ -141,6 +155,9 @@ pub mod control {
         /// Orderly close.
         #[prost(message, tag = "14")]
         Bye(super::Goodbye),
+        /// Stream paused / resumed (host → viewer, Active only).
+        #[prost(message, tag = "16")]
+        StreamState(super::StreamState),
     }
 }
 
@@ -274,6 +291,10 @@ pub fn decode_envelope(bytes: &[u8]) -> Result<Envelope, MessageError> {
             }
             Some(control::Kind::MediaKey(k)) => require(k.key.len() == 32, "media key length")?,
             Some(control::Kind::Pending(_) | control::Kind::Bye(_)) => {}
+            Some(control::Kind::StreamState(st)) => require(
+                st.paused == (st.reason != 0),
+                "stream state: paused needs a reason, resumed has none",
+            )?,
         },
         Some(envelope::Msg::Input(i)) => match &i.kind {
             None => return Err(MessageError::Invalid("empty or unknown input message")),

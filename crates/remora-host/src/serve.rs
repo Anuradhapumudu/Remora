@@ -250,6 +250,9 @@ impl Ui {
                 println!("note: 3 failed attempts - the password was replaced");
             }
             HostEvent::OtpUsed { .. } => {}
+            // Phase 3 CLI streams nothing yet; the Phase 4 streaming host
+            // forces the encoder's next frame to a keyframe here.
+            HostEvent::ForceKeyframe => {}
             HostEvent::Closed { id, code } => {
                 self.inputs.remove(&id);
                 if let Some(n) = self.number_of(id) {

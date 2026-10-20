@@ -200,6 +200,41 @@ mod tests {
     use super::*;
 
     #[test]
+    fn t4_os_names_are_refused_in_session_and_net_only() {
+        // phase4-criteria §7 T4: the session layer never learns the OS.
+        for word in [
+            "SCStream",
+            "ScreenCaptureKit",
+            "VideoToolbox",
+            "DXGI",
+            "objc2",
+            "windows_sys",
+            "target_os",
+            "3815",
+        ] {
+            let src = format!("let x = {word};");
+            for path in [
+                "crates/remora-session/src/host.rs",
+                "crates/remora-net/src/host.rs",
+            ] {
+                let v = check_rust(path, &src);
+                assert_eq!(v.len(), 1, "{word} in {path}");
+                assert_eq!(v[0].rule, "OS-specific name in remora-session / remora-net");
+            }
+            assert!(check_rust("crates/remora-capture/src/sys/macos.rs", &src).is_empty());
+            assert!(check_rust("crates/remora-app/src/sys/macos.rs", &src).is_empty());
+        }
+        // Comments may explain the mapping; longer identifiers are not hits.
+        assert!(
+            check_rust(
+                "crates/remora-session/src/lib.rs",
+                "/// macOS: SCStream error -3815\nlet scstream_like = 38150;"
+            )
+            .is_empty()
+        );
+    }
+
+    #[test]
     fn flags_unsafe_outside_sys_but_not_inside() {
         let src = "fn f() { unsafe { g() } }";
         let v = check_rust("crates/remora-net/src/lib.rs", src);
