@@ -692,6 +692,56 @@ fn report(
     }
 }
 
+/// `remora-host watch-capture`: phase4-criteria §7 T2. Captures the main
+/// display and prints one line per second (frames) and one per capture event
+/// (`Interrupted` / `Resumed` / `Stopped`), each with the Unix time in
+/// milliseconds, so display sleep / wake can be timed against it.
+pub(crate) fn watch_capture(seconds: u64) -> Result<()> {
+    let unix_ms = || {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_millis())
+    };
+    let mut capture = MacScreenCapture::main_display(CaptureConfig::default())?;
+    let (tx, rx) = mpsc::channel::<String>();
+    let frames = Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let counted = Arc::clone(&frames);
+    capture
+        .start(Box::new(move |ev| {
+            let line = match ev {
+                CaptureEvent::Frame(f) => {
+                    if f.status == FrameStatus::Complete {
+                        counted.fetch_add(1, Ordering::Relaxed);
+                    }
+                    return;
+                }
+                CaptureEvent::Interrupted(r) => format!("INTERRUPTED {r:?}"),
+                CaptureEvent::Resumed => "RESUMED".to_owned(),
+                CaptureEvent::Stopped(e) => format!("STOPPED {e}"),
+            };
+            let _ = tx.send(format!("{} {line}", unix_ms()));
+        }))
+        .context("start capture")?;
+    println!("{} START watching for {seconds} s", unix_ms());
+    let end = Instant::now() + Duration::from_secs(seconds);
+    let mut last = 0;
+    while Instant::now() < end {
+        while let Ok(line) = rx.try_recv() {
+            println!("{line}");
+        }
+        std::thread::sleep(Duration::from_secs(1));
+        let n = frames.load(Ordering::Relaxed);
+        println!("{} frames {}", unix_ms(), n - last);
+        last = n;
+    }
+    capture.stop().context("stop capture")?;
+    while let Ok(line) = rx.try_recv() {
+        println!("{line}");
+    }
+    println!("{} END", unix_ms());
+    Ok(())
+}
+
 /// `remora-host list-displays`.
 pub(crate) fn list_displays() -> Result<()> {
     for (id, w, h, main) in MacScreenCapture::list_displays()? {

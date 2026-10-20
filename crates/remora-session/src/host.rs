@@ -19,7 +19,7 @@ use remora_crypto::secret::{Exporter, Otp};
 
 use remora_proto::messages::{
     Control, Envelope, Goodbye, HostHello, Mode, SasReveal, SessionAccept, SessionPending,
-    SessionReject, control, decode_envelope, decode_viewer_hello, envelope,
+    SessionReject, StreamState, control, decode_envelope, decode_viewer_hello, envelope,
 };
 
 use crate::fail::{AuthDetail, Violation};
@@ -467,6 +467,13 @@ impl Host {
         if *shown != sas {
             return Err(ApproveError::SasMismatch);
         }
+        if self.capture == crate::CaptureStatus::Stopped {
+            // Nothing to stream until the user fixes capture at the host:
+            // do not tell the viewer it is active and then cut it off.
+            let mut out = Vec::new();
+            self.close(id, CloseCode::CaptureStopped, true, &mut out);
+            return Ok(out);
+        }
         let state = std::mem::replace(&mut sess.state, HostSessionState::Closed);
         let HostSessionState::Pending { mut est, .. } = state else {
             return Err(ApproveError::NotPending);
@@ -483,6 +490,10 @@ impl Host {
                     self.limiter.release();
                 }
                 out.push(HostAction::Active { id });
+                // Approved while capture is paused: say so at once.
+                if let crate::CaptureStatus::Interrupted(reason) = self.capture {
+                    self.send_stream_state(id, true, reason.wire(), &mut out);
+                }
             }
             Err(_) => self.fail(
                 id,
@@ -590,8 +601,68 @@ impl Host {
     /// right after `SessionAccept`; one approved while it is stopped closes
     /// with `CaptureStopped`.
     pub fn capture_changed(&mut self, status: crate::CaptureStatus) -> Vec<HostAction> {
-        let _ = status;
-        todo!("phase 4 step 2: written test-first")
+        use crate::CaptureStatus;
+        let mut out = Vec::new();
+        if status == self.capture {
+            return out;
+        }
+        let was = std::mem::replace(&mut self.capture, status);
+        let active = self.active_sessions();
+        match status {
+            CaptureStatus::Interrupted(reason) => {
+                for id in active {
+                    self.send_stream_state(id, true, reason.wire(), &mut out);
+                }
+            }
+            CaptureStatus::Running => {
+                // Only a resume after an interruption is news to viewers;
+                // Running after Stopped has no Active sessions left to tell.
+                if matches!(was, CaptureStatus::Interrupted(_)) {
+                    for id in active {
+                        self.send_stream_state(id, false, 0, &mut out);
+                    }
+                    // One shared encoder: one keyframe, however many viewers.
+                    out.push(HostAction::ForceKeyframe);
+                }
+            }
+            CaptureStatus::Stopped => {
+                for id in active {
+                    self.close(id, CloseCode::CaptureStopped, false, &mut out);
+                }
+            }
+        }
+        out
+    }
+
+    /// Sends `StreamState` on an Active session's encrypted stream.
+    fn send_stream_state(
+        &mut self,
+        id: SessionId,
+        paused: bool,
+        reason: u32,
+        out: &mut Vec<HostAction>,
+    ) {
+        let Some(HostSession {
+            state: HostSessionState::Active(est),
+            ..
+        }) = self.sessions.get_mut(&id)
+        else {
+            return;
+        };
+        let env = control_env(control::Kind::StreamState(StreamState { paused, reason }));
+        match est.encrypt(&env) {
+            Ok(frame) => out.push(HostAction::Send { id, frame }),
+            Err(_) => self.fail(
+                id,
+                FailReason::AuthFailed(AuthDetail::Handshake(
+                    remora_crypto::noise::HandshakeError::Internal,
+                )),
+                Step::Active,
+                None,
+                false,
+                out,
+            ),
+        }
     }
 
     /// What screen capture is doing, as last reported.

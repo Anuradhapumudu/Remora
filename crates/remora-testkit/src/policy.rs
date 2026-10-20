@@ -7,6 +7,8 @@
 //!   `snow` type can reach a public signature or another crate.
 //! * `remora-testkit` only ever as a `[dev-dependencies]` entry (it contains the
 //!   counting allocator, which must never ship).
+//! * No OS-specific names in `remora-session` / `remora-net` (phase4-criteria
+//!   §7 T4): only capture/codec/input backends know the OS.
 
 use std::path::Path;
 
@@ -30,6 +32,20 @@ const CRYPTO_WRAPPERS: [&str; 2] = [
 ];
 /// Third-party crates confined behind Remora's own abstractions.
 const CONFINED_CRATES: [&str; 2] = ["spake2", "snow"];
+/// Crates that must not know which OS they run on (phase4-criteria §7 T4):
+/// capture backends map OS errors to OS-neutral reasons below them.
+const OS_FREE: [&str; 2] = ["crates/remora-session/", "crates/remora-net/"];
+/// Names that only OS backend code may use.
+const OS_WORDS: [&str; 8] = [
+    "SCStream",
+    "ScreenCaptureKit",
+    "VideoToolbox",
+    "DXGI",
+    "objc2",
+    "windows_sys",
+    "target_os",
+    "3815",
+];
 
 fn is_ident_char(c: char) -> bool {
     c.is_alphanumeric() || c == '_'
@@ -86,12 +102,21 @@ pub fn check_rust(path: &str, content: &str) -> Vec<Violation> {
     let unsafe_allowed =
         path.starts_with("spikes/") || (path.starts_with("crates/") && path.contains("/src/sys/"));
     let confined_allowed = CRYPTO_WRAPPERS.iter().any(|w| path.starts_with(w));
+    let os_free = OS_FREE.iter().any(|c| path.starts_with(c));
     let mut v = Vec::new();
     for (i, line) in content.lines().enumerate() {
         let code = code_part(line);
         if !unsafe_allowed && has_word(&code, "unsafe") {
             v.push(Violation {
                 rule: "unsafe outside src/sys",
+                path: path.into(),
+                line: i + 1,
+                text: line.trim().into(),
+            });
+        }
+        if os_free && OS_WORDS.iter().any(|w| has_word(&code, w)) {
+            v.push(Violation {
+                rule: "OS-specific name in remora-session / remora-net",
                 path: path.into(),
                 line: i + 1,
                 text: line.trim().into(),

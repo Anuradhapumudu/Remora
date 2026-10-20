@@ -447,8 +447,14 @@ fn on_active(
         Some(envelope::Msg::Control(Control {
             kind: Some(control::Kind::StreamState(st)),
         })) => {
-            let _ = st;
-            todo!("phase 4 step 2: written test-first")
+            // Shape (paused <=> reason != 0) is checked by the envelope
+            // validator; an unknown reason is a newer host's: "other".
+            out.push(if st.paused {
+                ViewerAction::StreamPaused(crate::PauseReason::from_wire(st.reason))
+            } else {
+                ViewerAction::StreamResumed
+            });
+            Ok(ViewerState::Active(est))
         }
         _ => Err(Some(FailReason::ProtocolViolation(Violation::WrongRole))),
     }

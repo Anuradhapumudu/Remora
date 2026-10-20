@@ -41,6 +41,13 @@ enum Command {
     /// List capturable displays and their IDs.
     #[cfg(target_os = "macos")]
     ListDisplays,
+    /// Phase 4 T2: print capture events (interrupted / resumed) with times.
+    #[cfg(target_os = "macos")]
+    WatchCapture {
+        /// How long to watch.
+        #[arg(long, default_value_t = 60)]
+        seconds: u64,
+    },
     /// Phase 2: report encoder capabilities (4:4:4, LTR, intra-refresh) as evidence.
     #[cfg(target_os = "macos")]
     ProbeEncoder,
@@ -66,6 +73,8 @@ fn main() -> ExitCode {
         Some(Command::ProbeEncoder) => bench::probe(),
         #[cfg(target_os = "macos")]
         Some(Command::ListDisplays) => bench::list_displays(),
+        #[cfg(target_os = "macos")]
+        Some(Command::WatchCapture { seconds }) => bench::watch_capture(seconds),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,

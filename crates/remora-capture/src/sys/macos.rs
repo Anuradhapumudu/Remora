@@ -8,8 +8,8 @@
 
 use std::ffi::c_void;
 use std::ptr::NonNull;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Mutex, mpsc};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak, mpsc};
 use std::time::{Duration, Instant};
 
 use block2::RcBlock;
@@ -63,8 +63,13 @@ enum StopKind {
 ///   give-up kills the session.
 /// * Anything else (user declined, user stopped from the menu bar, …): fatal.
 fn classify_stop(code: i64) -> StopKind {
-    let _ = code;
-    todo!("phase 4 step 2: written test-first")
+    if code == SCStreamErrorCode::NoCaptureSource.0 as i64 {
+        StopKind::Interrupted(InterruptReason::DisplayUnavailable)
+    } else if code == SCStreamErrorCode::SystemStoppedStream.0 as i64 {
+        StopKind::Interrupted(InterruptReason::Other)
+    } else {
+        StopKind::Fatal
+    }
 }
 
 /// A retained, IOSurface-backed `CVPixelBuffer` holding one captured frame (NV12).
@@ -124,6 +129,18 @@ struct HandlerIvars {
     sink: Mutex<Option<EventSink>>,
     seq: AtomicU64,
     clock: HostClock,
+    /// Where to restart from after an interruption (phase4-criteria §7).
+    restart: RestartCtx,
+    /// A stream started by the restart thread announces `Resumed` on its
+    /// first callback, so `Resumed` always arrives before its frames.
+    announce_resume: AtomicBool,
+}
+
+/// What an interrupted stream's restart thread needs.
+#[derive(Clone)]
+struct RestartCtx {
+    core: Weak<Mutex<Core>>,
+    generation: u64,
 }
 
 define_class!(
@@ -151,18 +168,32 @@ define_class!(
     unsafe impl SCStreamDelegate for StreamHandler {
         #[unsafe(method(stream:didStopWithError:))]
         fn stream_did_stop(&self, _stream: &SCStream, error: &NSError) {
-            let err = ns_error_to_capture("SCStream", error);
-            self.emit(CaptureEvent::Stopped(err));
+            match classify_stop(error.code() as i64) {
+                StopKind::Interrupted(reason) => {
+                    self.emit(CaptureEvent::Interrupted(reason));
+                    // Never block ScreenCaptureKit's thread: retry elsewhere.
+                    // The sink moves to the restart thread (this stream is dead).
+                    if let Some(sink) = self.take_sink() {
+                        spawn_restart(self.ivars().restart.clone(), sink);
+                    }
+                }
+                StopKind::Fatal => {
+                    let err = ns_error_to_capture("SCStream", error);
+                    self.emit(CaptureEvent::Stopped(err));
+                }
+            }
         }
     }
 );
 
 impl StreamHandler {
-    fn new(sink: EventSink) -> Retained<Self> {
+    fn new(sink: EventSink, restart: RestartCtx, announce_resume: bool) -> Retained<Self> {
         let this = Self::alloc().set_ivars(HandlerIvars {
             sink: Mutex::new(Some(sink)),
             seq: AtomicU64::new(0),
             clock: HostClock::new(),
+            restart,
+            announce_resume: AtomicBool::new(announce_resume),
         });
         // SAFETY: calling NSObject's designated initializer on a freshly allocated object.
         unsafe { msg_send![super(this), init] }
@@ -177,10 +208,12 @@ impl StreamHandler {
         }
     }
 
-    /// Detaches the sink: after this returns, no further events are delivered.
-    fn detach(&self) {
-        if let Ok(mut guard) = self.ivars().sink.lock() {
-            guard.take();
+    /// Detaches the sink and returns it: after this returns, no further
+    /// events are delivered through this handler.
+    fn take_sink(&self) -> Option<EventSink> {
+        match self.ivars().sink.lock() {
+            Ok(mut guard) => guard.take(),
+            Err(poisoned) => poisoned.into_inner().take(),
         }
     }
 
@@ -193,6 +226,9 @@ impl StreamHandler {
             return;
         }
         let ivars = self.ivars();
+        if ivars.announce_resume.swap(false, Ordering::Relaxed) {
+            self.emit(CaptureEvent::Resumed);
+        }
         let seq = ivars.seq.fetch_add(1, Ordering::Relaxed);
         let info = read_frame_info(sample_buffer);
 
@@ -418,13 +454,29 @@ fn display_pixel_size(display: &SCDisplay) -> (u32, u32) {
     }
 }
 
-/// ScreenCaptureKit capture of one display.
-pub struct MacScreenCapture {
+/// How often an interrupted stream tries to start again (T2: resumed
+/// <= 2 s after the display wakes).
+const RESTART_POLL: Duration = Duration::from_millis(500);
+
+/// Capture state shared by the owner and an interrupted stream's restart
+/// thread.
+struct Core {
     cfg: CaptureConfig,
     size: (u32, u32),
+    display_id: u32,
     display: Retained<SCDisplay>,
     running: Option<Running>,
+    /// The user called `start` and not yet `stop`.
+    started: bool,
+    /// Bumped by every `start` and `stop`: a restart thread belonging to an
+    /// older run sees the change and gives up.
+    generation: u64,
 }
+
+// SAFETY: `Core` is only touched behind its `Mutex`. ScreenCaptureKit objects
+// may be messaged from any thread (see `MacScreenCapture` below); the
+// dispatch queue handle is only kept alive, never used from here.
+unsafe impl Send for Core {}
 
 struct Running {
     stream: Retained<SCStream>,
@@ -433,11 +485,156 @@ struct Running {
     _queue: DispatchRetained<DispatchQueue>,
 }
 
-// SAFETY: `MacScreenCapture` is only used through `&mut self`, so calls into
-// SCStream are serialized. ScreenCaptureKit objects may be messaged from any
-// thread (Apple's own samples drive SCStream from Swift concurrency tasks); the
-// handler's shared state is behind a Mutex/atomics.
+/// ScreenCaptureKit capture of one display.
+pub struct MacScreenCapture {
+    core: Arc<Mutex<Core>>,
+}
+
+// SAFETY: all state is in `Core` behind a Mutex (see there).
 unsafe impl Send for MacScreenCapture {}
+
+fn lock_core(core: &Mutex<Core>) -> MutexGuard<'_, Core> {
+    // Every unlock point leaves `Core` consistent; recover from a panic elsewhere.
+    core.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+fn configuration(cfg: &CaptureConfig, size: (u32, u32)) -> Retained<SCStreamConfiguration> {
+    let fps = i32::try_from(cfg.max_fps.clamp(1, 240)).unwrap_or(60);
+    // SAFETY: freshly created configuration object; setters take plain values.
+    unsafe {
+        let c = SCStreamConfiguration::new();
+        c.setWidth(size.0 as usize);
+        c.setHeight(size.1 as usize);
+        c.setPixelFormat(kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange);
+        // Interval of 1/(fps+1), not 1/fps: with exactly 1/fps, display timing
+        // jitter makes ScreenCaptureKit skip frames that arrive a hair early
+        // (measured: 57.2 instead of 60 fps). The display's own refresh rate still
+        // caps delivery, and on faster displays every other frame still fits.
+        c.setMinimumFrameInterval(CMTime::new(1, fps + 1));
+        c.setQueueDepth(cfg.queue_depth.clamp(3, 8) as isize);
+        c.setShowsCursor(cfg.show_cursor);
+        // Capture at full pixel resolution, then scale (sharper text).
+        c.setCaptureResolution(SCCaptureResolutionType::Best);
+        c
+    }
+}
+
+/// Starts one SCStream delivering to `sink`. On failure the sink comes back,
+/// so a retry can use it.
+fn start_stream(
+    core: &Core,
+    sink: EventSink,
+    restart: RestartCtx,
+    announce_resume: bool,
+) -> Result<Running, (CaptureError, EventSink)> {
+    let config = configuration(&core.cfg, core.size);
+    // SAFETY: valid display; empty exclusion array.
+    let filter = unsafe {
+        SCContentFilter::initWithDisplay_excludingWindows(
+            SCContentFilter::alloc(),
+            &core.display,
+            &NSArray::new(),
+        )
+    };
+    let handler = StreamHandler::new(sink, restart, announce_resume);
+    let delegate = ProtocolObject::<dyn SCStreamDelegate>::from_ref(&*handler);
+    // SAFETY: valid filter/config; the delegate is retained by us for the
+    // stream's lifetime (`Running::handler`).
+    let stream = unsafe {
+        SCStream::initWithFilter_configuration_delegate(
+            SCStream::alloc(),
+            &filter,
+            &config,
+            Some(delegate),
+        )
+    };
+    // Frames are latency-critical: user-interactive QoS. The QoS must be part of
+    // the queue's attributes at creation — libdispatch traps if a queue's
+    // properties are changed after it is active.
+    let attr = DispatchQueueAttr::with_qos_class(
+        DispatchQueueAttr::SERIAL,
+        DispatchQoS::UserInteractive,
+        0,
+    );
+    let queue = DispatchQueue::new("dev.remora.capture", Some(&attr));
+    let output = ProtocolObject::<dyn SCStreamOutput>::from_ref(&*handler);
+    let give_back = |e: CaptureError, handler: &StreamHandler| match handler.take_sink() {
+        Some(sink) => Err((e, sink)),
+        // Unreachable in practice (nothing else takes it before start
+        // returns); a no-op sink keeps the signature total.
+        None => Err((e, Box::new(|_| {}) as EventSink)),
+    };
+    // SAFETY: valid stream, output and queue; all retained in `Running`.
+    if let Err(e) = unsafe {
+        stream.addStreamOutput_type_sampleHandlerQueue_error(
+            output,
+            SCStreamOutputType::Screen,
+            Some(&queue),
+        )
+    } {
+        return give_back(
+            ns_error_to_capture("SCStream.addStreamOutput", &e),
+            &handler,
+        );
+    }
+    // SAFETY: the block matches the completion-handler signature.
+    if let Err(e) = wait_completion("SCStream.startCapture", |b| unsafe {
+        stream.startCaptureWithCompletionHandler(Some(b))
+    }) {
+        return give_back(e, &handler);
+    }
+    Ok(Running {
+        stream,
+        handler,
+        _queue: queue,
+    })
+}
+
+fn spawn_restart(ctx: RestartCtx, sink: EventSink) {
+    let spawned = std::thread::Builder::new()
+        .name("remora-capture-restart".into())
+        .spawn(move || restart_loop(ctx, sink));
+    // If no thread can be created the sink is dropped: the consumer stays
+    // paused and its own stop() still works. Nothing better is possible.
+    drop(spawned);
+}
+
+/// Retries every [`RESTART_POLL`] until the display is back and a new
+/// stream starts (it then announces `Resumed`), or the owner stopped,
+/// restarted or dropped the capture.
+fn restart_loop(ctx: RestartCtx, mut sink: EventSink) {
+    loop {
+        std::thread::sleep(RESTART_POLL);
+        let Some(core) = ctx.core.upgrade() else {
+            return;
+        };
+        let mut c = lock_core(&core);
+        if !c.started || c.generation != ctx.generation {
+            return;
+        }
+        // The old stream is dead; release it before starting a new one.
+        c.running = None;
+        // The display object may be stale after sleep: look it up again.
+        let Ok(displays) = shareable_displays() else {
+            continue;
+        };
+        // SAFETY: property getter on a valid SCDisplay.
+        let Some(display) = displays
+            .iter()
+            .find(|d| unsafe { d.displayID() } == c.display_id)
+        else {
+            continue;
+        };
+        c.display = display;
+        match start_stream(&c, sink, ctx.clone(), true) {
+            Ok(running) => {
+                c.running = Some(running);
+                return;
+            }
+            Err((_, s)) => sink = s,
+        }
+    }
+}
 
 impl MacScreenCapture {
     /// Prepares capture of the main display. Fails fast if permission is missing.
@@ -463,11 +660,18 @@ impl MacScreenCapture {
             })
             .ok_or(CaptureError::NoDisplay)?;
         let (pw, ph) = display_pixel_size(&display);
+        // SAFETY: property getter on a valid SCDisplay.
+        let display_id = unsafe { display.displayID() };
         Ok(Self {
-            size: output_size(&cfg, pw, ph),
-            cfg,
-            display,
-            running: None,
+            core: Arc::new(Mutex::new(Core {
+                size: output_size(&cfg, pw, ph),
+                cfg,
+                display_id,
+                display,
+                running: None,
+                started: false,
+                generation: 0,
+            })),
         })
     }
 
@@ -487,109 +691,56 @@ impl MacScreenCapture {
 
     /// The display's native size in pixels.
     pub fn display_pixel_size(&self) -> (u32, u32) {
-        display_pixel_size(&self.display)
-    }
-
-    fn configuration(&self) -> Retained<SCStreamConfiguration> {
-        let fps = i32::try_from(self.cfg.max_fps.clamp(1, 240)).unwrap_or(60);
-        // SAFETY: freshly created configuration object; setters take plain values.
-        unsafe {
-            let c = SCStreamConfiguration::new();
-            c.setWidth(self.size.0 as usize);
-            c.setHeight(self.size.1 as usize);
-            c.setPixelFormat(kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange);
-            // Interval of 1/(fps+1), not 1/fps: with exactly 1/fps, display timing
-            // jitter makes ScreenCaptureKit skip frames that arrive a hair early
-            // (measured: 57.2 instead of 60 fps). The display's own refresh rate still
-            // caps delivery, and on faster displays every other frame still fits.
-            c.setMinimumFrameInterval(CMTime::new(1, fps + 1));
-            c.setQueueDepth(self.cfg.queue_depth.clamp(3, 8) as isize);
-            c.setShowsCursor(self.cfg.show_cursor);
-            // Capture at full pixel resolution, then scale (sharper text).
-            c.setCaptureResolution(SCCaptureResolutionType::Best);
-            c
-        }
+        display_pixel_size(&lock_core(&self.core).display)
     }
 }
 
 impl ScreenCapture for MacScreenCapture {
     fn start(&mut self, sink: EventSink) -> Result<(), CaptureError> {
-        if self.running.is_some() {
+        let mut c = lock_core(&self.core);
+        if c.started {
             return Err(CaptureError::InvalidState("already running"));
         }
-        let config = self.configuration();
-        // SAFETY: valid display; empty exclusion array.
-        let filter = unsafe {
-            SCContentFilter::initWithDisplay_excludingWindows(
-                SCContentFilter::alloc(),
-                &self.display,
-                &NSArray::new(),
-            )
+        c.generation = c.generation.wrapping_add(1);
+        let ctx = RestartCtx {
+            core: Arc::downgrade(&self.core),
+            generation: c.generation,
         };
-        let handler = StreamHandler::new(sink);
-        let delegate = ProtocolObject::<dyn SCStreamDelegate>::from_ref(&*handler);
-        // SAFETY: valid filter/config; the delegate is retained by us for the
-        // stream's lifetime (`Running::handler`).
-        let stream = unsafe {
-            SCStream::initWithFilter_configuration_delegate(
-                SCStream::alloc(),
-                &filter,
-                &config,
-                Some(delegate),
-            )
-        };
-        // Frames are latency-critical: user-interactive QoS. The QoS must be part of
-        // the queue's attributes at creation — libdispatch traps if a queue's
-        // properties are changed after it is active.
-        let attr = DispatchQueueAttr::with_qos_class(
-            DispatchQueueAttr::SERIAL,
-            DispatchQoS::UserInteractive,
-            0,
-        );
-        let queue = DispatchQueue::new("dev.remora.capture", Some(&attr));
-        let output = ProtocolObject::<dyn SCStreamOutput>::from_ref(&*handler);
-        // SAFETY: valid stream, output and queue; all retained in `Running`.
-        unsafe {
-            stream.addStreamOutput_type_sampleHandlerQueue_error(
-                output,
-                SCStreamOutputType::Screen,
-                Some(&queue),
-            )
-        }
-        .map_err(|e| ns_error_to_capture("SCStream.addStreamOutput", &e))?;
-        // SAFETY: the block matches the completion-handler signature.
-        wait_completion("SCStream.startCapture", |b| unsafe {
-            stream.startCaptureWithCompletionHandler(Some(b))
-        })
-        .inspect_err(|_| handler.detach())?;
-        self.running = Some(Running {
-            stream,
-            handler,
-            _queue: queue,
-        });
+        let running = start_stream(&c, sink, ctx, false).map_err(|(e, _)| e)?;
+        c.running = Some(running);
+        c.started = true;
         Ok(())
     }
 
     fn stop(&mut self) -> Result<(), CaptureError> {
-        let Some(running) = self.running.take() else {
+        let mut c = lock_core(&self.core);
+        if !c.started {
             return Err(CaptureError::InvalidState("not running"));
+        }
+        c.started = false;
+        // A restart thread of this run sees the new generation and gives up
+        // (it holds the sink while retrying; dropping it ends delivery).
+        c.generation = c.generation.wrapping_add(1);
+        let Some(running) = c.running.take() else {
+            // Interrupted: no live stream to stop.
+            return Ok(());
         };
         // SAFETY: the block matches the completion-handler signature.
         let result = wait_completion("SCStream.stopCapture", |b| unsafe {
             running.stream.stopCaptureWithCompletionHandler(Some(b))
         });
-        running.handler.detach();
+        drop(running.handler.take_sink());
         result
     }
 
     fn output_size(&self) -> (u32, u32) {
-        self.size
+        lock_core(&self.core).size
     }
 }
 
 impl Drop for MacScreenCapture {
     fn drop(&mut self) {
-        if self.running.is_some() {
+        if lock_core(&self.core).started {
             let _ = self.stop();
         }
     }
