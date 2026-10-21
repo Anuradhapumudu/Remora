@@ -266,12 +266,13 @@ impl Stats {
         let fps = self.draw.len() as f64 / elapsed.as_secs_f64();
         let (d50, d95) = percentiles(&mut self.decode);
         let (r50, r95) = percentiles(&mut self.draw);
-        let (_, refused, failed, dropped) = counters.map(Counters::get).unwrap_or_default();
+        let t = counters.map(Counters::get).unwrap_or_default();
+        let (refused, waiting, failed, dropped) = (t.refused, t.waiting, t.failed, t.dropped);
         self.since = Instant::now();
         self.decode.clear();
         self.draw.clear();
         Some(format!(
-            "{fps:.0} fps, decode p50 {d50:.1} / p95 {d95:.1} ms, upload+draw p50 {r50:.1} / p95 {r95:.1} ms, refused {refused}, failed {failed}, dropped {dropped}"
+            "{fps:.0} fps, decode p50 {d50:.1} / p95 {d95:.1} ms, upload+draw p50 {r50:.1} / p95 {r95:.1} ms, refused {refused}, waiting {waiting}, failed {failed}, dropped {dropped}"
         ))
     }
 }

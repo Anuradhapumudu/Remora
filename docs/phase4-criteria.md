@@ -311,6 +311,28 @@ The phase report lists the whole deferred list row by row (CLAUDE.md).
   macOS gives no drawable and frames are decoded but not drawn (the
   stats show 0 fps).
 
+* **Step 7a (2026-10-22).** Streaming host (architecture D42). Tests:
+  `remora-host` `stream.rs` (6, macOS, scripted capture backend and the
+  synthetic source), `remora-viewer` `decode.rs` (1, error → counter),
+  e2e `streaming_host_video_is_decoded_by_the_viewer` (host `--source
+  synthetic`, viewer `--no-window`, real QUIC on loopback): **180 frames
+  decoded in 3 s, 0 refused, 0 waiting, 0 failed, 0 dropped**, and the
+  host stops streaming when the session ends. **T2's open item closed:**
+  the first frame after capture resumes is a keyframe (scripted capture;
+  the real `pmset` cycle repeats it in 7d). **Plants, each seen failing
+  then removed:** no keyframe on resume, a keyframe request ignored,
+  arrival time sent instead of display time (the first version of that
+  test had bounds too loose to see 5 ms and missed it — tightened to a
+  50 ms display-to-arrival gap), the stream never stopping after the last
+  session, a "waiting" refusal counted as malformed. A forced first
+  keyframe was **removed** instead: removing it changed nothing, because
+  VideoToolbox's first frame is always an IDR. **Mutation** (`stream.rs`,
+  not in the gated scope — app code): 29 mutants, 23 caught, 5 unviable,
+  1 timeout, 0 missed; the first run missed 9, which led to the rate,
+  stop and size checks of the synthetic source, and to removing a bitrate
+  parameter no test could observe (the synthetic pattern is too easy to
+  encode for bitrate to show; bitrate is tuned with P1 in 7d).
+
 ## 12. Changes to criteria
 
 * **2026-10-19 — owner approval.** R1–R5 approved as proposed. R1 and R2 are

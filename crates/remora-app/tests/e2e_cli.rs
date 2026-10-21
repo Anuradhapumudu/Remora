@@ -663,7 +663,7 @@ fn f_ux6_an_unquoted_device_code_is_accepted_and_still_checked() {
 #[test]
 fn streaming_host_video_is_decoded_by_the_viewer() {
     let dir = tmp_dir();
-    let mut host = start_host(&dir, &["--source", "synthetic", "--width", "640"]);
+    let mut host = start_host(&dir, &["--source", "synthetic", "--width", "1280"]);
     let mut viewer = connect_viewer(
         &dir,
         &host.code,
@@ -684,8 +684,17 @@ fn streaming_host_video_is_decoded_by_the_viewer() {
         before.rsplit(' ').next().unwrap().parse().unwrap()
     };
     // 3 s at 60 fps is 180; a loaded CI machine gets fewer, never none.
+    println!("{line}");
+    // Nothing is captured once nobody is connected.
+    assert!(
+        host.app.seen.iter().any(|l| l == "streaming stopped")
+            || host.app.sees_within("streaming stopped", 5000),
+        "host:\n{}",
+        host.app.seen.join("\n")
+    );
     assert!(n("frames decoded") >= 30, "{line}");
-    // The first frame after approval is a keyframe, so nothing is refused.
+    // Nothing malformed. ("waiting for a keyframe" is allowed: frames
+    // encoded between approval and the keyframe forced for this viewer.)
     assert_eq!(n("refused"), 0, "{line}");
     assert_eq!(n("failed"), 0, "{line}");
 }

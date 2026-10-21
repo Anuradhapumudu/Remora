@@ -30,9 +30,10 @@ pub(crate) struct Picture {
     pub(crate) decode: std::time::Duration,
 }
 
-/// Receives decoded pictures (on the decode thread).
+/// Receives decoded pictures (on the decode thread); `None` = no window
+/// (`connect --no-window`): pictures are decoded, counted and released.
 #[cfg(target_os = "macos")]
-pub(crate) type Show = Box<dyn FnMut(Picture) + Send>;
+pub(crate) type Show = Option<Box<dyn FnMut(Picture) + Send>>;
 /// No decoder, so no pictures (a named type rather than `()`, which
 /// clippy's `unit_arg` rejects as an argument).
 #[cfg(not(target_os = "macos"))]
@@ -44,8 +45,12 @@ pub(crate) struct Show;
 pub(crate) struct Counters {
     /// Decoded to a picture.
     pub(crate) decoded: AtomicU64,
-    /// Refused before the decoder (malformed, too large, after a gap).
+    /// Refused before the decoder: malformed or too large.
     pub(crate) refused: AtomicU64,
+    /// Not decodable yet: before the first keyframe, or after a gap or an
+    /// error until the next one. Normal for a moment at the start of a
+    /// session (frames encoded before the host's keyframe for this viewer).
+    pub(crate) waiting: AtomicU64,
     /// The decoder failed on them.
     pub(crate) failed: AtomicU64,
     /// Dropped because the decoder was busy (or there is none).
@@ -63,16 +68,28 @@ pub(crate) struct Counters {
 #[cfg(target_os = "macos")]
 pub(crate) const MAX_UNSHOWN: u64 = 2;
 
+/// The counters at one moment.
+#[derive(Debug, Default, Clone, Copy)]
+pub(crate) struct Totals {
+    pub(crate) decoded: u64,
+    pub(crate) refused: u64,
+    pub(crate) waiting: u64,
+    pub(crate) failed: u64,
+    /// Dropped before the decoder plus decoded but not shown.
+    pub(crate) dropped: u64,
+}
+
 impl Counters {
-    /// `(decoded, refused, failed, dropped + not shown)` now.
-    pub(crate) fn get(&self) -> (u64, u64, u64, u64) {
+    /// The counters now.
+    pub(crate) fn get(&self) -> Totals {
         let g = |a: &AtomicU64| a.load(Ordering::Relaxed);
-        (
-            g(&self.decoded),
-            g(&self.refused),
-            g(&self.failed),
-            g(&self.dropped) + g(&self.not_shown),
-        )
+        Totals {
+            decoded: g(&self.decoded),
+            refused: g(&self.refused),
+            waiting: g(&self.waiting),
+            failed: g(&self.failed),
+            dropped: g(&self.dropped) + g(&self.not_shown),
+        }
     }
 
     /// The window has dealt with one picture. Only the window thread
@@ -135,7 +152,7 @@ impl Decoder {
     }
 
     /// Stops the decoder thread; returns the final counts.
-    pub(crate) fn finish(mut self) -> (u64, u64, u64, u64) {
+    pub(crate) fn finish(mut self) -> Totals {
         self.tx = None; // ends the thread's loop
         if let Some(w) = self.worker.take() {
             let _ = w.join();
@@ -151,8 +168,8 @@ fn run(
     mut show: Show,
     counters: &Counters,
 ) {
+    use remora_codec::VtDecoder;
     use remora_codec::h264::SizeLimit;
-    use remora_codec::{DecodeError, VtDecoder};
 
     let mut decoder = VtDecoder::new(SizeLimit::default());
     for frame in rx {
@@ -160,6 +177,9 @@ fn run(
         match decoder.decode(frame.frame_id, &frame.data) {
             Ok(picture) => {
                 bump(&counters.decoded);
+                let Some(show) = show.as_mut() else {
+                    continue; // no window: the picture is released here
+                };
                 if counters.unshown.load(Ordering::Relaxed) >= MAX_UNSHOWN {
                     bump(&counters.not_shown);
                     continue;
@@ -171,13 +191,23 @@ fn run(
                 });
             }
             Err(e) => {
-                bump(match e {
-                    DecodeError::Refused(_) => &counters.refused,
-                    _ => &counters.failed,
-                });
+                bump(counter_for(counters, &e));
                 client.request_keyframe();
             }
         }
+    }
+}
+
+/// The counter a decode error goes to: "refused" means the host sent
+/// something malformed; "waiting" is normal for a moment (module docs).
+#[cfg(target_os = "macos")]
+fn counter_for<'a>(c: &'a Counters, e: &remora_codec::DecodeError) -> &'a AtomicU64 {
+    use remora_codec::DecodeError;
+    use remora_codec::h264::Refusal;
+    match e {
+        DecodeError::Refused(Refusal::WaitingForKeyframe) => &c.waiting,
+        DecodeError::Refused(Refusal::Malformed(_)) => &c.refused,
+        DecodeError::Configure(_) | DecodeError::Decode(_) | DecodeError::NoPicture => &c.failed,
     }
 }
 
@@ -191,5 +221,28 @@ fn run(
     let _ = (client, show);
     for _ in rx {
         bump(&counters.dropped);
+    }
+}
+
+#[cfg(all(test, target_os = "macos"))]
+mod tests {
+    use remora_codec::DecodeError;
+    use remora_codec::h264::{Refusal, StreamError};
+
+    use super::*;
+
+    #[test]
+    fn decode_errors_are_counted_where_they_belong() {
+        let c = Counters::default();
+        let is = |e: DecodeError, want: &AtomicU64| std::ptr::eq(counter_for(&c, &e), want);
+        assert!(is(
+            DecodeError::Refused(Refusal::WaitingForKeyframe),
+            &c.waiting
+        ));
+        assert!(is(
+            DecodeError::Refused(Refusal::Malformed(StreamError::NoStartCode)),
+            &c.refused
+        ));
+        assert!(is(DecodeError::NoPicture, &c.failed));
     }
 }

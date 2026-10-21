@@ -12,6 +12,10 @@
 //!
 //! Remote input is NOT echoed: a keystroke could be someone typing a
 //! password; Phase 3 has no injector, so the CLI only counts events.
+//!
+//! Phase 4: once a viewer is accepted the host streams `--source` (the
+//! screen by default on macOS; architecture D42) and prints `streaming:`,
+//! `capture paused/resumed/stopped` and `streaming stopped` lines.
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -94,7 +98,7 @@ pub(crate) fn run(args: ServeArgs) -> anyhow::Result<()> {
 }
 
 async fn serve(args: ServeArgs) -> anyhow::Result<()> {
-    let _ = (args.source, args.width); // step 7 GREEN
+    check_source(args.source, args.width)?;
     if args.bind.ip().is_unspecified() {
         bail!(
             "Phase 3 listens on a specific address (e.g. 127.0.0.1:0), not {}",
@@ -129,10 +133,12 @@ async fn serve(args: ServeArgs) -> anyhow::Result<()> {
         trusted,
     };
     let (server, mut events) = HostServer::bind(args.bind, config).await?;
+    let server = Arc::new(server);
     let addr = server.local_addr()?;
     println!("device: {}", short_code_of(&public));
     println!("identity: {}", identity_hex(&public));
     println!("listening: {addr}");
+    let ui_server = Arc::clone(&server);
     let mut ui = Ui {
         shown_password: server.otp(),
         server,
@@ -141,6 +147,7 @@ async fn serve(args: ServeArgs) -> anyhow::Result<()> {
         book: SessionBook::new(),
         inputs: HashMap::new(),
         rotated: false,
+        video: Video::new(args.source, args.width, Arc::clone(&ui_server)),
     };
     ui.print_code(false);
 
@@ -159,6 +166,7 @@ async fn serve(args: ServeArgs) -> anyhow::Result<()> {
             }
         }
     }
+    ui.video.stop();
     ui.server.shutdown();
     Ok(())
 }
@@ -174,7 +182,7 @@ struct Entry {
 
 /// The host CLI's state.
 struct Ui {
-    server: HostServer,
+    server: Arc<HostServer>,
     addr: SocketAddr,
     public: IdentityPublic,
     book: SessionBook<Entry>,
@@ -184,6 +192,7 @@ struct Ui {
     /// The host replaced the password after failed attempts since it was
     /// last printed.
     rotated: bool,
+    video: Video,
 }
 
 impl Ui {
@@ -261,6 +270,7 @@ impl Ui {
                 println!(
                     "SESSION ACTIVE {n}: a viewer is connected (type 'disconnect {n}' to end it)"
                 );
+                self.video.active.insert(id);
             }
             HostEvent::Deliver { id, .. } => {
                 let count = self.inputs.entry(id).or_default();
@@ -284,11 +294,12 @@ impl Ui {
                 println!("note: 3 failed attempts - the password was replaced");
             }
             HostEvent::OtpUsed { .. } => {}
-            // Phase 3 CLI streams nothing yet; the Phase 4 streaming host
-            // forces the encoder's next frame to a keyframe here.
-            HostEvent::ForceKeyframe => {}
+            // A new viewer, a viewer's request (rate-limited by the
+            // session) or capture resumed.
+            HostEvent::ForceKeyframe => self.video.force_keyframe(),
             HostEvent::Closed { id, code } => {
                 self.inputs.remove(&id);
+                self.video.ended(id);
                 if let Some(n) = self.number_of(id) {
                     self.book.remove(n);
                     println!("session ended {n} ({code:?})");
@@ -298,6 +309,7 @@ impl Ui {
             // as "session ended (Normal)".
             HostEvent::Lost { id } => {
                 self.inputs.remove(&id);
+                self.video.ended(id);
                 if let Some(n) = self.number_of(id) {
                     self.book.remove(n);
                     println!(
@@ -328,9 +340,18 @@ impl Ui {
                     id,
                     pending: Some(sas),
                 }) => {
-                    if let Err(e) = self.server.approve(*id, *sas) {
+                    let (id, sas) = (*id, *sas);
+                    // Capture starts before the approval, so a capture
+                    // that cannot start ends this session with
+                    // CaptureStopped instead of an Active session that
+                    // never shows anything.
+                    self.video.prepare();
+                    if let Err(e) = self.server.approve(id, sas) {
                         println!("cannot accept {n}: {e}");
+                        self.video.idle_check();
                     }
+                    // On success the session's Active (or Closed) event
+                    // arrives later through the event channel.
                 }
                 Some(Entry { pending: None, .. }) => {
                     println!("session {n} is already active - nothing to accept")
@@ -351,6 +372,154 @@ impl Ui {
             },
         }
         true
+    }
+}
+
+/// Checks `--source` and `--width` before anything starts.
+fn check_source(source: Source, width: u32) -> anyhow::Result<()> {
+    if source == Source::None {
+        return Ok(());
+    }
+    if !cfg!(target_os = "macos") {
+        bail!(
+            "--source {source:?}: no screen capture or encoder on this OS yet (Phase 6.5); use --source none"
+        );
+    }
+    // The barcode strip that numbers each test frame (P7) is 704 pixels wide.
+    if source == Source::Synthetic && width < 704 {
+        bail!("--source synthetic needs --width 704 or more (got {width})");
+    }
+    if width < 2 {
+        bail!("--width must be at least 2");
+    }
+    Ok(())
+}
+
+/// The video stream (macOS): started when the person accepts a viewer,
+/// stopped when the last session ends, so nothing is captured while
+/// nobody is connected.
+struct Video {
+    #[cfg(target_os = "macos")]
+    source: Source,
+    #[cfg(target_os = "macos")]
+    width: u32,
+    #[cfg(target_os = "macos")]
+    server: Arc<HostServer>,
+    /// Sessions that are Active.
+    active: std::collections::HashSet<SessionId>,
+    #[cfg(target_os = "macos")]
+    running: Option<crate::stream::Streamer>,
+}
+
+impl Video {
+    fn new(source: Source, width: u32, server: Arc<HostServer>) -> Self {
+        // Other systems stream nothing yet (`check_source` refused it).
+        #[cfg(not(target_os = "macos"))]
+        let _ = (source, width, server);
+        Self {
+            #[cfg(target_os = "macos")]
+            source,
+            #[cfg(target_os = "macos")]
+            width,
+            #[cfg(target_os = "macos")]
+            server,
+            active: std::collections::HashSet::new(),
+            #[cfg(target_os = "macos")]
+            running: None,
+        }
+    }
+
+    /// Makes sure the stream runs before a viewer is approved, and tells
+    /// the session layer whether capture works.
+    #[cfg(target_os = "macos")]
+    fn prepare(&mut self) {
+        use remora_capture::{CaptureConfig, MacScreenCapture, ScreenCapture};
+        use remora_session::CaptureStatus;
+
+        if self.running.is_some() || self.source == Source::None {
+            return;
+        }
+        let capture: anyhow::Result<Box<dyn ScreenCapture>> = match self.source {
+            Source::Screen => MacScreenCapture::main_display(CaptureConfig {
+                width: self.width,
+                ..CaptureConfig::default()
+            })
+            .map(|c| Box::new(c) as Box<dyn ScreenCapture>)
+            .map_err(anyhow::Error::from),
+            // 16:9, as a typical screen.
+            _ => Ok(Box::new(crate::stream::SyntheticCapture::new(
+                self.width,
+                self.width * 9 / 16,
+                60,
+            ))),
+        };
+        let out: Arc<dyn crate::stream::VideoOut> = Arc::new(Out(Arc::clone(&self.server)));
+        match capture.and_then(|c| crate::stream::Streamer::start(c, out)) {
+            Ok(s) => {
+                println!("streaming: {:?}, H.264", self.source);
+                self.running = Some(s);
+                self.server.capture_changed(CaptureStatus::Running);
+            }
+            Err(e) => {
+                println!("cannot stream: {e:#}");
+                self.server.capture_changed(CaptureStatus::Stopped);
+            }
+        }
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    fn prepare(&mut self) {}
+
+    fn force_keyframe(&self) {
+        #[cfg(target_os = "macos")]
+        if let Some(s) = &self.running {
+            s.force_keyframe();
+        }
+    }
+
+    /// Session `id` is over.
+    fn ended(&mut self, id: SessionId) {
+        self.active.remove(&id);
+        self.idle_check();
+    }
+
+    /// Stops the stream when no session is Active.
+    fn idle_check(&mut self) {
+        if self.active.is_empty() {
+            self.stop();
+        }
+    }
+
+    fn stop(&mut self) {
+        #[cfg(target_os = "macos")]
+        if let Some(s) = self.running.take() {
+            s.stop();
+            println!("streaming stopped");
+        }
+    }
+}
+
+/// Frames and capture state into the host server (macOS).
+#[cfg(target_os = "macos")]
+struct Out(Arc<HostServer>);
+
+#[cfg(target_os = "macos")]
+impl crate::stream::VideoOut for Out {
+    fn video(&self, keyframe: bool, capture_ts_us: u64, data: &[u8]) {
+        if let Err(e) = self.0.send_video(keyframe, capture_ts_us, data) {
+            // Sizes and counts only (INV9).
+            eprintln!("video frame of {} bytes not sent: {e}", data.len());
+        }
+    }
+
+    fn capture(&self, status: remora_session::CaptureStatus) {
+        use remora_session::CaptureStatus;
+        match status {
+            CaptureStatus::Running => println!("capture resumed"),
+            CaptureStatus::Interrupted(r) => println!("capture paused ({r:?}) - viewers are told"),
+            CaptureStatus::Stopped => println!("capture stopped - active sessions end"),
+        }
+        self.0.capture_changed(status);
     }
 }
 

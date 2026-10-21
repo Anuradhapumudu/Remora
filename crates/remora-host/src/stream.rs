@@ -16,16 +16,18 @@
 //!   (StreamPaused / StreamResumed) and ends sessions when capture stops.
 //!
 //! Nothing here logs frame content (INV9): only counts and states.
-#![allow(dead_code, unused_imports)] // RED stubs (step 7); removed in GREEN
-
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use remora_capture::{CaptureError, CaptureEvent, CapturedFrame, EventSink, ScreenCapture};
-use remora_codec::VtEncoder;
-use remora_session::CaptureStatus;
+use anyhow::Context;
+use remora_capture::{
+    CaptureError, CaptureEvent, CapturedFrame, EventSink, FrameStatus, InterruptReason,
+    ScreenCapture,
+};
+use remora_codec::{EncoderConfig, EncoderEvent, SyntheticSource, VtEncoder};
+use remora_session::{CaptureStatus, PauseReason};
 
 /// Where encoded frames and capture state go: the host server, or a
 /// recorder in tests.
@@ -37,35 +39,147 @@ pub(crate) trait VideoOut: Send + Sync + 'static {
     fn capture(&self, status: CaptureStatus);
 }
 
+/// Display times of the frames inside the encoder, by encoder sequence
+/// number modulo this. The encoder holds a few frames at most (it runs in
+/// real time, without B-frames), far fewer than 64.
+const IN_FLIGHT: usize = 64;
+
+/// What the capture thread and the encoder thread share.
+struct Shared {
+    out: Arc<dyn VideoOut>,
+    /// The next frame must be a keyframe.
+    force: AtomicBool,
+    /// `capture_ts_us` per encoder sequence number (see [`IN_FLIGHT`]).
+    display_us: [AtomicU64; IN_FLIGHT],
+}
+
 /// A running capture → encode → send pipeline.
 pub(crate) struct Streamer {
     capture: Box<dyn ScreenCapture>,
-    encoder: Option<Arc<Mutex<VtEncoder>>>,
-    force: Arc<AtomicBool>,
+    encoder: Arc<Mutex<VtEncoder>>,
+    shared: Arc<Shared>,
 }
 
 impl Streamer {
-    /// Starts `capture` and an encoder of its output size at `bitrate_bps`.
+    /// Starts `capture` and an encoder of its output size (default
+    /// bitrate; tuning it is part of the latency measurements, P1).
     pub(crate) fn start(
-        capture: Box<dyn ScreenCapture>,
-        bitrate_bps: u32,
+        mut capture: Box<dyn ScreenCapture>,
         out: Arc<dyn VideoOut>,
     ) -> anyhow::Result<Self> {
-        let _ = (bitrate_bps, out);
+        let (width, height) = capture.output_size();
+        let shared = Arc::new(Shared {
+            out,
+            // Not needed for the first frame: VideoToolbox always starts
+            // with an IDR (test `the_first_frame_is_a_keyframe_…` passes
+            // without forcing it, checked by removing a forced first frame).
+            force: AtomicBool::new(false),
+            display_us: std::array::from_fn(|_| AtomicU64::new(0)),
+        });
+        let s = Arc::clone(&shared);
+        let encoder = VtEncoder::new(
+            EncoderConfig {
+                width,
+                height,
+                // The default keyframe_interval, 0, means keyframes only
+                // when asked for (module docs).
+                ..EncoderConfig::default()
+            },
+            Box::new(move |ev| match ev {
+                EncoderEvent::Frame(f) => {
+                    let slot = &s.display_us[f.seq as usize % IN_FLIGHT];
+                    s.out
+                        .video(f.keyframe, slot.load(Ordering::Relaxed), &f.data);
+                }
+                // A frame the encoder skipped is never referenced by later
+                // ones, so the stream stays decodable.
+                EncoderEvent::Dropped { .. } => {}
+                // A failed frame may leave the encoder's references in an
+                // unknown state: start again from a keyframe.
+                EncoderEvent::Error { .. } => s.force.store(true, Ordering::Relaxed),
+            }),
+        )
+        .context("hardware encoder")?;
+        let encoder = Arc::new(Mutex::new(encoder));
+        let (enc, s) = (Arc::clone(&encoder), Arc::clone(&shared));
+        // The encoder numbers frames 0, 1, 2, … by calls to `encode`
+        // (failed calls included), so the slot is known before the call
+        // and the encoder thread can never read it too early.
+        let mut calls: u64 = 0;
+        let started = Instant::now();
+        capture
+            .start(Box::new(move |ev| match ev {
+                CaptureEvent::Frame(f) => {
+                    let Some(image) = f.image.as_ref() else {
+                        return; // nothing changed on screen: nothing to send
+                    };
+                    let shown = f.display_time();
+                    s.display_us[calls as usize % IN_FLIGHT]
+                        .store(display_us(shown), Ordering::Relaxed);
+                    calls += 1;
+                    let keyframe = s.force.swap(false, Ordering::Relaxed);
+                    let pts = shown.saturating_duration_since(started);
+                    let sent = enc.lock().map(|mut e| e.encode(image, pts, keyframe));
+                    if !matches!(sent, Ok(Ok(_))) {
+                        s.force.store(true, Ordering::Relaxed);
+                    }
+                }
+                CaptureEvent::Interrupted(reason) => s
+                    .out
+                    .capture(CaptureStatus::Interrupted(pause_reason(reason))),
+                CaptureEvent::Resumed => {
+                    // The viewer's decoder has nothing current: T2.
+                    s.force.store(true, Ordering::Relaxed);
+                    s.out.capture(CaptureStatus::Running);
+                }
+                CaptureEvent::Stopped(e) => {
+                    // An OS error message, never screen content.
+                    eprintln!("capture stopped: {e}");
+                    s.out.capture(CaptureStatus::Stopped);
+                }
+            }))
+            .context("starting screen capture")?;
         Ok(Self {
             capture,
-            encoder: None,
-            force: Arc::new(AtomicBool::new(false)),
+            encoder,
+            shared,
         })
     }
 
     /// The next frame is encoded as a keyframe (a viewer asked for one).
-    pub(crate) fn force_keyframe(&self) {}
+    pub(crate) fn force_keyframe(&self) {
+        self.shared.force.store(true, Ordering::Relaxed);
+    }
 
     /// Stops capture and delivers every frame already submitted.
     pub(crate) fn stop(mut self) {
-        let _ = self.capture.stop();
-        let _ = (&self.encoder, &self.force);
+        if let Err(e) = self.capture.stop() {
+            eprintln!("stopping capture: {e}");
+        }
+        if let Ok(mut e) = self.encoder.lock()
+            && let Err(err) = e.flush()
+        {
+            eprintln!("flushing the encoder: {err}");
+        }
+    }
+}
+
+/// `shown` in microseconds on the shared monotonic clock (0 if this OS
+/// has none yet; the viewer then reports no latency).
+fn display_us(shown: Instant) -> u64 {
+    remora_app::clock::monotonic_ns()
+        .map(|now| {
+            let ago = u64::try_from(shown.elapsed().as_nanos()).unwrap_or(u64::MAX);
+            now.saturating_sub(ago) / 1000
+        })
+        .unwrap_or(0)
+}
+
+fn pause_reason(r: InterruptReason) -> PauseReason {
+    match r {
+        InterruptReason::DisplayUnavailable => PauseReason::DisplayUnavailable,
+        InterruptReason::AccessLost => PauseReason::AccessLost,
+        InterruptReason::Other => PauseReason::Other,
     }
 }
 
@@ -95,12 +209,56 @@ impl SyntheticCapture {
 }
 
 impl ScreenCapture for SyntheticCapture {
-    fn start(&mut self, sink: EventSink) -> Result<(), CaptureError> {
-        let _ = (sink, self.fps, &self.stop, &mut self.thread);
+    fn start(&mut self, mut sink: EventSink) -> Result<(), CaptureError> {
+        if self.thread.is_some() {
+            return Err(CaptureError::InvalidState("already running"));
+        }
+        let os = |e: remora_codec::CodecError| CaptureError::Os {
+            api: "synthetic source",
+            code: 0, // not an OS error
+            message: e.to_string(),
+        };
+        let mut src = SyntheticSource::new(self.width, self.height).map_err(os)?;
+        let (stop, period) = (Arc::clone(&self.stop), Duration::from_secs(1) / self.fps);
+        self.stop.store(false, Ordering::Relaxed);
+        let thread = std::thread::Builder::new()
+            .name("remora-synthetic".into())
+            .spawn(move || {
+                let mut next = Instant::now();
+                while !stop.load(Ordering::Relaxed) {
+                    match src.next_frame_marked() {
+                        Ok((number, image)) => sink(CaptureEvent::Frame(CapturedFrame {
+                            seq: u64::from(number),
+                            status: FrameStatus::Complete,
+                            arrival: Instant::now(),
+                            delivery_ns: Some(0),
+                            dirty_rects: Vec::new(),
+                            image: Some(image),
+                        })),
+                        Err(e) => {
+                            sink(CaptureEvent::Stopped(os(e)));
+                            return;
+                        }
+                    }
+                    next += period;
+                    std::thread::sleep(next.saturating_duration_since(Instant::now()));
+                }
+            })
+            .map_err(|e| CaptureError::Os {
+                api: "spawn",
+                code: e.raw_os_error().map_or(0, i64::from),
+                message: e.to_string(),
+            })?;
+        self.thread = Some(thread);
         Ok(())
     }
 
     fn stop(&mut self) -> Result<(), CaptureError> {
+        self.stop.store(true, Ordering::Relaxed);
+        if let Some(t) = self.thread.take() {
+            t.join()
+                .map_err(|_| CaptureError::InvalidState("synthetic source panicked"))?;
+        }
         Ok(())
     }
 
@@ -123,7 +281,12 @@ mod tests {
 
     #[derive(Debug, Clone, PartialEq)]
     enum Rec {
-        Video { keyframe: bool, ts_us: u64 },
+        /// `sent_us`: the shared clock when the frame reached us.
+        Video {
+            keyframe: bool,
+            ts_us: u64,
+            sent_us: u64,
+        },
         Capture(CaptureStatus),
     }
 
@@ -136,6 +299,7 @@ mod tests {
             self.0.lock().unwrap().push(Rec::Video {
                 keyframe,
                 ts_us: capture_ts_us,
+                sent_us: remora_app::clock::monotonic_ns().unwrap() / 1000,
             });
         }
         fn capture(&self, status: CaptureStatus) {
@@ -172,6 +336,10 @@ mod tests {
         Wait(mpsc::Receiver<()>),
     }
 
+    /// The script's frames reach the backend this long after the
+    /// compositor displayed them.
+    const DISPLAYED_BEFORE_NS: i64 = 50_000_000;
+
     const W: u32 = 640;
     const H: u32 = 360;
 
@@ -205,7 +373,7 @@ mod tests {
                                     seq,
                                     status: FrameStatus::Complete,
                                     arrival: Instant::now(),
-                                    delivery_ns: Some(2_000_000),
+                                    delivery_ns: Some(DISPLAYED_BEFORE_NS),
                                     dirty_rects: Vec::new(),
                                     image: Some(src.next_frame().unwrap()),
                                 }));
@@ -240,7 +408,7 @@ mod tests {
     fn run(script: Vec<Step>) -> (Arc<Recorder>, Streamer) {
         let rec = Arc::new(Recorder::default());
         let out: Arc<dyn VideoOut> = rec.clone();
-        let s = Streamer::start(Scripted::new(script), 2_000_000, out).unwrap();
+        let s = Streamer::start(Scripted::new(script), out).unwrap();
         (rec, s)
     }
 
@@ -266,27 +434,27 @@ mod tests {
 
     #[test]
     fn frames_carry_their_display_time_on_the_shared_clock() {
-        let before = remora_app::clock::monotonic_ns().unwrap() / 1000;
         let (rec, s) = run(vec![Step::Frames(10)]);
         rec.wait_videos(10);
         s.stop();
-        let after = remora_app::clock::monotonic_ns().unwrap() / 1000;
-        let ts: Vec<u64> = rec
+        let ts: Vec<(u64, u64)> = rec
             .all()
             .iter()
             .filter_map(|r| match r {
-                Rec::Video { ts_us, .. } => Some(*ts_us),
+                Rec::Video { ts_us, sent_us, .. } => Some((*ts_us, *sent_us)),
                 Rec::Capture(_) => None,
             })
             .collect();
-        // Displayed 2 ms before arrival (the script's delivery_ns).
-        for t in &ts {
+        // Displayed 50 ms before the backend got it, so at least 50 ms
+        // before it was sent; and not long before (encoding is fast).
+        for (t, sent) in &ts {
+            let age = sent - t;
             assert!(
-                (before.saturating_sub(2_000)..=after).contains(t),
-                "{t} not in {before}..={after}"
+                (50_000..1_000_000).contains(&age),
+                "display time {age} µs before sending"
             );
         }
-        assert!(ts.windows(2).all(|w| w[0] < w[1]), "increasing: {ts:?}");
+        assert!(ts.windows(2).all(|w| w[0].0 < w[1].0), "increasing: {ts:?}");
     }
 
     /// T2's open item: "the first frame after resume is a keyframe".
@@ -339,13 +507,26 @@ mod tests {
     }
 
     #[test]
-    fn the_synthetic_source_streams_numbered_frames() {
+    fn the_synthetic_source_streams_at_its_rate_until_stopped() {
         let rec = Arc::new(Recorder::default());
         let out: Arc<dyn VideoOut> = rec.clone();
-        let cap = Box::new(SyntheticCapture::new(W, H, 120));
-        let s = Streamer::start(cap, 2_000_000, out).unwrap();
-        rec.wait_videos(20);
+        // The strip is 704 pixels wide: 640 × 360 would not hold it.
+        let cap = Box::new(SyntheticCapture::new(1281, 721, 120));
+        assert_eq!(cap.output_size(), (1280, 720), "even sizes");
+        let s = Streamer::start(cap, out).unwrap();
+        rec.wait_videos(1);
+        let first = Instant::now();
+        let at_first = rec.videos();
+        std::thread::sleep(Duration::from_millis(500));
+        let made = rec.videos() - at_first;
         s.stop();
+        // 120 fps for 0.5 s: about 60, never a free-running source.
+        let secs = first.elapsed().as_secs_f64();
+        assert!((40..=80).contains(&made), "{made} frames in {secs:.2} s");
         assert!(keyframes(&rec.all())[0]);
+        // Stopped means stopped.
+        let stopped = rec.videos();
+        std::thread::sleep(Duration::from_millis(100));
+        assert_eq!(rec.videos(), stopped, "frames after stop()");
     }
 }

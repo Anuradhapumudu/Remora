@@ -2,12 +2,14 @@
 //!
 //! Phase 3: `connect` runs the authenticated handshake against a host's
 //! connection code on loopback and shows the safety code. Phase 4: it
-//! decodes the video it receives (step 5); the window comes in step 6.
+//! decodes the video it receives (step 5) and shows it in a window (step
+//! 6), or only decodes it with `--no-window` (step 7a).
 //!
 //! Output lines (stable prefixes; the end-to-end tests read them):
 //! `safety code:`, `SESSION ACTIVE`, `rejected by the host`, `identity
 //! mismatch: ...`, `this device's identity changed ...`, `failed: ...`,
-//! `session ended`. Exit codes: see [`remora_app::cli::exit`].
+//! `session ended`, `video:` (decoder counts, at the end). Exit codes:
+//! see [`remora_app::cli::exit`].
 
 #![forbid(unsafe_code)]
 
@@ -122,13 +124,21 @@ fn runtime() -> anyhow::Result<tokio::runtime::Runtime> {
 #[cfg(target_os = "macos")]
 fn connect_command(args: ConnectArgs) -> anyhow::Result<u8> {
     use window::Event;
+    if args.no_window {
+        let display = Display {
+            show: None,
+            on_counters: Box::new(|_| {}),
+            close: None,
+        };
+        return runtime().and_then(|rt| rt.block_on(run_connect(args, display)));
+    }
     window::run(move |proxy, close| {
         let show_proxy = proxy.clone();
         let counters_proxy = proxy.clone();
         let display = Display {
-            show: Box::new(move |p| {
+            show: Some(Box::new(move |p| {
                 let _ = show_proxy.send_event(Event::Picture(p));
-            }),
+            })),
             on_counters: Box::new(move |c| {
                 let _ = counters_proxy.send_event(Event::Counters(c));
             }),
@@ -142,6 +152,7 @@ fn connect_command(args: ConnectArgs) -> anyhow::Result<u8> {
 /// Other systems: no window or decoder yet (Phase 6.5).
 #[cfg(not(target_os = "macos"))]
 fn connect_command(args: ConnectArgs) -> anyhow::Result<u8> {
+    let _ = args.no_window; // there is no window here either way
     let display = Display {
         show: decode::Show,
         on_counters: Box::new(|_| {}),
@@ -172,7 +183,6 @@ fn identity(file: Option<PathBuf>) -> anyhow::Result<()> {
 }
 
 async fn run_connect(args: ConnectArgs, display: Display) -> anyhow::Result<u8> {
-    let _ = args.no_window; // step 7 GREEN
     // The code is checked before any network traffic (A07: expiry).
     let code = ConnectionCode::parse(args.code.trim(), unix_now()).map_err(|e| {
         anyhow!(
@@ -264,9 +274,10 @@ async fn run_connect(args: ConnectArgs, display: Display) -> anyhow::Result<u8> 
         decode::Decoder::start(client.clone(), display.show).context("decoder thread")?;
     (display.on_counters)(decoder.counters());
     let code = session_loop(&client, &mut events, &mut decoder, display.close).await;
-    let (decoded, refused, failed, dropped) = decoder.finish();
+    let t = decoder.finish();
     println!(
-        "video: {decoded} frames decoded, {refused} refused, {failed} failed, {dropped} dropped"
+        "video: {} frames decoded, {} refused, {} waiting for a keyframe, {} failed, {} dropped",
+        t.decoded, t.refused, t.waiting, t.failed, t.dropped
     );
     drop(client);
     Ok(code)
