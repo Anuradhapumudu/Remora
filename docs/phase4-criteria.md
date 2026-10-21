@@ -237,7 +237,10 @@ The phase report lists the whole deferred list row by row (CLAUDE.md).
   frames (random bytes with a 32-byte canary, 600 frames at 60 fps): the
   seal does not depend on the codec; the VideoToolbox pipeline repeats it
   in step 7 (M1b, N1). **M8**: 10⁶ packets, 20 rotations, no counter
-  repeated. **Mutation:** the new session media code first left 17
+  repeated (CI's test job; the mutation job runs it with `M8_PACKETS` =
+  20 000, still 20 rotations, as it does A04 with 3 samples: 10⁶ per
+  mutant would put the session shard over its 120-minute limit; the media
+  mutants were re-run at 20 000 with the same result). **Mutation:** the new session media code first left 17
   survivors (key lifetime not pinned, current/next key not shown to
   survive the grace window, unusable-but-authentic datagrams and three
   drop counters never checked); new tests kill 16, one is equivalent

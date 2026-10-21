@@ -68,6 +68,10 @@ jobs:
           # here (any single sample shows it); the 200-sample criteria run
           # is the separate "A04 timing" workflow.
           A04_SAMPLES: "3"
+          # M8's 10^6-packet run takes ~15 s and would rerun for each of
+          # ~220 session mutants (over the job's time limit). 20 000 packets
+          # still rotate the key 20 times; CI's test job runs the full 10^6.
+          M8_PACKETS: "20000"
         run: |
           set +e
           cargo mutants --no-shuffle -p "$CRATE" -o mutants-out

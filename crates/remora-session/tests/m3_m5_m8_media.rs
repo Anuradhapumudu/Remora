@@ -288,16 +288,26 @@ fn m5_a_replayed_datagram_is_dropped_and_counted() {
 
 #[test]
 fn m8_counters_strictly_increase_and_never_repeat_over_a_million_packets() {
-    const PACKETS: u64 = 1_000_000;
-    const PER_KEY: u64 = 50_000;
+    // 10^6 as M8 asks. The mutation job (which reruns this once per mutant)
+    // sets M8_packets lower, like A04_SAMPLES: any count still shows a
+    // repeat or a missed rotation, the full count is CI's normal test run.
+    let packets: u64 = std::env::var("M8_packets")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(1_000_000);
+    assert!(
+        packets >= 20_000,
+        "M8_packets={packets}: too few to rotate 20 times"
+    );
+    let per_key = packets / 20;
     let h = device("host");
     let mut host = host_with(&h, vec![]);
-    host.set_key_rotation(PER_KEY);
+    host.set_key_rotation(per_key);
     let mut c = active(&mut host);
     let mut last: HashMap<u16, u64> = HashMap::new();
     let mut key_order: Vec<u16> = Vec::new();
     let data = [0x5a_u8];
-    for _ in 0..PACKETS {
+    for _ in 0..packets {
         let ds = send(&mut host, &mut c, false, &data);
         assert_eq!(ds.len(), 1);
         let h = header_of(&ds[0]);
@@ -331,13 +341,13 @@ fn m8_counters_strictly_increase_and_never_repeat_over_a_million_packets() {
     // the next one started: so no (key, nonce) pair repeated.
     assert_eq!(
         key_order,
-        (0..(PACKETS / PER_KEY) as u16).collect::<Vec<_>>()
+        (0..(packets / per_key) as u16).collect::<Vec<_>>()
     );
     for (&k, &c) in &last {
-        assert_eq!(c, PER_KEY - 1, "key {k} ended at counter {c}");
+        assert_eq!(c, per_key - 1, "key {k} ended at counter {c}");
     }
     let stats = c.viewer.media_stats();
-    assert_eq!(stats.frames, PACKETS);
+    assert_eq!(stats.frames, packets);
     assert_eq!(stats.dropped(), 0);
 }
 
