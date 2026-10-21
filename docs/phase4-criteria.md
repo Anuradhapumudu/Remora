@@ -480,6 +480,15 @@ The phase report lists the whole deferred list row by row (CLAUDE.md).
   and dropped as in the run) before the baseline, and the baseline and
   the final value each the median of three readings; the +8 MB limit
   unchanged.
+  *Update (`7be80a8`, the fixed measurement on the VM):* **FAIL, by the
+  new stability check**: footprint 70, 97, 99, 102, 109, then **61 MB**
+  after 500 … 3000 frames, and two readings with nothing in between
+  61.0 and 56.0 MB (`footprint unstable: 63963136 then 58720256 bytes`).
+  On this VM the process footprint swings by tens of MB on its own, so
+  it cannot measure an 8 MB growth there; a longer warm-up and medians
+  (the earlier proposal) would not fix that. The streaming e2e test
+  passed on the same run. Reported to the owner with a new proposal; no
+  threshold changed.
 * Standing rule (owner, 2026-10-20): **a UX change to a security-relevant
   flow needs its own attack test** — phase3-criteria §10.8, the F-UX1
   prompt-number confused-deputy case. Applies to the Phase 4 viewer window
