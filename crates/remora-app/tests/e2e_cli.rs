@@ -64,9 +64,20 @@ struct App {
 
 impl App {
     fn spawn(exe: &Path, args: &[&str]) -> App {
-        let mut child = Command::new(exe)
-            .args(args)
-            .env("RUST_LOG", "warn")
+        Self::spawn_env(exe, args, &[], None)
+    }
+
+    /// With extra environment variables and a working directory.
+    fn spawn_env(exe: &Path, args: &[&str], env: &[(&str, &Path)], cwd: Option<&Path>) -> App {
+        let mut cmd = Command::new(exe);
+        cmd.args(args).env("RUST_LOG", "warn");
+        for (k, v) in env {
+            cmd.env(k, v);
+        }
+        if let Some(d) = cwd {
+            cmd.current_dir(d);
+        }
+        let mut child = cmd
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -697,4 +708,142 @@ fn streaming_host_video_is_decoded_by_the_viewer() {
     // encoded between approval and the keyframe forced for this viewer.)
     assert_eq!(n("refused"), 0, "{line}");
     assert_eq!(n("failed"), 0, "{line}");
+}
+
+/// Every file under `dir` (recursively), unreadable entries skipped.
+#[cfg(target_os = "macos")]
+fn files_under(dir: &Path) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return out;
+    };
+    for e in entries.flatten() {
+        let p = e.path();
+        match e.file_type() {
+            Ok(t) if t.is_dir() => out.extend(files_under(&p)),
+            Ok(t) if t.is_file() => out.push(p),
+            _ => {}
+        }
+    }
+    out
+}
+
+/// An H.264 parameter set or keyframe slice after a start code: a file
+/// holding encoded video holds these.
+#[cfg(target_os = "macos")]
+fn holds_h264(bytes: &[u8]) -> bool {
+    bytes
+        .windows(4)
+        .any(|w| w[..3] == [0, 0, 1] && matches!(w[3] & 0x1f, 5 | 7 | 8) && w[3] & 0x80 == 0)
+}
+
+/// N2 (phase4-criteria §6, INV9): after a 10 s streaming session, the
+/// only files host and viewer wrote in their home, temp and working
+/// directories are their key files, and no file anywhere they wrote holds
+/// encoded video. Files under the macOS per-user temp and cache folders
+/// whose path names our binaries are listed and scanned the same way.
+#[cfg(target_os = "macos")]
+#[test]
+fn n2_a_streaming_session_leaves_only_the_key_files_on_disk() {
+    let started = std::time::SystemTime::now();
+    let dirs = |who: &str| -> Vec<(&'static str, PathBuf)> {
+        let base = tmp_dir().join(who);
+        [
+            "HOME",
+            "TMPDIR",
+            "XDG_CONFIG_HOME",
+            "XDG_CACHE_HOME",
+            "XDG_DATA_HOME",
+            "XDG_STATE_HOME",
+            "cwd",
+        ]
+        .into_iter()
+        .map(|k| {
+            let d = base.join(k);
+            std::fs::create_dir_all(&d).unwrap();
+            (k, d)
+        })
+        .collect()
+    };
+    let (host_dirs, viewer_dirs) = (dirs("host"), dirs("viewer"));
+    let env = |d: &[(&'static str, PathBuf)]| -> Vec<(&'static str, PathBuf)> {
+        d.iter().filter(|(k, _)| *k != "cwd").cloned().collect()
+    };
+    let cwd =
+        |d: &[(&'static str, PathBuf)]| d.iter().find(|(k, _)| *k == "cwd").unwrap().1.clone();
+    let (henv, venv) = (env(&host_dirs), env(&viewer_dirs));
+    let henv: Vec<(&str, &Path)> = henv.iter().map(|(k, v)| (*k, v.as_path())).collect();
+    let venv: Vec<(&str, &Path)> = venv.iter().map(|(k, v)| (*k, v.as_path())).collect();
+
+    let mut host = App::spawn_env(
+        &bins().0,
+        &["serve", "--source", "synthetic", "--width", "1280"],
+        &henv,
+        Some(&cwd(&host_dirs)),
+    );
+    let code = value(&host.expect("code:", 10));
+    let password = value(&host.expect("password:", 10));
+    let mut viewer = App::spawn_env(
+        &bins().1,
+        &["connect", &code, "--password", &password, "--no-window"],
+        &venv,
+        Some(&cwd(&viewer_dirs)),
+    );
+    let (id, _) = parse_prompt(&host.expect("prompt ", 15));
+    host.send(&format!("accept {id}"));
+    viewer.expect("SESSION ACTIVE", 10);
+    std::thread::sleep(Duration::from_secs(10));
+    host.send(&format!("disconnect {id}"));
+    let line = viewer.expect("video:", 10);
+    assert_eq!(viewer.wait_exit(10), 0);
+    host.send("quit");
+    let _ = host.wait_exit(10);
+    assert!(
+        !line.starts_with("video: 0 "),
+        "nothing was streamed: {line}"
+    );
+
+    let support = Path::new("Library/Application Support/Remora");
+    for (who, dirs, key) in [
+        ("host", &host_dirs, "host-identity.key"),
+        ("viewer", &viewer_dirs, "viewer-identity.key"),
+    ] {
+        let mut found: Vec<PathBuf> = dirs.iter().flat_map(|(_, d)| files_under(d)).collect();
+        found.sort();
+        let home = &dirs[0].1;
+        assert_eq!(
+            found,
+            vec![home.join(support).join(key)],
+            "{who} wrote other files"
+        );
+        for f in &found {
+            assert!(
+                !holds_h264(&std::fs::read(f).unwrap()),
+                "{} holds video",
+                f.display()
+            );
+        }
+    }
+
+    // The macOS per-user folders (not redirected by HOME/TMPDIR).
+    let mut ours = Vec::new();
+    for var in ["DARWIN_USER_TEMP_DIR", "DARWIN_USER_CACHE_DIR"] {
+        let out = Command::new("/usr/bin/getconf").arg(var).output().unwrap();
+        let dir = PathBuf::from(String::from_utf8_lossy(&out.stdout).trim());
+        for f in files_under(&dir) {
+            let named = f.to_string_lossy().contains("remora-");
+            let new = std::fs::metadata(&f)
+                .and_then(|m| m.modified())
+                .is_ok_and(|t| t >= started);
+            if named && new && !f.to_string_lossy().contains("remora-e2e-") {
+                assert!(
+                    !holds_h264(&std::fs::read(&f).unwrap_or_default()),
+                    "{} holds video",
+                    f.display()
+                );
+                ours.push(f);
+            }
+        }
+    }
+    println!("N2: {line}; files in the macOS per-user folders: {ours:?}");
 }

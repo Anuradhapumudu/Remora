@@ -27,6 +27,10 @@ wgpu = { workspace = true }
 winit = { workspace = true }
 pollster = { workspace = true }
 
+[dev-dependencies]
+rand_core = { workspace = true }
+remora-testkit = { workspace = true }
+
 [lints]
 workspace = true
 

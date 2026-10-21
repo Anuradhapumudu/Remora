@@ -593,6 +593,26 @@ impl SyntheticSource {
     /// this source made, marked or not (phase4-criteria P7).
     pub fn next_frame_marked(&mut self) -> Result<(u32, PixelBufferRef), CodecError> {
         let number = u32::try_from(self.frame).unwrap_or(u32::MAX);
+        let frame = self
+            .next_frame_with(|luma, stride, width, rows| {
+                crate::barcode::stamp(luma, stride, width, rows, number)
+            })
+            .map_err(|e| match e {
+                CodecError::Unsupported(_) => {
+                    CodecError::Unsupported("frame smaller than the barcode strip")
+                }
+                other => other,
+            })?;
+        Ok((number, frame))
+    }
+
+    /// The next frame, after `draw(luma, stride, width, rows)` changed its
+    /// luma plane (tests: a canary written into the pixels, phase4-criteria
+    /// N1). `draw` returns `false` if it could not draw: an error.
+    pub fn next_frame_with(
+        &mut self,
+        draw: impl FnOnce(&mut [u8], usize, usize, usize) -> bool,
+    ) -> Result<PixelBufferRef, CodecError> {
         let frame = self.next_frame()?;
         let buf = frame.as_cv();
         // SAFETY: valid buffer; flags 0 = read/write lock.
@@ -607,16 +627,14 @@ impl SyntheticSource {
                 // SAFETY: while locked, the luma plane is `stride * rows`
                 // writable bytes at `base`.
                 let luma = unsafe { std::slice::from_raw_parts_mut(base, len) };
-                crate::barcode::stamp(luma, stride, CVPixelBufferGetWidth(buf), rows, number)
+                draw(luma, stride, CVPixelBufferGetWidth(buf), rows)
             });
         // SAFETY: matched with the lock above.
         unsafe { CVPixelBufferUnlockBaseAddress(buf, CVPixelBufferLockFlags(0)) };
         if !stamped {
-            return Err(CodecError::Unsupported(
-                "frame smaller than the barcode strip",
-            ));
+            return Err(CodecError::Unsupported("the frame could not be drawn"));
         }
-        Ok((number, frame))
+        Ok(frame)
     }
 
     /// Returns the next frame: a vertical bar sweeping across a gradient, so

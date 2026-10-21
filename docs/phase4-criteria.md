@@ -354,6 +354,35 @@ The phase report lists the whole deferred list row by row (CLAUDE.md).
   sizes and ids to be printed: a `Debug` printing nothing leaks nothing
   too); `find_windows` 3, 2 caught, 1 unviable.
 
+* **Step 7b, M1b, M4, N1, N2 (2026-10-22).** `remora-viewer/tests/
+  m1b_m4_n1_wire.rs` (one test, its own process: it captures every
+  `tracing` event of the process at TRACE, quinn and rustls included —
+  new `LogCapture::global`): 600 real encoded frames (1280 × 720, a P7
+  barcode, a 32-byte random pixel canary and a band of fresh random pixels
+  in each) from `HostServer` through a recording UDP relay to `connect`.
+  **M1b:** 10 912 UDP payloads, 10.7 MB, **entropy 7.9989 bits/byte**, no
+  16-byte window of any encoded frame and no canary in any of them; the
+  checker finds a frame window spliced into a recorded payload (kept in
+  the test). **M4:** halfway, the relay re-sent the 100 oldest and 50
+  newest host→viewer packets: 600 of 600 frames delivered once each,
+  600 drawn, numbers strictly increasing. QUIC itself drops a re-sent UDP
+  packet (packet numbers are never reused), so the replay never reached
+  our media layer; our replay window is the second line and is tested
+  directly in M5 (sans-IO). **N1:** 45 565 log lines at TRACE, no frame
+  window (raw, hex, byte list; new testkit `Windows16`) and no canary.
+  **N2** (`e2e_cli` `n2_…`, the real binaries, each with its own `HOME`,
+  `TMPDIR`, `XDG_*` and working directory, 10 s of streaming, 599 frames
+  decoded): the only files written are the two key files, and no file
+  holds H.264 parameter sets or keyframe slices; no file under the macOS
+  per-user temp and cache folders names our binaries (no window, so no
+  Metal shader cache). N2 cannot look for the pixel canary or encoded
+  frames *inside* the binaries' files (the test does not see the host's
+  frames); it checks the file list and H.264 headers, while N1 does the
+  window check in-process. **Plants, each seen failing then removed:** a
+  `trace!` of each received frame's bytes in `remora-net` (N1), every
+  frame delivered twice (M4), the viewer writing each frame to
+  `frame.bin` in its working directory (N2).
+
 ## 12. Changes to criteria
 
 * **2026-10-19 — owner approval.** R1–R5 approved as proposed. R1 and R2 are
