@@ -61,7 +61,7 @@ impl ProfileInfo {
 }
 
 /// Removes emulation-prevention bytes (`00 00 03` → `00 00`) to get the raw payload.
-fn unescape_rbsp(nal: &[u8]) -> Vec<u8> {
+pub(crate) fn unescape_rbsp(nal: &[u8]) -> Vec<u8> {
     let mut out = Vec::with_capacity(nal.len());
     let mut zeros = 0;
     for &b in nal {
@@ -76,27 +76,30 @@ fn unescape_rbsp(nal: &[u8]) -> Vec<u8> {
 }
 
 /// Minimal MSB-first bit reader with Exp-Golomb support; every read is bounds-checked.
-struct Bits<'a> {
+pub(crate) struct Bits<'a> {
     data: &'a [u8],
     pos: usize,
 }
 
-impl Bits<'_> {
-    fn bit(&mut self) -> Option<u32> {
+impl<'a> Bits<'a> {
+    pub(crate) fn new(data: &'a [u8]) -> Self {
+        Self { data, pos: 0 }
+    }
+    pub(crate) fn bit(&mut self) -> Option<u32> {
         let byte = *self.data.get(self.pos / 8)?;
         let v = (byte >> (7 - self.pos % 8)) & 1;
         self.pos += 1;
         Some(u32::from(v))
     }
-    fn bits(&mut self, n: u32) -> Option<u32> {
+    pub(crate) fn bits(&mut self, n: u32) -> Option<u32> {
         (0..n).try_fold(0u32, |acc, _| Some((acc << 1) | self.bit()?))
     }
-    fn skip(&mut self, n: usize) -> Option<()> {
+    pub(crate) fn skip(&mut self, n: usize) -> Option<()> {
         self.pos = self.pos.checked_add(n)?;
         (self.pos <= self.data.len() * 8).then_some(())
     }
     /// Unsigned Exp-Golomb `ue(v)`; rejects codes longer than 31 bits.
-    fn ue(&mut self) -> Option<u32> {
+    pub(crate) fn ue(&mut self) -> Option<u32> {
         let mut zeros = 0;
         while self.bit()? == 0 {
             zeros += 1;
@@ -105,6 +108,11 @@ impl Bits<'_> {
             }
         }
         Some((1u32 << zeros) - 1 + self.bits(zeros)?)
+    }
+    /// Signed Exp-Golomb `se(v)`.
+    pub(crate) fn se(&mut self) -> Option<i64> {
+        let k = i64::from(self.ue()?);
+        Some(if k % 2 == 1 { (k + 1) / 2 } else { -(k / 2) })
     }
 }
 

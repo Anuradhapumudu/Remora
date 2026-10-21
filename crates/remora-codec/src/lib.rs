@@ -12,12 +12,13 @@
 use std::time::{Duration, Instant};
 
 pub mod bitstream;
+pub mod h264;
 mod sys;
 
 #[cfg(target_os = "macos")]
 pub use sys::macos::{
-    EncoderInfo, Probe444, PropertyReport, SyntheticSource, VtEncoder, list_encoders, probe_444,
-    supported_properties,
+    DecodedFrame, EncoderInfo, Probe444, PropertyReport, SyntheticSource, VtDecoder, VtEncoder,
+    list_encoders, probe_444, supported_properties,
 };
 
 /// Video codecs Remora can produce.
@@ -170,6 +171,39 @@ pub enum CodecError {
     /// Not available on this machine / OS.
     #[error("not supported: {0}")]
     Unsupported(&'static str),
+}
+
+/// Why a frame produced no picture. **Every** case means the decoder needs
+/// a keyframe before it can show anything correct again, so the viewer
+/// asks the host for one (phase4-criteria M7).
+#[derive(Debug, thiserror::Error)]
+pub enum DecodeError {
+    /// Refused before decoding (malformed, too large, or waiting for a
+    /// keyframe): no byte of it reached the decoder.
+    #[error("refused: {0}")]
+    Refused(h264::Refusal),
+    /// The decoder could not be configured with the keyframe's SPS/PPS.
+    #[error("decoder configuration failed: {0}")]
+    Configure(CodecError),
+    /// The decoder reported an error for this frame.
+    #[error("decode failed: {0}")]
+    Decode(CodecError),
+    /// The decoder returned no picture, or one larger than the SPS said.
+    #[error("decoder returned no usable picture")]
+    NoPicture,
+}
+
+/// What a decoder did with the frames it was given.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct DecodeStats {
+    /// Frames decoded to a picture.
+    pub decoded: u64,
+    /// Frames refused before decoding ([`DecodeError::Refused`]).
+    pub refused: u64,
+    /// Frames the decoder failed on (configure, decode, no picture).
+    pub failed: u64,
+    /// Decoder sessions created (one per accepted change of SPS/PPS).
+    pub sessions_created: u64,
 }
 
 #[cfg(test)]

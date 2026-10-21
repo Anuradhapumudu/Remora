@@ -1,4 +1,4 @@
-//! macOS backend: VideoToolbox hardware encoder.
+//! macOS backend: VideoToolbox hardware encoder and decoder.
 //!
 //! Configuration follows Apple's documented recipe for "ultra-low-latency
 //! conferencing and cloud gaming" (VTCompressionProperties.h, SDK 27):
@@ -51,9 +51,10 @@ use remora_capture::PixelBufferRef;
 use crate::bitstream::{
     ProfileInfo, START_CODE, h264_sps_profile, hevc_sps_profile, length_prefixed_to_annexb,
 };
+use crate::h264::{DecodeGate, SizeLimit};
 use crate::{
-    Codec, CodecError, EncodedFrame, EncoderConfig, EncoderEvent, EncoderSink, H264Profile,
-    TuneValue,
+    Codec, CodecError, DecodeError, DecodeStats, EncodedFrame, EncoderConfig, EncoderEvent,
+    EncoderSink, H264Profile, TuneValue,
 };
 
 /// Submit timestamps are kept for this many in-flight frames (power of two).
@@ -903,4 +904,65 @@ fn first_sps_profile(codec: Codec, annexb: &[u8]) -> Option<ProfileInfo> {
                 Codec::Hevc => hevc_sps_profile(nal),
             }
         })
+}
+
+// ───────────────────────── Decoder (Phase 4 step 5) ─────────────────────────
+
+/// One decoded picture (NV12, IOSurface-backed). `Debug` prints its size
+/// and id, never pixels (INV9).
+pub struct DecodedFrame {
+    /// The video frame it came from (`frame_id` on the wire).
+    pub frame_id: u32,
+    image: PixelBufferRef,
+}
+
+impl DecodedFrame {
+    /// The picture.
+    pub fn image(&self) -> &PixelBufferRef {
+        &self.image
+    }
+}
+
+impl std::fmt::Debug for DecodedFrame {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DecodedFrame")
+            .field("frame_id", &self.frame_id)
+            .field("width", &self.image.width())
+            .field("height", &self.image.height())
+            .finish()
+    }
+}
+
+/// Hardware H.264 decoder behind a [`DecodeGate`]: no frame reaches
+/// VideoToolbox unless the gate admitted it, and the decoder is only ever
+/// configured with parameter sets the gate checked (phase4-criteria M7).
+///
+/// Decoding is synchronous: VideoToolbox calls the output callback before
+/// `VTDecompressionSessionDecodeFrame` returns when no asynchronous flag is
+/// set (VTDecompressionSession.h, SDK 27). Run it on its own thread.
+pub struct VtDecoder {
+    gate: DecodeGate,
+    stats: DecodeStats,
+}
+
+impl VtDecoder {
+    /// A decoder for pictures up to `limit`. Nothing is created until the
+    /// first keyframe passes the gate.
+    pub fn new(limit: SizeLimit) -> Self {
+        Self {
+            gate: DecodeGate::new(limit),
+            stats: DecodeStats::default(),
+        }
+    }
+
+    /// Decodes one Annex B frame. On any error the viewer needs a keyframe.
+    pub fn decode(&mut self, frame_id: u32, annexb: &[u8]) -> Result<DecodedFrame, DecodeError> {
+        let _ = (frame_id, annexb, &mut self.gate);
+        Err(DecodeError::NoPicture) // RED: not yet
+    }
+
+    /// Counters.
+    pub fn stats(&self) -> DecodeStats {
+        self.stats
+    }
 }

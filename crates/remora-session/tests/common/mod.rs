@@ -324,6 +324,11 @@ pub fn app_envelopes() -> Vec<(&'static str, Vec<u8>)> {
                 reason: 1,
             })),
         ),
+        // Phase 4 step 5: viewer → host keyframe request, Active only.
+        (
+            "recovery request",
+            control(control::Kind::Recovery(RecoveryRequest {})),
+        ),
     ]
 }
 

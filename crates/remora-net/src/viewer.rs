@@ -66,6 +66,7 @@ pub struct ViewerClient {
 pub(crate) enum ViewerCommand {
     Input(remora_proto::messages::Input),
     Stats(tokio::sync::oneshot::Sender<MediaStats>),
+    RequestKeyframe,
     Disconnect,
 }
 
@@ -185,6 +186,9 @@ async fn drive(
             },
             cmd = commands.recv() => match cmd {
                 Some(ViewerCommand::Input(input)) => pending = session.send_input(input).into_iter().collect(),
+                Some(ViewerCommand::RequestKeyframe) => {
+                    pending = session.request_keyframe(now(start)).into_iter().collect();
+                }
                 Some(ViewerCommand::Stats(reply)) => {
                     let _ = reply.send(session.media_stats());
                 }
@@ -199,6 +203,12 @@ impl ViewerClient {
     /// Sends an input event (dropped unless the session is Active).
     pub fn send_input(&self, input: remora_proto::messages::Input) {
         let _ = self.commands.send(ViewerCommand::Input(input));
+    }
+
+    /// The decoder needs a keyframe (phase4-criteria M7). Sent only while
+    /// Active, at most once per 500 ms (`KEYFRAME_REQUEST_INTERVAL_MS`).
+    pub fn request_keyframe(&self) {
+        let _ = self.commands.send(ViewerCommand::RequestKeyframe);
     }
 
     /// What happened to the media datagrams received so far (`None` once

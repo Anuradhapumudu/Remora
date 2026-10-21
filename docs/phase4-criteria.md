@@ -303,6 +303,29 @@ The phase report lists the whole deferred list row by row (CLAUDE.md).
      has no media key. What Phase 4 can check, and does: every **session**
      has its own key (`m8_every_session_has_its_own_key`). The viewer-key
      half moves to D-1b.
+* **2026-10-21 — step 5 plan, approved by the owner ("ok"); no threshold
+  changes.**
+  1. *Codec:* Phase 4 streams and decodes **H.264 only** (Phase 2: the
+     faster low-latency hardware encoder on the M4). HEVC decode is roadmap
+     D-32.
+  2. *M7's "negotiated size":* no `Capabilities` message exists yet, so
+     nothing is negotiated. The viewer enforces its **own** limit
+     (`SizeLimit`, ≤ 7680 × 4320) on every SPS before the decoder is
+     configured; sending it to the host is roadmap D-31. The limit applies
+     to the **coded** size too (what the decoder allocates), not only the
+     cropped one.
+  3. *"Keyframe request":* new control message `RecoveryRequest`
+     (protocol.md §5 tag 9, no fields yet), viewer → host, Active only. The
+     viewer sends at most one per 500 ms; the host forces at most one
+     keyframe per 500 ms for all viewers together, so a viewer cannot make
+     the stream keyframes only.
+  4. *Accepted subset:* the viewer accepts only what Remora's encoder
+     produces: Annex B, NAL types 1, 5, 6, 7, 8, 9; SPS/PPS only (and
+     always) in a keyframe; 8-bit 4:2:0 Baseline/Main/High. Everything
+     else is refused before the decoder sees it.
+  5. *M7 memory bound,* fixed before measuring: footprint growth ≤ 8 MB
+     over 3000 hostile frames after a 300-frame warm-up, in its own test
+     process.
 * Standing rule (owner, 2026-10-20): **a UX change to a security-relevant
   flow needs its own attack test** — phase3-criteria §10.8, the F-UX1
   prompt-number confused-deputy case. Applies to the Phase 4 viewer window

@@ -108,6 +108,12 @@ pub struct StreamState {
     pub reason: u32,
 }
 
+/// Viewer → host: the viewer's decoder cannot continue (a frame was lost,
+/// refused or failed to decode); send a keyframe (protocol.md §5 tag 9).
+/// Phase 4 carries no fields; lost frame ids (for LTR recovery) come later.
+#[derive(Clone, Copy, PartialEq, prost::Message)]
+pub struct RecoveryRequest {}
+
 /// Mouse button press/release at normalised coordinates.
 #[derive(Clone, Copy, PartialEq, prost::Message)]
 pub struct MouseButton {
@@ -140,7 +146,7 @@ pub struct Key {
 #[derive(Clone, PartialEq, prost::Message)]
 pub struct Control {
     /// The message.
-    #[prost(oneof = "control::Kind", tags = "2, 3, 4, 5, 6, 14, 16")]
+    #[prost(oneof = "control::Kind", tags = "2, 3, 4, 5, 6, 9, 14, 16")]
     pub kind: Option<control::Kind>,
 }
 
@@ -164,6 +170,9 @@ pub mod control {
         /// Media key announcement.
         #[prost(message, tag = "6")]
         MediaKey(super::MediaKeyAnnounce),
+        /// Keyframe request (viewer → host, Active only).
+        #[prost(message, tag = "9")]
+        Recovery(super::RecoveryRequest),
         /// Orderly close.
         #[prost(message, tag = "14")]
         Bye(super::Goodbye),
@@ -306,7 +315,9 @@ pub fn decode_envelope(bytes: &[u8]) -> Result<Envelope, MessageError> {
                 // Datagram headers carry the id as u16 (protocol.md §6).
                 require(k.key_id <= u32::from(u16::MAX), "media key id")?;
             }
-            Some(control::Kind::Pending(_) | control::Kind::Bye(_)) => {}
+            Some(
+                control::Kind::Pending(_) | control::Kind::Bye(_) | control::Kind::Recovery(_),
+            ) => {}
             Some(control::Kind::StreamState(st)) => require(
                 st.paused == (st.reason != 0),
                 "stream state: paused needs a reason, resumed has none",

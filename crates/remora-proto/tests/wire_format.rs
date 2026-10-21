@@ -7,8 +7,8 @@ use remora_proto::frame::{FrameDecoder, FrameError, encode_frame};
 use remora_proto::limits::HANDSHAKE_FRAME_MAX;
 use remora_proto::messages::{
     Control, Envelope, HostHello, Input, Key, MediaKeyAnnounce, MessageError, Mode, MouseButton,
-    SasReveal, SessionAccept, SessionReject, StreamState, ViewerHello, control, decode_envelope,
-    decode_host_hello, decode_viewer_hello, envelope, input,
+    RecoveryRequest, SasReveal, SessionAccept, SessionReject, StreamState, ViewerHello, control,
+    decode_envelope, decode_host_hello, decode_viewer_hello, envelope, input,
 };
 
 // ── framing ──────────────────────────────────────────────────────────────────
@@ -356,4 +356,19 @@ fn a_media_key_announcement_never_prints_its_key() {
     );
     assert!(!env.contains("171"), "{env}");
     assert!(env.contains("[redacted]"), "{env}");
+}
+
+/// Phase 4 step 5: the keyframe request is control tag 9 (protocol.md §5),
+/// carries no fields, and is decoded like every other control message.
+#[test]
+fn a_recovery_request_is_control_tag_9() {
+    let env = ctl(control::Kind::Recovery(RecoveryRequest {}));
+    // Envelope field 1 (control), then Control field 9, length 0.
+    assert_eq!(env, [0x0A, 0x02, 0x4A, 0x00]);
+    assert!(matches!(
+        decode_envelope(&env).unwrap().msg,
+        Some(envelope::Msg::Control(Control {
+            kind: Some(control::Kind::Recovery(_))
+        }))
+    ));
 }

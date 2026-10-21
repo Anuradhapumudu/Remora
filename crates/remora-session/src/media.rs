@@ -32,6 +32,11 @@ pub const KEY_LIFETIME_MS: u64 = 3_600_000;
 /// How long a replaced key still opens packets, counted from the first
 /// packet that opened under a newer key (protocol.md §6).
 pub const KEY_GRACE_MS: u64 = 2_000;
+/// Keyframe requests are answered at most this often (phase4-criteria
+/// M7): a viewer asks only once per interval, and the host forces at most
+/// one keyframe per interval for all viewers together, so a hostile viewer
+/// cannot turn the stream into keyframes only.
+pub const KEYFRAME_REQUEST_INTERVAL_MS: u64 = 500;
 /// The one video stream of Phase 4 (`stream_id`, `layer_id` 0).
 pub const VIDEO_STREAM: u16 = 0;
 

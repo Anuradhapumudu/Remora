@@ -12,6 +12,8 @@ on:
       - "crates/remora-proto/**"
       - "crates/remora-crypto/**"
       - "crates/remora-session/**"
+      - "crates/remora-codec/src/h264.rs"
+      - "crates/remora-codec/src/bitstream.rs"
       - "fuzz/**"
 
 permissions:
@@ -36,6 +38,7 @@ jobs:
             media_open,
             session_host,
             video_reassembly,
+            h264_frame,
           ]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

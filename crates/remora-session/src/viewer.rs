@@ -262,6 +262,14 @@ impl ViewerSession {
         est.encrypt(&env).ok().map(ViewerAction::Send)
     }
 
+    /// The decoder needs a keyframe (a frame was refused or failed to
+    /// decode, phase4-criteria M7): asks the host for one. Active only, and
+    /// at most once per [`KEYFRAME_REQUEST_INTERVAL_MS`](crate::media::KEYFRAME_REQUEST_INTERVAL_MS).
+    pub fn request_keyframe(&mut self, now: Millis) -> Option<ViewerAction> {
+        let _ = now;
+        None // RED: not yet
+    }
+
     /// One-click disconnect from any state.
     pub fn disconnect(&mut self) -> Vec<ViewerAction> {
         let mut out = Vec::new();
@@ -440,7 +448,8 @@ fn on_pending(
             control::Kind::MediaKey(_) | control::Kind::StreamState(_) => {
                 Err(Some(FailReason::ProtocolViolation(Violation::BeforeActive)))
             }
-            control::Kind::SasReveal(_) => {
+            // A keyframe request is viewer → host only.
+            control::Kind::SasReveal(_) | control::Kind::Recovery(_) => {
                 Err(Some(FailReason::ProtocolViolation(Violation::WrongRole)))
             }
         },

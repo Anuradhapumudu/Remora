@@ -1,0 +1,169 @@
+//! M7 (phase4-criteria §5) on the real decoder: a malicious authenticated
+//! host sends a hostile bitstream to VideoToolbox through `VtDecoder`.
+//!
+//! PASS if: sizes over the limit are refused **before** a decoder session
+//! is created; every decoder error comes back as an error (so the viewer
+//! asks for a keyframe); nothing crashes; no single decode call takes more
+//! than 5 s (watchdog); and a real keyframe afterwards decodes again.
+//! Memory: `m7_decode_memory.rs` (its own process, so other tests'
+//! allocations do not count).
+//!
+//! Real frames come from the hardware encoder (`VtEncoder` +
+//! `SyntheticSource`); GitHub's macOS runner hardware-encodes (step 1).
+#![cfg(target_os = "macos")]
+#![allow(clippy::unwrap_used, clippy::expect_used)] // test code: a panic is how a test fails
+
+mod common;
+
+use common::vt::*;
+use common::*;
+use remora_codec::h264::{Refusal, SizeLimit, StreamError};
+use remora_codec::{DecodeError, VtDecoder};
+
+#[test]
+fn m7_real_stream_round_trip_decodes_every_frame() {
+    let frames = encode(1280, 720, 60, 0);
+    let dec = VtDecoder::new(SizeLimit::new(1280, 720));
+    let (dec, results) = decode_all(dec, frames.into_iter().map(|f| f.1).collect());
+    for (i, r) in results.iter().enumerate() {
+        assert_eq!(r.as_ref(), Ok(&(1280, 720)), "frame {i}");
+    }
+    let s = dec.stats();
+    assert_eq!((s.decoded, s.failed, s.refused), (60, 0, 0), "{s:?}");
+    assert_eq!(s.sessions_created, 1, "{s:?}");
+}
+
+#[test]
+fn m7_oversized_sps_is_refused_before_the_decoder_is_configured() {
+    // A real 1080p keyframe to a viewer whose limit is 720p.
+    let frames = encode(1920, 1080, 2, 0);
+    let mut dec = VtDecoder::new(SizeLimit::new(1280, 720));
+    let r = dec.decode(0, &frames[0].1);
+    assert!(
+        matches!(
+            r,
+            Err(DecodeError::Refused(Refusal::Malformed(
+                StreamError::TooLarge { .. }
+            )))
+        ),
+        "{r:?}"
+    );
+    // Over 8K for any viewer.
+    let mut dec8k = VtDecoder::new(SizeLimit::default());
+    let r = dec8k.decode(0, &keyframe(&Sps::sized(481, 270)));
+    assert!(
+        matches!(
+            r,
+            Err(DecodeError::Refused(Refusal::Malformed(
+                StreamError::TooLarge { .. }
+            )))
+        ),
+        "{r:?}"
+    );
+    for d in [&dec, &dec8k] {
+        let s = d.stats();
+        assert_eq!(s.sessions_created, 0, "a decoder was configured: {s:?}");
+        assert_eq!((s.refused, s.decoded), (1, 0), "{s:?}");
+    }
+    // The P frame after a refused keyframe is refused too, unread.
+    let r = dec.decode(1, &frames[1].1);
+    assert!(
+        matches!(r, Err(DecodeError::Refused(Refusal::WaitingForKeyframe))),
+        "{r:?}"
+    );
+}
+
+#[test]
+fn m7_random_bytes_and_random_slices_never_crash_or_hang() {
+    let real = encode(640, 360, 4, 0);
+    let (sps, pps) = parameter_sets(&real[0].1);
+    let mut x = 0x2545_F491_4F6C_DD1D;
+    let mut inputs = Vec::new();
+    for i in 0..600 {
+        let len = 1 + (xorshift(&mut x) % 4000) as usize;
+        let body = random_bytes(&mut x, len);
+        inputs.push(match i % 4 {
+            // Plain random bytes.
+            0 => body,
+            // A keyframe with real SPS/PPS and a random IDR slice: reaches
+            // VideoToolbox, which must cope.
+            1 => {
+                let mut idr = vec![0x65];
+                idr.extend_from_slice(&body);
+                annexb(&[&sps, &pps, &idr])
+            }
+            // A random P slice after it.
+            2 => {
+                let mut p = vec![0x41];
+                p.extend_from_slice(&body);
+                annexb(&[&p])
+            }
+            // A real frame now and then, so the decoder is in every state.
+            _ => real[i % real.len()].1.clone(),
+        });
+    }
+    inputs.push(real[0].1.clone());
+    let (dec, results) = decode_all(VtDecoder::new(SizeLimit::default()), inputs);
+    assert_eq!(
+        results.last().unwrap().as_ref(),
+        Ok(&(640, 360)),
+        "a real keyframe decodes after the hostile run"
+    );
+    let s = dec.stats();
+    assert!(s.refused + s.failed > 0, "nothing was rejected: {s:?}");
+    println!("M7 random: {s:?}");
+}
+
+#[test]
+fn m7_truncated_nal_units_never_crash_or_hang() {
+    let real = encode(640, 360, 8, 0);
+    let mut inputs = Vec::new();
+    for (k, p) in [(0, 1), (0, 5)] {
+        let key = &real[k].1;
+        let next = &real[p].1;
+        for cut in (5..key.len()).step_by(1 + key.len() / 97) {
+            inputs.push(key[..cut].to_vec());
+            inputs.push(next.clone());
+        }
+        for cut in (1..next.len()).step_by(1 + next.len() / 31) {
+            inputs.push(key.clone());
+            inputs.push(next[..cut].to_vec());
+        }
+    }
+    inputs.push(real[0].1.clone());
+    let n = inputs.len();
+    let (dec, results) = decode_all(VtDecoder::new(SizeLimit::default()), inputs);
+    assert_eq!(results[n - 1].as_ref(), Ok(&(640, 360)));
+    let s = dec.stats();
+    assert!(s.refused + s.failed > 0, "{s:?}");
+    println!("M7 truncated: {} inputs, {s:?}", n);
+}
+
+#[test]
+fn m7_after_a_decode_error_the_decoder_waits_for_a_keyframe() {
+    let real = encode(640, 360, 3, 0);
+    let (sps, pps) = parameter_sets(&real[0].1);
+    let mut dec = VtDecoder::new(SizeLimit::default());
+    dec.decode(0, &real[0].1).unwrap();
+    // An IDR slice made of zero bytes (no emulation prevention needed:
+    // 0x00 runs are framing, so use 0x01) that the decoder rejects.
+    let bad = annexb(&[&sps, &pps, &[0x65, 0x01, 0x01, 0x01]]);
+    let r = dec.decode(1, &bad);
+    assert!(r.is_err(), "decoder accepted a 3-byte IDR slice: {r:?}");
+    let r = dec.decode(2, &real[1].1);
+    assert!(
+        matches!(r, Err(DecodeError::Refused(Refusal::WaitingForKeyframe))),
+        "P frame after an error must wait for a keyframe: {r:?}"
+    );
+    assert!(dec.decode(3, &real[0].1).is_ok());
+    assert!(dec.decode(4, &real[1].1).is_ok());
+}
+
+#[test]
+fn m7_a_decoded_frame_never_prints_its_pixels() {
+    let real = encode(640, 360, 1, 0);
+    let mut dec = VtDecoder::new(SizeLimit::default());
+    let f = dec.decode(42, &real[0].1).unwrap();
+    let s = format!("{f:?}");
+    assert_eq!(s, "DecodedFrame { frame_id: 42, width: 640, height: 360 }");
+}
