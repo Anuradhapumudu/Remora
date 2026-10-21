@@ -20,6 +20,7 @@ fn real_workspace_obeys_unsafe_dependency_and_boundary_policies() {
         "crates/remora-capture/src/sys/macos.rs",
         "crates/remora-crypto/Cargo.toml",
         "crates/remora-host/src/main.rs",
+        "crates/remora-net/src/media.rs",
         "crates/remora-testkit/src/sys/count_alloc.rs",
         "spikes/windows-spike/src/win.rs",
     ] {
@@ -81,6 +82,23 @@ fn planted_workspace() -> std::io::Result<PathBuf> {
             "crates/remora-capture/src/sys/macos.rs.extra.rs",
             "const STOPPED: i64 = -3815;\n",
         ), // allowed: the capture backend may name its OS
+        // M2 (phase4-criteria §5): quinn's datagram send in one file only.
+        (
+            "crates/remora-net/src/host.rs",
+            "// send_datagram lives in media.rs\nfn s(c: &C, b: B) { let _ = c.send_datagram(b); }\n",
+        ),
+        (
+            "crates/remora-viewer/src/main.rs",
+            "async fn w(c: &C, b: B) { c.send_datagram_wait(b).await; }\n",
+        ),
+        (
+            "crates/remora-net/src/media.rs",
+            "fn send(c: &C, b: B) { let _ = c.send_datagram(b); }\n",
+        ), // allowed: the one media send path
+        (
+            "crates/remora-net/tests/m5_inject.rs",
+            "fn attack(c: &C, b: B) { let _ = c.send_datagram(b); }\n",
+        ), // allowed: a test playing a hostile peer
     ];
     for (path, content) in files {
         let p = root.join(path);
@@ -117,6 +135,11 @@ fn planted_violations_are_all_found_and_nothing_else() {
                 "remora-testkit as a non-dev dependency"
             ),
             (
+                "crates/remora-net/src/host.rs".to_owned(),
+                2,
+                "QUIC datagram send outside remora-net/src/media.rs"
+            ),
+            (
                 "crates/remora-net/src/lib.rs".to_owned(),
                 1,
                 "unsafe outside src/sys"
@@ -135,6 +158,11 @@ fn planted_violations_are_all_found_and_nothing_else() {
                 "crates/remora-session/src/capture.rs".to_owned(),
                 3,
                 "OS-specific name in remora-session / remora-net"
+            ),
+            (
+                "crates/remora-viewer/src/main.rs".to_owned(),
+                1,
+                "QUIC datagram send outside remora-net/src/media.rs"
             ),
         ]
     );

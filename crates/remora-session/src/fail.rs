@@ -166,6 +166,10 @@ pub enum Violation {
     /// A transport frame failed to decrypt (A10).
     #[error("transport frame failed to authenticate")]
     TransportAuth,
+    /// A media key announcement out of order or beyond the limits, or a
+    /// sender that used up its key ids (protocol.md §6).
+    #[error("media key: {0}")]
+    MediaKey(&'static str),
 }
 
 impl FailReason {

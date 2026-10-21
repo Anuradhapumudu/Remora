@@ -23,6 +23,8 @@ examine_globs = [
     # exporter / close codes, and the A04 timing floor. TLS setup and the
     # viewer driver are plumbing whose failures the session layer catches.
     "crates/remora-net/src/host.rs",
+    # The only media send path (phase4-criteria M2).
+    "crates/remora-net/src/media.rs",
     "crates/remora-net/src/wire.rs",
     "crates/remora-net/src/lib.rs",
     # Device key file: owner-only creation and refusal rules are a control.
@@ -52,4 +54,10 @@ exclude_re = [
     # `completed`: `<` == `<=`. It is that function's only comparison, so
     # this pattern cannot hide any other mutant.
     'replace < with <= in Reassembler::abandon_older',
+    # EQUIVALENT: in MediaIn::datagram, `key_id > newest` vs `>=`: when equal,
+    # the loop that follows only retires keys below key_id that are not yet
+    # retiring, and those were all retired when key_id first opened a packet
+    # (key ids are announced strictly increasing). It is that function's
+    # only `>`, so this pattern cannot hide any other mutant.
+    'replace > with >= in MediaIn::datagram',
 ]

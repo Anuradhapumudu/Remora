@@ -53,7 +53,7 @@ fn viewer_reason(acts: &[ViewerAction]) -> Option<FailReason> {
 fn no_viewer_delivery(acts: &[ViewerAction]) -> bool {
     !acts
         .iter()
-        .any(|a| matches!(a, ViewerAction::Deliver(_) | ViewerAction::Active))
+        .any(|a| matches!(a, ViewerAction::Video(_) | ViewerAction::Active))
 }
 
 // ------------------------------------------------------------ host side --
@@ -398,21 +398,22 @@ fn a21_host_sending_input_to_the_viewer_in_active_is_wrong_role() {
             "{what}"
         );
     }
-    // A media key AFTER accept is legitimate and delivered.
+    // A media key AFTER accept is legitimate: installed inside the session
+    // (it never reaches the application), and the session goes on.
     let mk = e.est.encrypt(&app_envelopes()[2].1).unwrap();
     let acts = e.viewer.on_frame(&mk, T0, &mut OsRng);
-    assert!(acts.iter().any(|a| matches!(
-        a,
-        ViewerAction::Deliver(remora_session::AppMessage::MediaKey(_))
-    )));
+    assert!(acts.is_empty(), "{acts:?}");
+    assert_eq!(e.viewer.state(), State::Active);
 }
 
 #[test]
-fn a20_viewer_datagrams_before_active_close_the_session() {
+fn a20_viewer_datagrams_during_the_handshake_close_the_session() {
+    // No host can have sent media before the safety code is even shown.
     let (h, v) = (device("host"), device("viewer"));
     let otp = remora_crypto::secret::Otp::parse("123456").unwrap();
-    let mut e = evil_host_viewer_pending(&v, &h, &otp);
-    let acts = e.viewer.on_datagram(&[1u8; 64]);
+    let (mut e, _) = evil_host_viewer_awaiting_reveal(&v, &h, &otp);
+    assert_eq!(e.viewer.state(), State::SasReveal);
+    let acts = e.viewer.on_datagram(&[1u8; 64], T0);
     assert_eq!(viewer_close(&acts), Some(CloseCode::ProtocolViolation));
     assert_eq!(
         viewer_reason(&acts),
@@ -420,6 +421,22 @@ fn a20_viewer_datagrams_before_active_close_the_session() {
             Violation::DatagramBeforeActive
         ))
     );
+}
+
+#[test]
+fn m3_viewer_datagrams_while_pending_are_dropped_unread() {
+    // Changed in Phase 4 (phase4-criteria M3, §12 2026-10-21): the host
+    // approves, then streams; a datagram can overtake the SessionAccept on
+    // the ordered stream, so closing here would break real sessions. It is
+    // dropped without being opened, and counted.
+    let (h, v) = (device("host"), device("viewer"));
+    let otp = remora_crypto::secret::Otp::parse("123456").unwrap();
+    let mut e = evil_host_viewer_pending(&v, &h, &otp);
+    let acts = e.viewer.on_datagram(&[1u8; 64], T0);
+    assert!(acts.is_empty(), "{acts:?}");
+    assert_eq!(e.viewer.state(), State::PendingApproval);
+    assert_eq!(e.viewer.media_stats().before_active, 1);
+    assert_eq!(e.viewer.media_stats().opened, 0);
 }
 
 #[test]

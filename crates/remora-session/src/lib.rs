@@ -13,7 +13,7 @@
 //!   (A03), and every failure is counted against the current one-time
 //!   password globally, across connections.
 //! * [`ViewerSession`] drives one viewer-side connection.
-//! * Application messages (input, media keys) are delivered **only** in
+//! * Application messages (input) and media (keys, datagrams) are used **only** in
 //!   [`State::Active`]; in every earlier state they close the session (INV1,
 //!   A20). The host reaches `Active` only through [`Host::approve`] with the
 //!   session ID **and** the safety code shown on the prompt (A22, A23).
@@ -23,10 +23,14 @@
 pub mod fail;
 mod host;
 pub mod limiter;
+pub mod media;
 mod viewer;
 
 pub use fail::{AuthDetail, CloseCode, FailReason, Step, Violation};
-pub use host::{ApproveError, Host, HostAction, HostConfig, Identity, Refused, SessionId};
+pub use host::{
+    ApproveError, Host, HostAction, HostConfig, Identity, Refused, SendVideoError, SessionId,
+};
+pub use media::MediaStats;
 pub use viewer::{ViewerAction, ViewerConfig, ViewerMode, ViewerSession};
 
 /// Milliseconds on a monotonic clock chosen by the caller.
@@ -76,8 +80,6 @@ pub enum State {
 pub enum AppMessage {
     /// Viewer → host: an input event for the injector.
     Input(remora_proto::messages::Input),
-    /// Host → viewer: a media key to install.
-    MediaKey(remora_proto::messages::MediaKeyAnnounce),
 }
 
 /// Why the stream paused (OS-neutral: each capture backend maps its own

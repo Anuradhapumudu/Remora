@@ -224,7 +224,8 @@ async fn run_connect(args: ConnectArgs) -> anyhow::Result<u8> {
                 )
             }
             ViewerEvent::StreamResumed => println!("stream resumed"),
-            ViewerEvent::Deliver(_) => {}
+            // Phase 4 step 6 draws these; until then they are discarded.
+            ViewerEvent::Video(_) => {}
             ViewerEvent::Failed { reason, .. } => outcome = Some(report_failure(&reason)),
             ViewerEvent::Closed { local, remote } => {
                 let code = outcome.unwrap_or_else(|| report_close(local, remote));

@@ -202,6 +202,18 @@ fn invalid_envelopes_are_rejected() {
         key_id: 7,
         key: vec![3; 31]
     }))));
+    // Datagram headers carry key ids as u16: 65 535 is the last valid one.
+    assert!(invalid(ctl(control::Kind::MediaKey(MediaKeyAnnounce {
+        key_id: 65_536,
+        key: vec![3; 32]
+    }))));
+    assert!(
+        decode_envelope(&ctl(control::Kind::MediaKey(MediaKeyAnnounce {
+            key_id: 65_535,
+            key: vec![3; 32]
+        })))
+        .is_ok()
+    );
     assert!(invalid(ctl(control::Kind::Accept(SessionAccept {
         role: 0
     }))));
@@ -326,4 +338,22 @@ fn stream_state_shapes() {
             "{paused} {reason}"
         );
     }
+}
+
+#[test]
+fn a_media_key_announcement_never_prints_its_key() {
+    // CLAUDE.md: never log secrets. prost derives Debug by default, which
+    // would print the key bytes - and so would any Envelope holding one.
+    let k = MediaKeyAnnounce {
+        key_id: 9,
+        key: vec![0xAB; 32],
+    };
+    let text = format!("{k:?}");
+    assert_eq!(text, "MediaKeyAnnounce { key_id: 9, key: \"[redacted]\" }");
+    let env = format!(
+        "{:?}",
+        decode_envelope(&ctl(control::Kind::MediaKey(k))).unwrap()
+    );
+    assert!(!env.contains("171"), "{env}");
+    assert!(env.contains("[redacted]"), "{env}");
 }

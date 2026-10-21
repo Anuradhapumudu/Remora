@@ -13,11 +13,12 @@ use remora_crypto::sas::Sas;
 use remora_crypto::secret::Otp;
 use remora_session::{
     AppMessage, ApproveError, CloseCode, FailReason, Host, HostAction, HostConfig, Millis,
-    SessionId, Step,
+    SendVideoError, SessionId, Step,
 };
 use tokio::sync::mpsc;
 use tokio::time::Instant;
 
+use crate::media::MediaPath;
 use crate::wire::{FrameSender, is_lost};
 use crate::{FramedStream, NetError, TICK, close, exporter, floor_deadline, server_config};
 
@@ -104,6 +105,9 @@ struct Conn {
     out: mpsc::UnboundedSender<Out>,
     peer: SocketAddr,
     accepted: Instant,
+    /// For media datagrams, which bypass the ordered writer: a late frame
+    /// is worth nothing, so they go out at once.
+    quic: quinn::Connection,
 }
 
 struct Shared {
@@ -111,6 +115,7 @@ struct Shared {
     conns: Mutex<HashMap<SessionId, Conn>>,
     events: mpsc::UnboundedSender<HostEvent>,
     start: Instant,
+    media: MediaPath,
 }
 
 /// A running host endpoint.
@@ -138,6 +143,7 @@ impl HostServer {
             conns: Mutex::new(HashMap::new()),
             events,
             start: Instant::now(),
+            media: MediaPath::default(),
         });
         tokio::spawn(accept_loop(endpoint.clone(), shared.clone()));
         tokio::spawn(tick_loop(Arc::downgrade(&shared)));
@@ -184,6 +190,35 @@ impl HostServer {
         self.shared.apply(actions, None);
     }
 
+    /// Sends one encoded video frame to every active session; see
+    /// [`remora_session::Host::send_video`].
+    pub fn send_video(
+        &self,
+        keyframe: bool,
+        capture_ts_us: u64,
+        data: &[u8],
+    ) -> Result<(), SendVideoError> {
+        let now = self.shared.now();
+        let actions =
+            lock(&self.shared.host).send_video(keyframe, capture_ts_us, data, now, &mut OsRng)?;
+        self.shared.apply(actions, None);
+        Ok(())
+    }
+
+    /// Every media datagram payload handed to quinn from now on
+    /// (phase4-criteria M1a; feature `test-tap`, tests only).
+    #[cfg(feature = "test-tap")]
+    pub fn tap_datagrams(&self) -> mpsc::UnboundedReceiver<Vec<u8>> {
+        let (tx, rx) = mpsc::unbounded_channel();
+        *self
+            .shared
+            .media
+            .tap
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some(tx);
+        rx
+    }
+
     /// Disconnect session `id` (any state).
     pub fn disconnect(&self, id: SessionId) {
         let actions = lock(&self.shared.host).disconnect(id);
@@ -216,7 +251,7 @@ impl Shared {
         let mut rest = Vec::new();
         for action in actions {
             match action {
-                HostAction::Send { .. } => {}
+                HostAction::Send { .. } | HostAction::Media { .. } => {}
                 HostAction::Close { id, .. } => {
                     let _ = self.events.send(HostEvent::Lost { id });
                 }
@@ -237,6 +272,11 @@ impl Shared {
                 HostAction::Send { id, frame } => {
                     if let Some(c) = conns.get(&id) {
                         let _ = c.out.send(Out::Frame(frame));
+                    }
+                }
+                HostAction::Media { id, datagram } => {
+                    if let Some(c) = conns.get(&id) {
+                        self.media.send(&c.quic, datagram);
                     }
                 }
                 HostAction::Close { id, code } => {
@@ -380,6 +420,7 @@ async fn run_connection(incoming: quinn::Incoming, shared: Arc<Shared>) {
             out: out_tx,
             peer,
             accepted: Instant::now(),
+            quic: conn.clone(),
         },
     );
     let mut out_rx = out_rx;

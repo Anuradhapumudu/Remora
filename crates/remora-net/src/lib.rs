@@ -18,6 +18,7 @@
 #![forbid(unsafe_code)]
 
 mod host;
+mod media;
 mod tls;
 mod viewer;
 mod wire;

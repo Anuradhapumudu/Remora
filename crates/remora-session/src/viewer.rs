@@ -20,9 +20,8 @@ use remora_proto::messages::{
 
 use crate::fail::Violation;
 use crate::host::{Identity, decrypt_envelope};
-use crate::{
-    AppMessage, CloseCode, FailReason, HANDSHAKE_TIMEOUT_MS, Millis, PROTOCOL_VERSION, State, Step,
-};
+use crate::media::{MediaIn, MediaStats};
+use crate::{CloseCode, FailReason, HANDSHAKE_TIMEOUT_MS, Millis, PROTOCOL_VERSION, State, Step};
 
 /// How the viewer authenticates.
 #[derive(Debug, Clone)]
@@ -67,13 +66,14 @@ pub enum ViewerAction {
     },
     /// The host approved: the session is active.
     Active,
-    /// Deliver an application message (Active only).
-    Deliver(AppMessage),
     /// The host's screen capture paused: keep the session, show "paused"
     /// with this reason (Active only).
     StreamPaused(crate::PauseReason),
     /// The stream resumed; a keyframe follows.
     StreamResumed,
+    /// A complete video frame for the decoder (Active only; it came only
+    /// from datagrams that opened under an announced media key).
+    Video(remora_proto::video::VideoFrame),
     /// The session failed (log it, tell the user).
     Failed {
         /// Precise local reason.
@@ -111,6 +111,7 @@ pub struct ViewerSession {
     pub(crate) exporter: Exporter,
     pub(crate) state: ViewerState,
     pub(crate) deadline: Millis,
+    pub(crate) media: MediaIn,
 }
 
 impl std::fmt::Debug for ViewerSession {
@@ -147,6 +148,7 @@ impl ViewerSession {
                 exporter,
                 state: ViewerState::Hello { vh, nonce },
                 deadline: now.plus(HANDSHAKE_TIMEOUT_MS),
+                media: MediaIn::default(),
             },
             first,
         )
@@ -184,7 +186,7 @@ impl ViewerSession {
                 Err(e) => Err(Some(reveal_failure(e))),
             },
             ViewerState::Pending(est) => on_pending(frame, est, &mut out),
-            ViewerState::Active(est) => on_active(frame, est, &mut out),
+            ViewerState::Active(est) => on_active(frame, est, &mut self.media, &mut out),
         };
         match result {
             Ok(next) => self.state = next,
@@ -194,12 +196,26 @@ impl ViewerSession {
         out
     }
 
-    /// A datagram arrived. Before `Active` it closes the session.
-    pub fn on_datagram(&mut self, datagram: &[u8]) -> Vec<ViewerAction> {
-        let _ = datagram;
+    /// A datagram arrived.
+    ///
+    /// * `Active`: opened, and complete frames are delivered as
+    ///   [`ViewerAction::Video`]; anything else is counted
+    ///   ([`ViewerSession::media_stats`]) and the session goes on (M5).
+    /// * Waiting for approval: dropped unread and counted. The host sends
+    ///   `SessionAccept` on the ordered stream and media as datagrams, which
+    ///   can overtake it when a packet is lost (M3).
+    /// * Earlier (handshake): no host can have sent media yet, so the
+    ///   session closes (A20).
+    pub fn on_datagram(&mut self, datagram: &[u8], now: Millis) -> Vec<ViewerAction> {
         let mut out = Vec::new();
         match self.state() {
-            State::Closed | State::Active => {}
+            State::Closed => {}
+            State::Active => out.extend(
+                self.media
+                    .datagram(datagram, now)
+                    .into_iter()
+                    .map(ViewerAction::Video),
+            ),
             _ => {
                 let step = step_of(&self.state);
                 self.state = ViewerState::Closed;
@@ -217,6 +233,7 @@ impl ViewerSession {
     /// safety code is shown — the host's 60 s prompt limit takes over).
     pub fn tick(&mut self, now: Millis) -> Vec<ViewerAction> {
         let mut out = Vec::new();
+        self.media.tick(now);
         let waiting = matches!(
             self.state,
             ViewerState::Hello { .. }
@@ -362,6 +379,11 @@ impl ViewerSession {
         Ok(ViewerState::Reveal(hs))
     }
 
+    /// What happened to the media datagrams received so far.
+    pub fn media_stats(&self) -> MediaStats {
+        self.media.stats
+    }
+
     /// Current state.
     pub fn state(&self) -> State {
         match self.state {
@@ -427,10 +449,12 @@ fn on_pending(
 }
 
 /// Active: the host may send media keys and `Goodbye`; input from the host
-/// is role confusion (A21).
+/// is role confusion (A21). A media key is installed here and never leaves
+/// the session.
 fn on_active(
     frame: &[u8],
     mut est: Established,
+    media: &mut MediaIn,
     out: &mut Vec<ViewerAction>,
 ) -> Result<ViewerState, Option<FailReason>> {
     let env = decrypt_envelope(&mut est, frame).map_err(Some)?;
@@ -438,7 +462,9 @@ fn on_active(
         Some(envelope::Msg::Control(Control {
             kind: Some(control::Kind::MediaKey(k)),
         })) => {
-            out.push(ViewerAction::Deliver(AppMessage::MediaKey(k)));
+            media
+                .announce(&k)
+                .map_err(|v| Some(FailReason::ProtocolViolation(v)))?;
             Ok(ViewerState::Active(est))
         }
         Some(envelope::Msg::Control(Control {

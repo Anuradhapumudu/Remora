@@ -367,11 +367,11 @@ fn datagrams_in_active_are_dropped_without_ending_the_session() {
     let mut c = to_active(&mut host, &v, ip(1));
     assert!(host.on_datagram(c.id, &[3; 64]).is_empty());
     assert_eq!(host.state(c.id), Some(State::Active));
-    assert!(c.viewer.on_datagram(&[1; 64]).is_empty());
+    assert!(c.viewer.on_datagram(&[1; 64], T0).is_empty());
     assert_eq!(c.viewer.state(), State::Active);
     c.viewer.disconnect();
     assert!(
-        c.viewer.on_datagram(&[1; 64]).is_empty(),
+        c.viewer.on_datagram(&[1; 64], T0).is_empty(),
         "closed: nothing happens"
     );
 }

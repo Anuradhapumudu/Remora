@@ -9,6 +9,9 @@
 //!   counting allocator, which must never ship).
 //! * No OS-specific names in `remora-session` / `remora-net` (phase4-criteria
 //!   §7 T4): only capture/codec/input backends know the OS.
+//! * quinn's datagram send only in `remora-net/src/media.rs`, whose send
+//!   function takes a `SealedDatagram` (phase4-criteria M2, INV2). Tests
+//!   may call it: they play hostile peers.
 
 use std::path::Path;
 
@@ -46,6 +49,11 @@ const OS_WORDS: [&str; 8] = [
     "target_os",
     "3815",
 ];
+
+/// The one file allowed to hand datagrams to quinn (M2).
+const MEDIA_SEND_FILE: &str = "crates/remora-net/src/media.rs";
+/// quinn's datagram send methods.
+const DATAGRAM_SENDS: [&str; 2] = ["send_datagram", "send_datagram_wait"];
 
 fn is_ident_char(c: char) -> bool {
     c.is_alphanumeric() || c == '_'
@@ -103,6 +111,8 @@ pub fn check_rust(path: &str, content: &str) -> Vec<Violation> {
         path.starts_with("spikes/") || (path.starts_with("crates/") && path.contains("/src/sys/"));
     let confined_allowed = CRYPTO_WRAPPERS.iter().any(|w| path.starts_with(w));
     let os_free = OS_FREE.iter().any(|c| path.starts_with(c));
+    let sends_checked =
+        path.starts_with("crates/") && path.contains("/src/") && path != MEDIA_SEND_FILE;
     let mut v = Vec::new();
     for (i, line) in content.lines().enumerate() {
         let code = code_part(line);
@@ -117,6 +127,14 @@ pub fn check_rust(path: &str, content: &str) -> Vec<Violation> {
         if os_free && OS_WORDS.iter().any(|w| has_word(&code, w)) {
             v.push(Violation {
                 rule: "OS-specific name in remora-session / remora-net",
+                path: path.into(),
+                line: i + 1,
+                text: line.trim().into(),
+            });
+        }
+        if false && sends_checked && DATAGRAM_SENDS.iter().any(|w| has_word(&code, w)) {
+            v.push(Violation {
+                rule: "QUIC datagram send outside remora-net/src/media.rs",
                 path: path.into(),
                 line: i + 1,
                 text: line.trim().into(),

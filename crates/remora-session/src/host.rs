@@ -22,8 +22,13 @@ use remora_proto::messages::{
     SessionReject, StreamState, control, decode_envelope, decode_viewer_hello, envelope,
 };
 
+use remora_crypto::media::{MAX_PACKETS_PER_KEY, SealedDatagram};
+use remora_proto::limits::VIDEO_FRAGMENT_DATA;
+use remora_proto::video::{PacketizeError, packetize};
+
 use crate::fail::{AuthDetail, Violation};
 use crate::limiter::Limiter;
+use crate::media::{MediaOut, video_header};
 use crate::{
     AppMessage, CloseCode, FailReason, HANDSHAKE_TIMEOUT_MS, Millis, PROMPT_TIMEOUT_MS,
     PROTOCOL_VERSION, State, Step,
@@ -59,6 +64,18 @@ pub struct HostConfig {
     pub password_enabled: bool,
     /// Viewer identity keys allowed to use trusted (password-less) mode.
     pub trusted: Vec<IdentityPublic>,
+}
+
+/// Why [`Host::send_video`] could not send a frame.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum SendVideoError {
+    /// The frame cannot be cut into fragments (empty, or over 8 MiB).
+    #[error("frame not sendable: {0}")]
+    Frame(PacketizeError),
+    /// 2³² frames were sent (about 2 years at 60 fps): the stream must be
+    /// restarted.
+    #[error("frame ids used up")]
+    FrameIdsExhausted,
 }
 
 /// A connection refused at admission, before any crypto (A03).
@@ -142,9 +159,23 @@ pub enum HostAction {
         /// The session that used it.
         id: SessionId,
     },
-    /// Capture came back after an interruption: the next encoded frame must
-    /// be a keyframe (the viewer's decoder state is stale).
+    /// The next encoded frame must be a keyframe: capture came back after
+    /// an interruption (the viewer's decoder state is stale), or a new
+    /// viewer was approved (it can only start decoding at a keyframe).
     ForceKeyframe,
+    /// Send one media datagram on session `id` (Active only). The type can
+    /// only be made by sealing (phase4-criteria M2):
+    ///
+    /// ```compile_fail
+    /// use remora_session::{HostAction, SessionId};
+    /// let plain = HostAction::Media { id: SessionId(1), datagram: vec![0u8; 64] };
+    /// ```
+    Media {
+        /// Session.
+        id: SessionId,
+        /// Header ‖ ciphertext ‖ tag, sealed under this session's key.
+        datagram: SealedDatagram,
+    },
     /// Three failed attempts: a new password is in effect; tell the user
     /// ("3 failed attempts — new password") and show [`Host::otp`].
     OtpRotated {
@@ -172,8 +203,12 @@ pub(crate) enum HostSessionState {
         est: Established,
         sas: Sas,
         prompt_deadline: Millis,
+        media: MediaOut,
     },
-    Active(Established),
+    Active {
+        est: Established,
+        media: MediaOut,
+    },
     Closed,
 }
 
@@ -184,7 +219,7 @@ impl HostSessionState {
             HostSessionState::Spake { .. } => State::Spake,
             HostSessionState::Msg1(_) | HostSessionState::Msg3(_) => State::Noise,
             HostSessionState::Pending { .. } => State::PendingApproval,
-            HostSessionState::Active(_) => State::Active,
+            HostSessionState::Active { .. } => State::Active,
             HostSessionState::Closed => State::Closed,
         }
     }
@@ -196,7 +231,7 @@ impl HostSessionState {
             HostSessionState::Msg1(_) => Step::NoiseMsg1,
             HostSessionState::Msg3(_) => Step::NoiseMsg3,
             HostSessionState::Pending { .. } => Step::Approval,
-            HostSessionState::Active(_) | HostSessionState::Closed => Step::Active,
+            HostSessionState::Active { .. } | HostSessionState::Closed => Step::Active,
         }
     }
 }
@@ -221,6 +256,10 @@ pub struct Host {
     pub(crate) nonces: VecDeque<IssuedNonce>,
     /// What screen capture is doing (phase4-criteria §7).
     pub(crate) capture: crate::CaptureStatus,
+    /// `frame_id` of the next video frame (one stream for all sessions).
+    pub(crate) next_frame_id: u32,
+    /// Packets per media key before rotation (protocol.md §6: 2³²).
+    pub(crate) rotate_after: u64,
 }
 
 /// One nonce the host put in an offer code.
@@ -252,7 +291,33 @@ impl Host {
             sessions: HashMap::new(),
             nonces: VecDeque::new(),
             capture: crate::CaptureStatus::Running,
+            next_frame_id: 0,
+            rotate_after: MAX_PACKETS_PER_KEY,
         }
+    }
+
+    /// Rotates every session's media key after `packets` packets instead
+    /// of 2³² (clamped to 1..=2³²). Shorter key lives only, for testing
+    /// rotation (phase4-criteria M8); keys still also rotate hourly.
+    pub fn set_key_rotation(&mut self, packets: u64) {
+        self.rotate_after = packets.clamp(1, MAX_PACKETS_PER_KEY);
+    }
+
+    /// Sends one encoded video frame to every `Active` session: cuts it
+    /// into fragments ([`VIDEO_FRAGMENT_DATA`] bytes each) and seals each
+    /// fragment under each session's own key. Sessions in any other state
+    /// get nothing (phase4-criteria M3). New key announcements, if a key
+    /// rotated, come first in the returned actions.
+    pub fn send_video<R: RngCore + CryptoRng>(
+        &mut self,
+        keyframe: bool,
+        capture_ts_us: u64,
+        data: &[u8],
+        now: Millis,
+        rng: &mut R,
+    ) -> Result<Vec<HostAction>, SendVideoError> {
+        let _ = (keyframe, capture_ts_us, data, now, rng); // RED: not yet
+        Ok(Vec::new())
     }
 
     /// The current one-time password (for the host's screen only).
@@ -356,9 +421,11 @@ impl Host {
                 spake_b,
             } => self.on_spake(id, frame, vh, hh, pake, spake_b, &mut out),
             HostSessionState::Msg1(hs) => self.on_msg1(id, frame, hs, rng, &mut out),
-            HostSessionState::Msg3(hs) => self.on_msg3(id, frame, hs, now, &mut out),
+            HostSessionState::Msg3(hs) => self.on_msg3(id, frame, hs, now, rng, &mut out),
             HostSessionState::Pending { est, .. } => Self::on_pending(frame, est),
-            HostSessionState::Active(est) => self.on_active(id, frame, est, &mut out),
+            HostSessionState::Active { est, media } => {
+                self.on_active(id, frame, est, media, &mut out)
+            }
         };
         match result {
             Ok(next) => {
@@ -418,7 +485,7 @@ impl Host {
                 continue;
             };
             match &mut sess.state {
-                HostSessionState::Closed | HostSessionState::Active(_) => {}
+                HostSessionState::Closed | HostSessionState::Active { .. } => {}
                 HostSessionState::Pending {
                     est,
                     prompt_deadline,
@@ -475,7 +542,10 @@ impl Host {
             return Ok(out);
         }
         let state = std::mem::replace(&mut sess.state, HostSessionState::Closed);
-        let HostSessionState::Pending { mut est, .. } = state else {
+        let HostSessionState::Pending {
+            mut est, mut media, ..
+        } = state
+        else {
             return Err(ApproveError::NotPending);
         };
         let mut out = Vec::new();
@@ -484,7 +554,30 @@ impl Host {
         }))) {
             Ok(frame) => {
                 out.push(HostAction::Send { id, frame });
-                sess.state = HostSessionState::Active(est);
+                // The session's media keys (current and next) follow the
+                // accept on the same ordered, encrypted stream.
+                for announce in media.take_announcements() {
+                    match est.encrypt(&control_env(control::Kind::MediaKey(announce))) {
+                        Ok(frame) => out.push(HostAction::Send { id, frame }),
+                        Err(_) => {
+                            self.fail(
+                                id,
+                                FailReason::AuthFailed(AuthDetail::Handshake(
+                                    remora_crypto::noise::HandshakeError::Internal,
+                                )),
+                                Step::Approval,
+                                None,
+                                true,
+                                &mut out,
+                            );
+                            return Ok(out);
+                        }
+                    }
+                }
+                let Some(sess) = self.sessions.get_mut(&id) else {
+                    return Ok(out);
+                };
+                sess.state = HostSessionState::Active { est, media };
                 if sess.holds_pending_slot {
                     sess.holds_pending_slot = false;
                     self.limiter.release();
@@ -536,7 +629,7 @@ impl Host {
         let prompt_open = matches!(sess.state, HostSessionState::Pending { .. });
         match &mut sess.state {
             HostSessionState::Closed => return out,
-            HostSessionState::Pending { est, .. } | HostSessionState::Active(est) => {
+            HostSessionState::Pending { est, .. } | HostSessionState::Active { est, .. } => {
                 if let Ok(frame) = est.encrypt(&control_env(control::Kind::Bye(Goodbye {}))) {
                     out.push(HostAction::Send { id, frame });
                 }
@@ -580,7 +673,7 @@ impl Host {
         let mut v: Vec<SessionId> = self
             .sessions
             .iter()
-            .filter(|(_, s)| matches!(s.state, HostSessionState::Active(_)))
+            .filter(|(_, s)| matches!(s.state, HostSessionState::Active { .. }))
             .map(|(id, _)| *id)
             .collect();
         v.sort();
@@ -643,7 +736,7 @@ impl Host {
         out: &mut Vec<HostAction>,
     ) {
         let Some(HostSession {
-            state: HostSessionState::Active(est),
+            state: HostSessionState::Active { est, .. },
             ..
         }) = self.sessions.get_mut(&id)
         else {
@@ -808,12 +901,13 @@ impl Host {
         Ok(HostSessionState::Msg3(hs))
     }
 
-    fn on_msg3(
+    fn on_msg3<R: RngCore + CryptoRng>(
         &mut self,
         id: SessionId,
         frame: &[u8],
         hs: HostAwaitMsg3,
         now: Millis,
+        rng: &mut R,
         out: &mut Vec<HostAction>,
     ) -> Result<HostSessionState, Ending> {
         let policy = self
@@ -852,6 +946,9 @@ impl Host {
             est,
             sas,
             prompt_deadline: now.plus(PROMPT_TIMEOUT_MS),
+            // Generated now (the step has a random source; approval does
+            // not), announced only once the host user accepts.
+            media: MediaOut::new(rng),
         })
     }
 
@@ -876,6 +973,7 @@ impl Host {
         id: SessionId,
         frame: &[u8],
         mut est: Established,
+        media: MediaOut,
         out: &mut Vec<HostAction>,
     ) -> Result<HostSessionState, Ending> {
         let env = decrypt_envelope(&mut est, frame).map_err(|r| Ending::Failed(r, false))?;
@@ -885,7 +983,7 @@ impl Host {
                     id,
                     msg: AppMessage::Input(input),
                 });
-                Ok(HostSessionState::Active(est))
+                Ok(HostSessionState::Active { est, media })
             }
             Some(envelope::Msg::Control(Control {
                 kind: Some(control::Kind::Bye(_)),

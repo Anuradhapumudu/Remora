@@ -6,7 +6,7 @@ use rand_core::OsRng;
 use remora_crypto::identity::IdentityCert;
 use remora_crypto::sas::Sas;
 use remora_session::{
-    AppMessage, CloseCode, FailReason, Millis, Step, ViewerAction, ViewerConfig, ViewerSession,
+    CloseCode, FailReason, MediaStats, Millis, Step, ViewerAction, ViewerConfig, ViewerSession,
 };
 use std::time::Duration;
 use tokio::sync::mpsc;
@@ -30,8 +30,8 @@ pub enum ViewerEvent {
     },
     /// The host approved.
     Active,
-    /// An application message from the host.
-    Deliver(AppMessage),
+    /// A complete video frame from the host, for the decoder.
+    Video(remora_proto::video::VideoFrame),
     /// The host's capture paused (session stays active).
     StreamPaused(remora_session::PauseReason),
     /// The stream resumed.
@@ -65,6 +65,7 @@ pub struct ViewerClient {
 #[derive(Debug)]
 pub(crate) enum ViewerCommand {
     Input(remora_proto::messages::Input),
+    Stats(tokio::sync::oneshot::Sender<MediaStats>),
     Disconnect,
 }
 
@@ -152,8 +153,8 @@ async fn drive(
                 ViewerAction::Active => {
                     let _ = events.send(ViewerEvent::Active);
                 }
-                ViewerAction::Deliver(msg) => {
-                    let _ = events.send(ViewerEvent::Deliver(msg));
+                ViewerAction::Video(frame) => {
+                    let _ = events.send(ViewerEvent::Video(frame));
                 }
                 ViewerAction::StreamPaused(reason) => {
                     let _ = events.send(ViewerEvent::StreamPaused(reason));
@@ -176,7 +177,7 @@ async fn drive(
                 }
             },
             dgram = conn.read_datagram() => match dgram {
-                Ok(d) => pending = session.on_datagram(&d),
+                Ok(d) => pending = session.on_datagram(&d, now(start)),
                 Err(err) => {
                     let _ = events.send(ended(&err));
                     return;
@@ -184,6 +185,9 @@ async fn drive(
             },
             cmd = commands.recv() => match cmd {
                 Some(ViewerCommand::Input(input)) => pending = session.send_input(input).into_iter().collect(),
+                Some(ViewerCommand::Stats(reply)) => {
+                    let _ = reply.send(session.media_stats());
+                }
                 Some(ViewerCommand::Disconnect) | None => pending = session.disconnect(),
             },
             _ = tick.tick() => pending = session.tick(now(start)),
@@ -195,6 +199,14 @@ impl ViewerClient {
     /// Sends an input event (dropped unless the session is Active).
     pub fn send_input(&self, input: remora_proto::messages::Input) {
         let _ = self.commands.send(ViewerCommand::Input(input));
+    }
+
+    /// What happened to the media datagrams received so far (`None` once
+    /// the connection is gone).
+    pub async fn media_stats(&self) -> Option<MediaStats> {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        self.commands.send(ViewerCommand::Stats(tx)).ok()?;
+        rx.await.ok()
     }
 
     /// Ends the session.

@@ -38,3 +38,13 @@ pub const MAX_OPEN_FRAMES: usize = 16;
 pub const REASSEMBLY_BYTES_MAX: usize = 32 * 1024 * 1024;
 /// Plaintext header of a video-fragment body (protocol.md §6).
 pub const FRAGMENT_HEADER_LEN: usize = 18;
+/// Largest media datagram the host sends (protocol.md §6): with QUIC's
+/// own overhead the UDP payload stays under 1200 bytes, the size every
+/// QUIC path must carry (quinn-proto 0.11.19 `src/config/transport.rs:646-649`:
+/// "a QUIC endpoint can split outgoing data in packets of 1200 bytes"), so
+/// no path-MTU discovery is needed.
+pub const VIDEO_DATAGRAM_TARGET: usize = 1100;
+/// Video data bytes in one fragment: the target minus the clear header,
+/// the fragment header and the AEAD tag.
+pub const VIDEO_FRAGMENT_DATA: usize =
+    VIDEO_DATAGRAM_TARGET - DATAGRAM_HEADER_LEN - FRAGMENT_HEADER_LEN - AEAD_TAG_LEN;

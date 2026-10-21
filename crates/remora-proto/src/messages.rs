@@ -67,8 +67,9 @@ pub struct SessionReject {
     pub reason: u32,
 }
 
-/// A sender announces its media key.
+/// A sender announces its media key. `Debug` never prints the key.
 #[derive(Clone, PartialEq, prost::Message)]
+#[prost(skip_debug)]
 pub struct MediaKeyAnnounce {
     /// Key identifier used in datagram headers.
     #[prost(uint32, tag = "1")]
@@ -76,6 +77,17 @@ pub struct MediaKeyAnnounce {
     /// ChaCha20-Poly1305 key (32 bytes).
     #[prost(bytes = "vec", tag = "2")]
     pub key: Vec<u8>,
+}
+
+impl std::fmt::Debug for MediaKeyAnnounce {
+    // The key is a secret (CLAUDE.md: never log secrets); prost's derived
+    // Debug would print its bytes, and so would any Envelope holding it.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MediaKeyAnnounce")
+            .field("key_id", &self.key_id)
+            .field("key", &self.key)
+            .finish()
+    }
 }
 
 /// Orderly close.
@@ -289,7 +301,10 @@ pub fn decode_envelope(bytes: &[u8]) -> Result<Envelope, MessageError> {
             Some(control::Kind::Reject(r)) => {
                 require((1..=2).contains(&r.reason), "reject reason")?
             }
-            Some(control::Kind::MediaKey(k)) => require(k.key.len() == 32, "media key length")?,
+            Some(control::Kind::MediaKey(k)) => {
+                require(k.key.len() == 32, "media key length")?;
+                // Datagram headers carry the id as u16 (protocol.md §6).
+            }
             Some(control::Kind::Pending(_) | control::Kind::Bye(_)) => {}
             Some(control::Kind::StreamState(st)) => require(
                 st.paused == (st.reason != 0),

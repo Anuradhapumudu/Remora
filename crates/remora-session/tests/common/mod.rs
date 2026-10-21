@@ -108,8 +108,8 @@ impl Log {
             }
         }
         for a in &self.viewer {
-            if let ViewerAction::Deliver(msg) = a {
-                log.record(format!("viewer got {msg:?}"));
+            if let ViewerAction::Video(frame) = a {
+                log.record(format!("viewer got {frame:?}"));
             }
         }
         log
