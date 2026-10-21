@@ -418,6 +418,25 @@ The phase report lists the whole deferred list row by row (CLAUDE.md).
   with `--nocapture` and writes every curve to the job summary (step "M7
   memory curve", measurement only, any failing run fails CI). Still
   **open**; the threshold is unchanged.
+  *Update (`8a7256b`, three curves):* after 500 … 3000 frames the VM's
+  footprint moves between **57 and 69 MB with no trend** (run 1: 63, 57,
+  68, 65, 60, 68; run 2: 68, 62, 66, 63, 62, 65; run 3: 66, 57, 58, 69,
+  59, 66), from 50 MB after the 300-frame warm-up. But all three runs
+  reported the final footprint as **14 MB**, read a moment after the
+  3000-frame reading of 65–68 MB: the only footprint read right after
+  a `vmmap` call. The passes were therefore on a meaningless number —
+  **a measurement bug that let the check pass**. Fixed: every footprint is
+  now read right after decoding and never right after `vmmap`, the final
+  one must agree with a second reading (≤ 4 MB apart, or the test fails),
+  and a reading after `vmmap` is printed for diagnosis only. On the M4:
+  125 → 114 MB, pass. Read the same way, the VM's growth is **+15 to
+  +18 MB** against the +8 MB limit, so M7 is expected to **fail in CI**
+  again: a fluctuation of about ±6 MB around a level reached after the
+  warm-up, not growth over the run. Proposed design change (not applied, needs
+  the owner): a longer warm-up (1000 frames, decoder sessions created
+  and dropped as in the run) before the baseline, and the baseline and
+  the final value each the median of three readings; the +8 MB limit
+  unchanged.
 * Standing rule (owner, 2026-10-20): **a UX change to a security-relevant
   flow needs its own attack test** — phase3-criteria §10.8, the F-UX1
   prompt-number confused-deputy case. Applies to the Phase 4 viewer window

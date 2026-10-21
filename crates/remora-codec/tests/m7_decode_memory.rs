@@ -45,23 +45,35 @@ fn m7_memory_stays_bounded_under_a_hostile_stream() {
     let warm = round(300);
     let run = round(3000);
     let (dec, _) = decode_all(VtDecoder::new(SizeLimit::default()), warm);
+    // Every footprint is read right after decoding, never right after
+    // `vmmap`: on GitHub's VM a footprint read just after `vmmap` came out
+    // ~50 MB lower than one read a moment before it (66 → 14 MB, three runs
+    // out of three), which made the check pass on a meaningless number
+    // (phase4-criteria §12). So: footprint first, then `vmmap`.
     let before = (footprint(), iosurfaces());
-    // The same 3000 frames in six parts, printing memory after each: a
-    // leak keeps growing, warm-up levels off (diagnosis of the first CI
-    // run on GitHub's VM, phase4-criteria §12). The check is unchanged.
+    // The same 3000 frames in six parts, printing the footprint after each
+    // (no `vmmap` in between): a leak keeps growing, warm-up levels off.
     let mut dec = dec;
     let mut run = run.into_iter();
+    let mut last = 0;
     for part in 1..=6 {
         let (d, _) = decode_all(dec, run.by_ref().take(500).collect());
         dec = d;
+        last = footprint();
         println!(
-            "M7 memory after {} frames: footprint {:.1} MB, IOSurfaces {:.1} MB",
+            "M7 memory after {} frames: footprint {:.1} MB",
             part * 500,
-            footprint() as f64 / 1048576.0,
-            iosurfaces() as f64 / 1048576.0
+            last as f64 / 1048576.0
         );
     }
-    let after = (footprint(), iosurfaces());
+    // A measurement that cannot be trusted fails rather than passes: two
+    // readings with no work between them must agree.
+    let again = footprint();
+    assert!(
+        last.abs_diff(again) <= 4 * 1024 * 1024,
+        "footprint unstable: {last} then {again} bytes with nothing in between"
+    );
+    let after = (last, iosurfaces());
     let s = dec.stats();
     let mb = |b: u64| b as f64 / 1048576.0;
     println!(
@@ -71,6 +83,11 @@ fn m7_memory_stays_bounded_under_a_hostile_stream() {
         mb(after.0),
         mb(before.1),
         mb(after.1)
+    );
+    // Diagnosis only (not checked): the footprint right after `vmmap`.
+    println!(
+        "M7 memory: footprint just after vmmap {:.1} MB",
+        mb(footprint())
     );
     let (b, a) = (before.0 + before.1, after.0 + after.1);
     assert!(a <= b + GROWTH_LIMIT, "memory grew {} bytes", a - b);
