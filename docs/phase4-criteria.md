@@ -396,6 +396,20 @@ The phase report lists the whole deferred list row by row (CLAUDE.md).
      (wait for a keyframe, ask for one): test
      `m7_a_missing_frame_waits_for_a_keyframe`, seen failing first. This
      adds a check; P7 (no repeats, no reordering) is unaffected.
+* **2026-10-21 — M7 memory FAILED on GitHub's macOS VM (open; reported
+  to the owner, no threshold changed).** First CI run of step 5
+  (`49e14e9`, macos-15 runner): footprint **51 → 65 MB (+14 MB, limit
+  +8 MB)**, IOSurfaces 0 → 0 MB, over 3000 hostile frames (1100 decoder
+  sessions). The runner logs `IOServiceMatching failed for:
+  AppleM2ScalerParavirtDriver`, and no picture is an IOSurface: its
+  VideoToolbox path is not the M4's. On the M4 the same test passes
+  (111 → 95 MB), and locally with VideoToolbox's software decoder forced
+  (temporary experiment) memory stays flat at 109 MB from 3000 to 15 000
+  hostile frames (5100 sessions): no leak reproduced. The test now prints
+  memory every 500 frames (measurement only, same check) so the next CI
+  run shows whether the VM's growth levels off (warm-up) or keeps rising
+  (a leak). Until then M7 "memory bounded" is **met on the M4, failing in
+  CI**.
 * Standing rule (owner, 2026-10-20): **a UX change to a security-relevant
   flow needs its own attack test** — phase3-criteria §10.8, the F-UX1
   prompt-number confused-deputy case. Applies to the Phase 4 viewer window

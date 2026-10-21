@@ -46,7 +46,21 @@ fn m7_memory_stays_bounded_under_a_hostile_stream() {
     let run = round(3000);
     let (dec, _) = decode_all(VtDecoder::new(SizeLimit::default()), warm);
     let before = (footprint(), iosurfaces());
-    let (dec, _) = decode_all(dec, run);
+    // The same 3000 frames in six parts, printing memory after each: a
+    // leak keeps growing, warm-up levels off (diagnosis of the first CI
+    // run on GitHub's VM, phase4-criteria §12). The check is unchanged.
+    let mut dec = dec;
+    let mut run = run.into_iter();
+    for part in 1..=6 {
+        let (d, _) = decode_all(dec, run.by_ref().take(500).collect());
+        dec = d;
+        println!(
+            "M7 memory after {} frames: footprint {:.1} MB, IOSurfaces {:.1} MB",
+            part * 500,
+            footprint() as f64 / 1048576.0,
+            iosurfaces() as f64 / 1048576.0
+        );
+    }
     let after = (footprint(), iosurfaces());
     let s = dec.stats();
     let mb = |b: u64| b as f64 / 1048576.0;
