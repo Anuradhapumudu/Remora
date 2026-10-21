@@ -101,7 +101,7 @@ be called done; *nice-to-have* = wanted, but its absence does not block it.
 | # | Item | Kind | Blocks / close by | Why it is deferred |
 |---|---|---|---|---|
 | D-1 | **INV2** — no media or input without encryption, tested on the **real media path** (loopback capture: UDP payload never plaintext) | **BLOCKER** | Phase 4 | No media path existed in Phase 3; only the media AEAD was tested (A11–A13) |
-| D-1b | **INV2 for input** — the same loopback-capture test over input events (pointer, keys) | **BLOCKER** | Phase 6 | Split from D-1 (2026-10-19): Phase 4 has no input path |
+| D-1b | **INV2 for input** — the same loopback-capture test over input events (pointer, keys); and M8's "host and viewer media keys differ" once the viewer sends pointer-motion datagrams (phase4-criteria §12, 2026-10-21) | **BLOCKER** | Phase 6 | Split from D-1 (2026-10-19): Phase 4 has no input path |
 | D-2 | **INV9** — no screen pixels logged or written to disk by the streaming path | **BLOCKER** | Phase 4 | No pixels flowed in Phase 3 |
 | D-3 | **INV10** — keys and mouse buttons released when a session ends for any reason | **BLOCKER** | Phase 6 | No input injection until Phase 6 |
 | D-4 | **INV11** — session indicator: automated **GUI** test (visible for the whole `Active` period; its button reaches `Closed` within 1 s). The CLI part is automated since Phase 3 | **BLOCKER** | **Phase 4.5** (the small GUI shows sessions: INV11 applies to it; was Phase 7) | No GUI until Phase 7; a manual check decays Phase re-checked 2026-10-20 (owner: record the phase that NEEDS an item, not the furthest-away one). |

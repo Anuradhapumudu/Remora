@@ -22,6 +22,18 @@ impl MediaPath {
     /// Hands one sealed datagram to QUIC. Loss is normal for datagrams
     /// (the viewer counts what it misses), so a refusal is not fatal.
     pub(crate) fn send(&self, conn: &quinn::Connection, datagram: SealedDatagram) {
-        let _ = (conn, datagram); // RED: not yet
+        let bytes = datagram.into_bytes();
+        #[cfg(feature = "test-tap")]
+        if let Some(tap) = self
+            .tap
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .as_ref()
+        {
+            let _ = tap.send(bytes.clone());
+        }
+        if let Err(e) = conn.send_datagram(bytes::Bytes::from(bytes)) {
+            tracing::debug!(error = %e, "media datagram not sent");
+        }
     }
 }

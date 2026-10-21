@@ -216,6 +216,7 @@ impl ViewerSession {
                     .into_iter()
                     .map(ViewerAction::Video),
             ),
+            State::PendingApproval => self.media.stats.before_active += 1,
             _ => {
                 let step = step_of(&self.state);
                 self.state = ViewerState::Closed;

@@ -85,7 +85,7 @@ impl std::fmt::Debug for MediaKeyAnnounce {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("MediaKeyAnnounce")
             .field("key_id", &self.key_id)
-            .field("key", &self.key)
+            .field("key", &"[redacted]")
             .finish()
     }
 }
@@ -304,6 +304,7 @@ pub fn decode_envelope(bytes: &[u8]) -> Result<Envelope, MessageError> {
             Some(control::Kind::MediaKey(k)) => {
                 require(k.key.len() == 32, "media key length")?;
                 // Datagram headers carry the id as u16 (protocol.md §6).
+                require(k.key_id <= u32::from(u16::MAX), "media key id")?;
             }
             Some(control::Kind::Pending(_) | control::Kind::Bye(_)) => {}
             Some(control::Kind::StreamState(st)) => require(

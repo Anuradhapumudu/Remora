@@ -222,6 +222,32 @@ The phase report lists the whole deferred list row by row (CLAUDE.md).
   from T2:** "the first frame after resume is a keyframe" needs the streaming
   host's encoder — checked in step 7.
 
+* **Step 4 (2026-10-21).** Sealed send path (architecture D39). Tests:
+  `remora-session/tests/m3_m5_m8_media.rs` (16, sans-IO),
+  `remora-net/tests/m1a_m3_media.rs` (2, real QUIC), the M2 compile-fail
+  doctests in `remora-crypto` (`SealedDatagram`) and `remora-session`
+  (`HostAction::Media`), and the policy-scanner rule. Each "catch" test
+  was seen failing against a planted fault, then the plant was removed:
+  a `seal` that returns plaintext (M1a: "payload 0 carries plaintext of
+  frame 0 at byte 0"); a public field and `From<Vec<u8>>` on
+  `SealedDatagram` (both compile-fail doctests fail); a second
+  `send_datagram` call in `remora-net/src/host.rs` (scanner names it); the
+  host sealing for sessions awaiting approval (M3 names the state, and
+  also caught the key announcements leaking). **M1a** used synthetic
+  frames (random bytes with a 32-byte canary, 600 frames at 60 fps): the
+  seal does not depend on the codec; the VideoToolbox pipeline repeats it
+  in step 7 (M1b, N1). **M8**: 10⁶ packets, 20 rotations, no counter
+  repeated. **Mutation:** the new session media code first left 17
+  survivors (key lifetime not pinned, current/next key not shown to
+  survive the grace window, unusable-but-authentic datagrams and three
+  drop counters never checked); new tests kill 16, one is equivalent
+  (justified in mutants.toml). Final: session media 57 mutants, 53
+  caught, 3 unviable, 1 equivalent; send/approve/viewer paths 83 tested;
+  crypto/proto/policy/net changes 54 mutants, 42 caught, 12 unviable,
+  0 missed. No new fuzz target: the bytes a viewer receives are parsed by
+  the existing targets `media_open` (header + AEAD), `video_reassembly`
+  (fragment body) and `messages` (key announcements).
+
 ## 12. Changes to criteria
 
 * **2026-10-19 — owner approval.** R1–R5 approved as proposed. R1 and R2 are
@@ -249,6 +275,24 @@ The phase report lists the whole deferred list row by row (CLAUDE.md).
   testable" — Phase 2 removed the captured display with a virtual display
   (phase2-criteria §5.4). T3 now tests it (see above); a new design
   decision follows from it (roadmap D-29). All other claims stand.
+* **2026-10-21 — M3 and M8 read precisely (step 4; no threshold changes,
+  flagged to the owner).**
+  1. *M3, viewer side* said "drops media datagrams received before
+     `Established`". Phase 3's tests already **close** the session on a
+     datagram during the handshake (stricter, kept: no host can have sent
+     media then). The real gap was later: a viewer **waiting for
+     approval** used to close too, but there the datagram can legitimately
+     overtake `SessionAccept` (ordered stream vs datagrams) and a lost packet
+     would end a real session. It now **drops unread and counts** in that
+     state (test `m3_viewer_datagrams_while_pending_are_dropped_unread`;
+     the old test `a20_viewer_datagrams_before_active_close_the_session` was
+     split into that and `a20_viewer_datagrams_during_the_handshake_close_
+     the_session`). Never fed to the decoder in either case.
+  2. *M8* "host and viewer keys differ": the Phase 4 viewer sends **no**
+     media (pointer motion comes with input, Phase 6, roadmap D-1b), so it
+     has no media key. What Phase 4 can check, and does: every **session**
+     has its own key (`m8_every_session_has_its_own_key`). The viewer-key
+     half moves to D-1b.
 * Standing rule (owner, 2026-10-20): **a UX change to a security-relevant
   flow needs its own attack test** — phase3-criteria §10.8, the F-UX1
   prompt-number confused-deputy case. Applies to the Phase 4 viewer window

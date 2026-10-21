@@ -334,6 +334,39 @@ Encrypted body (ChaCha20-Poly1305, 16-byte tag)
 * **Never wait:** the viewer delivers a frame as soon as it is complete and
   abandons every older incomplete frame; a frame that does not directly follow
   the previous one is marked, so a P-frame after a gap waits for a keyframe.
+* **Fragment size** (Phase 4): each datagram is at most 1100 bytes
+  (`VIDEO_DATAGRAM_TARGET`), i.e. 1050 bytes of video data after the clear
+  header, the fragment header and the tag, so with QUIC's own overhead the
+  UDP payload stays under 1200 bytes.
+* **Media keys** (Phase 4, `remora_session::media`; architecture D39):
+  * The host makes a fresh random key **per session** (each viewer has its
+    own) and announces it in `MediaKeyAnnounce` on the Noise channel right
+    after `SessionAccept`, together with the **next** key (`key_id` + 1). A
+    rotation then switches to a key the viewer already holds, and announces
+    a new next key; no frame waits for an announcement.
+  * Rotation: after 2³² packets (the sender refuses the 2³²+1st) or 1 hour
+    of use, whichever comes first.
+  * Viewer: announced `key_id`s must **strictly increase** (a repeat or a
+    lower id ends the session as a protocol violation: it would reuse a
+    nonce space). `key_id` > 65 535 is malformed. At most 4 keys are held;
+    when full, the oldest *superseded* key is forgotten early; if none is
+    superseded, the announcement is a violation.
+  * **Grace window:** when the first packet under a newer key opens, every
+    older key is kept for **2 s** more (`KEY_GRACE_MS`), so reordered late
+    packets still open; after that they are dropped as unknown-key.
+  * The key never leaves the session layer (it is not delivered to the
+    application), and `MediaKeyAnnounce`'s `Debug` prints `[redacted]`.
+* **Datagrams before `Active`** (Phase 4): the host never sends media to a
+  session that is not `Active`. A viewer **waiting for approval** drops
+  datagrams unread and counts them: the host sends `SessionAccept` on the
+  ordered stream and then media as datagrams, and a datagram can overtake
+  the accept when a packet is lost. In any **earlier** state (handshake)
+  no host can have sent media, so a datagram closes the session
+  (`ProtocolViolation`).
+* **Counting, not silence:** every datagram the viewer does not use is
+  counted by reason (`MediaStats`: before-active, bad header, unknown key,
+  replay, too old, authentication, ignored kind/stream, bad fragment, late
+  fragment, frames given up).
 
 ## 7. Limits
 
@@ -352,6 +385,8 @@ Enforced before allocation; violations are `ProtocolViolation` unless noted.
 | Fragments per frame | 8192 |
 | Frames in reassembly at once | 16 (oldest evicted) |
 | Bytes held for reassembly, all frames | 32 MiB (oldest frame evicted; Phase 4 addition — 16 × 8 MiB would be 128 MiB) |
+| Media datagram sent by the host | 1100 B (Phase 4) |
+| Media keys a viewer holds at once | 4 (oldest superseded key forgotten first) |
 | Video resolution | ≤ negotiated `max_width × max_height`, ≤ 7680×4320 |
 | Pending handshakes on host | 4 |
 | Handshake attempts per source IP | 10 per minute |

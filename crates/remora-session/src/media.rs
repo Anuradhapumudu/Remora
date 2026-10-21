@@ -68,8 +68,7 @@ impl MediaOut {
 
     /// Announcements to send now, in order.
     pub(crate) fn take_announcements(&mut self) -> Vec<MediaKeyAnnounce> {
-        // RED: not yet
-        Vec::new()
+        std::mem::take(&mut self.unannounced)
     }
 
     /// Seals one datagram, first switching to the next key if the current
@@ -178,19 +177,88 @@ impl MediaIn {
     /// Installs an announced key. Ids must strictly increase: a repeated or
     /// older id is a protocol violation (it would reuse a nonce space).
     pub(crate) fn announce(&mut self, k: &MediaKeyAnnounce) -> Result<(), Violation> {
-        let _ = k; // RED: not yet
+        let id = u16::try_from(k.key_id).map_err(|_| Violation::MediaKey("key id out of range"))?;
+        if self.last_announced.is_some_and(|last| id <= last) {
+            return Err(Violation::MediaKey("key id not increasing"));
+        }
+        let bytes: [u8; 32] = k
+            .key
+            .as_slice()
+            .try_into()
+            .map_err(|_| Violation::MediaKey("key length"))?;
+        if self.live.len() >= MAX_LIVE_KEYS {
+            // Make room by forgetting the oldest superseded key early; a
+            // host rotating faster than the grace period only loses its
+            // own late packets.
+            let oldest = self
+                .live
+                .iter()
+                .filter(|(_, retire)| retire.is_some())
+                .map(|&(id, _)| id)
+                .min()
+                .ok_or(Violation::MediaKey("too many live keys"))?;
+            self.forget(oldest);
+        }
+        self.rx
+            .add_key(id, MediaKey::from_bytes(bytes))
+            .map_err(|_| Violation::MediaKey("key rejected"))?;
+        self.live.push((id, None));
+        self.last_announced = Some(id);
         Ok(())
     }
 
     /// Opens one datagram; returns the frames it completed.
     pub(crate) fn datagram(&mut self, datagram: &[u8], now: Millis) -> Vec<VideoFrame> {
-        let _ = (datagram, now); // RED: not yet
-        Vec::new()
+        let mut frames = Vec::new();
+        let (header, body) = match self.rx.open(datagram) {
+            Ok(x) => x,
+            Err(drop) => {
+                self.stats.count(drop);
+                return frames;
+            }
+        };
+        self.stats.opened += 1;
+        if self.newest_used.is_none_or(|n| header.key_id > n) {
+            self.newest_used = Some(header.key_id);
+            let retire_at = now.plus(KEY_GRACE_MS);
+            for (id, retire) in &mut self.live {
+                if *id < header.key_id && retire.is_none() {
+                    *retire = Some(retire_at);
+                }
+            }
+        }
+        if header.kind != DatagramKind::VideoFragment
+            || header.stream_id != VIDEO_STREAM
+            || header.layer_id != 0
+        {
+            self.stats.ignored += 1;
+            return frames;
+        }
+        for event in self.reassembler.push(header.flags, &body) {
+            match event {
+                ReassemblyEvent::Frame(f) => {
+                    self.stats.frames += 1;
+                    frames.push(f);
+                }
+                ReassemblyEvent::Dropped { .. } => self.stats.frames_dropped += 1,
+                ReassemblyEvent::Rejected(_) => self.stats.bad_fragments += 1,
+                ReassemblyEvent::Late { .. } => self.stats.late_fragments += 1,
+            }
+        }
+        frames
     }
 
     /// Forgets superseded keys whose grace period is over.
     pub(crate) fn tick(&mut self, now: Millis) {
-        let _ = now; // RED: not yet
+        let expired: Vec<u16> = self
+            .live
+            .iter()
+            .filter(|(_, retire)| retire.is_some_and(|at| now >= at))
+            .map(|&(id, _)| id)
+            .collect();
+        for id in expired {
+            self.forget(id);
+        }
     }
 
     fn forget(&mut self, id: u16) {

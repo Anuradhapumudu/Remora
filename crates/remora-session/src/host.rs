@@ -316,8 +316,50 @@ impl Host {
         now: Millis,
         rng: &mut R,
     ) -> Result<Vec<HostAction>, SendVideoError> {
-        let _ = (keyframe, capture_ts_us, data, now, rng); // RED: not yet
-        Ok(Vec::new())
+        let frame_id = self.next_frame_id;
+        let fragments = packetize(frame_id, capture_ts_us, keyframe, data, VIDEO_FRAGMENT_DATA)
+            .map_err(SendVideoError::Frame)?;
+        self.next_frame_id = frame_id
+            .checked_add(1)
+            .ok_or(SendVideoError::FrameIdsExhausted)?;
+        let mut out = Vec::new();
+        for id in self.active_sessions() {
+            let mut datagrams = Vec::with_capacity(fragments.len());
+            let mut failed = None;
+            if let Some(HostSession {
+                state: HostSessionState::Active { est, media },
+                ..
+            }) = self.sessions.get_mut(&id)
+            {
+                for f in &fragments {
+                    match media.seal(video_header(f.flags), &f.body, self.rotate_after, now, rng) {
+                        Ok(datagram) => datagrams.push(HostAction::Media { id, datagram }),
+                        Err(_) => {
+                            failed = Some(Violation::MediaKey("key ids used up"));
+                            break;
+                        }
+                    }
+                }
+                for announce in media.take_announcements() {
+                    match est.encrypt(&control_env(control::Kind::MediaKey(announce))) {
+                        Ok(frame) => out.push(HostAction::Send { id, frame }),
+                        Err(_) => failed = Some(Violation::TransportAuth),
+                    }
+                }
+            }
+            match failed {
+                None => out.extend(datagrams),
+                Some(v) => self.fail(
+                    id,
+                    FailReason::ProtocolViolation(v),
+                    Step::Active,
+                    None,
+                    false,
+                    &mut out,
+                ),
+            }
+        }
+        Ok(out)
     }
 
     /// The current one-time password (for the host's screen only).
@@ -583,6 +625,8 @@ impl Host {
                     self.limiter.release();
                 }
                 out.push(HostAction::Active { id });
+                // A new viewer can only start decoding at a keyframe.
+                out.push(HostAction::ForceKeyframe);
                 // Approved while capture is paused: say so at once.
                 if let crate::CaptureStatus::Interrupted(reason) = self.capture {
                     self.send_stream_state(id, true, reason.wire(), &mut out);

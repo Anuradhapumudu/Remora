@@ -132,7 +132,7 @@ pub fn check_rust(path: &str, content: &str) -> Vec<Violation> {
                 text: line.trim().into(),
             });
         }
-        if false && sends_checked && DATAGRAM_SENDS.iter().any(|w| has_word(&code, w)) {
+        if sends_checked && DATAGRAM_SENDS.iter().any(|w| has_word(&code, w)) {
             v.push(Violation {
                 rule: "QUIC datagram send outside remora-net/src/media.rs",
                 path: path.into(),
