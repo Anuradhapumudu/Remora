@@ -33,8 +33,10 @@ pub(crate) struct Picture {
 /// Receives decoded pictures (on the decode thread).
 #[cfg(target_os = "macos")]
 pub(crate) type Show = Box<dyn FnMut(Picture) + Send>;
+/// No decoder, so no pictures (a named type rather than `()`, which
+/// clippy's `unit_arg` rejects as an argument).
 #[cfg(not(target_os = "macos"))]
-pub(crate) type Show = ();
+pub(crate) struct Show;
 
 /// What happened to the frames handed to [`Decoder::offer`], so far.
 /// Shared with the window, which shows it once per second (R3).
@@ -48,15 +50,17 @@ pub(crate) struct Counters {
     pub(crate) failed: AtomicU64,
     /// Dropped because the decoder was busy (or there is none).
     pub(crate) dropped: AtomicU64,
-    /// Decoded but not shown: the window still had [`MAX_UNSHOWN`]
+    /// Decoded but not shown: the window still had `MAX_UNSHOWN`
     /// pictures to draw (latest wins; the decoder's chain is unaffected).
     pub(crate) not_shown: AtomicU64,
     /// Pictures handed to the window and not yet drawn.
+    #[cfg(target_os = "macos")]
     pub(crate) unshown: AtomicU64,
 }
 
 /// Pictures on their way to the window at most: more would only add
 /// latency (and hold decoder surfaces), so newer ones are dropped.
+#[cfg(target_os = "macos")]
 pub(crate) const MAX_UNSHOWN: u64 = 2;
 
 impl Counters {
@@ -74,6 +78,7 @@ impl Counters {
     /// The window has dealt with one picture. Only the window thread
     /// decrements, so the check and the subtraction cannot race to
     /// below zero.
+    #[cfg(target_os = "macos")]
     pub(crate) fn shown(&self) {
         if self.unshown.load(Ordering::Relaxed) > 0 {
             self.unshown.fetch_sub(1, Ordering::Relaxed);

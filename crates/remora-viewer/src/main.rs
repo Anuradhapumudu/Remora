@@ -139,7 +139,7 @@ fn connect_command(args: ConnectArgs) -> anyhow::Result<u8> {
 #[cfg(not(target_os = "macos"))]
 fn connect_command(args: ConnectArgs) -> anyhow::Result<u8> {
     let display = Display {
-        show: (),
+        show: decode::Show,
         on_counters: Box::new(|_| {}),
         close: None,
     };
