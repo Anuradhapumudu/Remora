@@ -51,6 +51,38 @@ pub(crate) struct ServeArgs {
     /// password (trusted mode). May be repeated.
     #[arg(long = "trust", value_name = "KEY")]
     trusted: Vec<String>,
+    /// What to stream once a viewer is approved: the screen, a numbered
+    /// test pattern (no Screen Recording permission needed; tests and
+    /// measurements), or nothing (Phase 3: control channel only).
+    #[arg(long, value_enum, default_value_t = Source::default())]
+    source: Source,
+    /// Width of the streamed picture in pixels (the screen is scaled to
+    /// it, keeping its aspect ratio; never upscaled).
+    #[arg(long, default_value_t = 1920)]
+    width: u32,
+}
+
+/// `serve --source`.
+#[derive(clap::ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
+enum Source {
+    /// The main display.
+    Screen,
+    /// A test pattern whose frames carry their number (phase4-criteria P7).
+    Synthetic,
+    /// No video.
+    None,
+}
+
+impl Default for Source {
+    /// The screen where this build can capture it (macOS); nothing
+    /// elsewhere until those backends exist (Phase 6.5).
+    fn default() -> Self {
+        if cfg!(target_os = "macos") {
+            Source::Screen
+        } else {
+            Source::None
+        }
+    }
 }
 
 pub(crate) fn run(args: ServeArgs) -> anyhow::Result<()> {
@@ -62,6 +94,7 @@ pub(crate) fn run(args: ServeArgs) -> anyhow::Result<()> {
 }
 
 async fn serve(args: ServeArgs) -> anyhow::Result<()> {
+    let _ = (args.source, args.width); // step 7 GREEN
     if args.bind.ip().is_unspecified() {
         bail!(
             "Phase 3 listens on a specific address (e.g. 127.0.0.1:0), not {}",

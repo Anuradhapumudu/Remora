@@ -192,6 +192,11 @@ fn start_host(dir: &Path, extra: &[&str]) -> Host {
         "--name",
         "e2e host",
     ];
+    // Phase 3's tests need no video; screen capture would need the Screen
+    // Recording permission, which a CI machine does not have.
+    if !extra.contains(&"--source") {
+        args.extend_from_slice(&["--source", "none"]);
+    }
     args.extend_from_slice(extra);
     let mut app = App::spawn(&bins().0, &args);
     let device = value(&app.expect("device:", 10));
@@ -646,4 +651,41 @@ fn f_ux6_an_unquoted_device_code_is_accepted_and_still_checked() {
         !host.app.sees_within("prompt ", 1000),
         "never reaches the host's prompt"
     );
+}
+
+// ------------------------------------------------------- Phase 4 step 7 --
+
+/// The streaming host end to end: a synthetic test pattern through the
+/// real hardware encoder, the sealed media path and the viewer's decoder
+/// (phase4-criteria §8 "Functional"). The viewer runs without a window
+/// and prints its decoder counters when the session ends.
+#[cfg(target_os = "macos")]
+#[test]
+fn streaming_host_video_is_decoded_by_the_viewer() {
+    let dir = tmp_dir();
+    let mut host = start_host(&dir, &["--source", "synthetic", "--width", "640"]);
+    let mut viewer = connect_viewer(
+        &dir,
+        &host.code,
+        &["--password", &host.password, "--no-window"],
+    );
+    let (id, _) = parse_prompt(&host.app.expect("prompt ", 15));
+    host.app.send(&format!("accept {id}"));
+    host.app.expect(&format!("SESSION ACTIVE {id}"), 10);
+    viewer.expect("SESSION ACTIVE", 10);
+    std::thread::sleep(Duration::from_secs(3));
+    host.app.send(&format!("disconnect {id}"));
+    host.app.expect(&format!("session ended {id}"), 10);
+    let line = viewer.expect("video:", 10);
+    assert_eq!(viewer.wait_exit(10), 0);
+    // "video: N frames decoded, R refused, F failed, D dropped"
+    let n = |word: &str| -> u64 {
+        let before = line.split(&format!(" {word}")).next().unwrap();
+        before.rsplit(' ').next().unwrap().parse().unwrap()
+    };
+    // 3 s at 60 fps is 180; a loaded CI machine gets fewer, never none.
+    assert!(n("frames decoded") >= 30, "{line}");
+    // The first frame after approval is a keyframe, so nothing is refused.
+    assert_eq!(n("refused"), 0, "{line}");
+    assert_eq!(n("failed"), 0, "{line}");
 }

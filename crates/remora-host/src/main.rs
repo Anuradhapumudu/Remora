@@ -12,6 +12,8 @@ use clap::{Parser, Subcommand};
 #[cfg(target_os = "macos")]
 mod bench;
 mod serve;
+#[cfg(target_os = "macos")]
+mod stream;
 // Used by the macOS benchmark; pure Rust, so their tests run on every platform.
 #[cfg(any(target_os = "macos", test))]
 mod stats;

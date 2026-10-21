@@ -73,6 +73,10 @@ struct ConnectArgs {
     /// other.
     #[arg(long, value_name = "DEVICE CODE")]
     device: Option<String>,
+    /// Decode the video but open no window (tests and measurements); the
+    /// decoder's counts are printed when the session ends.
+    #[arg(long)]
+    no_window: bool,
 }
 
 fn main() -> ExitCode {
@@ -168,6 +172,7 @@ fn identity(file: Option<PathBuf>) -> anyhow::Result<()> {
 }
 
 async fn run_connect(args: ConnectArgs, display: Display) -> anyhow::Result<u8> {
+    let _ = args.no_window; // step 7 GREEN
     // The code is checked before any network traffic (A07: expiry).
     let code = ConnectionCode::parse(args.code.trim(), unix_now()).map_err(|e| {
         anyhow!(
