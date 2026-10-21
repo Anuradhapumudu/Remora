@@ -333,6 +333,27 @@ The phase report lists the whole deferred list row by row (CLAUDE.md).
   parameter no test could observe (the synthetic pattern is too easy to
   encode for bitrate to show; bitrate is tuned with P1 in 7d).
 
+* **Step 7b, N3 and N4 (2026-10-22).** **N3:** policy-scanner rule "file
+  write in a crate that handles screen content" (`File::create`,
+  `File::create_new`, `File::options`, `fs::write`, `OpenOptions` in the
+  `src/` of capture, codec, net, session, host, viewer; tests, the key
+  store and the capture-to-file benchmark `remora-host/src/bench.rs`
+  allowed). The real workspace passes; a planted `File::create("frame.bin")`
+  in the viewer's decoder fails the workspace scan, and the unit test
+  plants each call in each crate. **N4:** the `Debug` form of every type
+  holding video content checked for any 16-byte window of it (new
+  testkit `find_windows`: decimal `Debug` lists, hex, text). **It found
+  two real leaks:** `Fragment` derived `Debug` over its plaintext body,
+  and `Reassembler` (so also the viewer session's `MediaIn`) over the
+  fragments of open frames — a `{:?}` of either would have logged screen
+  content. Both now print counts and sizes only. `EncodedFrame`,
+  `CapturedFrame`, `VideoFrame` and `DecodedFrame` were already clean
+  (the first two were seen failing against a planted content field).
+  **Mutation:** `check_rust` 26 mutants, 25 caught, 1 unviable; the two
+  new `Debug` impls 2/2 caught (after the tests also required the
+  sizes and ids to be printed: a `Debug` printing nothing leaks nothing
+  too); `find_windows` 3, 2 caught, 1 unviable.
+
 ## 12. Changes to criteria
 
 * **2026-10-19 — owner approval.** R1–R5 approved as proposed. R1 and R2 are

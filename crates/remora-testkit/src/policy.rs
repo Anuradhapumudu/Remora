@@ -12,6 +12,8 @@
 //! * quinn's datagram send only in `remora-net/src/media.rs`, whose send
 //!   function takes a `SealedDatagram` (phase4-criteria M2, INV2). Tests
 //!   may call it: they play hostile peers.
+//! * No file writes in the `src/` of the crates that handle screen content
+//!   (phase4-criteria N3, INV9), except the capture-to-file benchmark.
 
 use std::path::Path;
 
@@ -48,6 +50,28 @@ const OS_WORDS: [&str; 8] = [
     "windows_sys",
     "target_os",
     "3815",
+];
+
+/// Crates that handle screen content: no file writes in their `src/`
+/// (phase4-criteria N3, INV9).
+const NO_FILE_WRITES: [&str; 6] = [
+    "crates/remora-capture/src/",
+    "crates/remora-codec/src/",
+    "crates/remora-net/src/",
+    "crates/remora-session/src/",
+    "crates/remora-host/src/",
+    "crates/remora-viewer/src/",
+];
+/// The one writer allowed among them: the Phase 2 `bench-capture --out`
+/// tool, which saves the encoded stream on purpose (INV9's exception).
+const FILE_WRITE_ALLOWED: &str = "crates/remora-host/src/bench.rs";
+/// Ways to create or write a file.
+const FILE_WRITES: [&str; 5] = [
+    "File::create",
+    "File::create_new",
+    "File::options",
+    "fs::write",
+    "OpenOptions",
 ];
 
 /// The one file allowed to hand datagrams to quinn (M2).
@@ -113,6 +137,8 @@ pub fn check_rust(path: &str, content: &str) -> Vec<Violation> {
     let os_free = OS_FREE.iter().any(|c| path.starts_with(c));
     let sends_checked =
         path.starts_with("crates/") && path.contains("/src/") && path != MEDIA_SEND_FILE;
+    let writes_checked =
+        NO_FILE_WRITES.iter().any(|c| path.starts_with(c)) && path != FILE_WRITE_ALLOWED;
     let mut v = Vec::new();
     for (i, line) in content.lines().enumerate() {
         let code = code_part(line);
@@ -135,6 +161,14 @@ pub fn check_rust(path: &str, content: &str) -> Vec<Violation> {
         if sends_checked && DATAGRAM_SENDS.iter().any(|w| has_word(&code, w)) {
             v.push(Violation {
                 rule: "QUIC datagram send outside remora-net/src/media.rs",
+                path: path.into(),
+                line: i + 1,
+                text: line.trim().into(),
+            });
+        }
+        if writes_checked && FILE_WRITES.iter().any(|w| has_word(&code, w)) {
+            v.push(Violation {
+                rule: "file write in a crate that handles screen content",
                 path: path.into(),
                 line: i + 1,
                 text: line.trim().into(),
@@ -305,6 +339,7 @@ mod tests {
                     v[0].rule,
                     "file write in a crate that handles screen content"
                 );
+                assert_eq!(v[0].line, 1);
                 // Tests may write (temp dirs, fixtures); the key store may.
                 assert!(check_rust(&format!("crates/{c}/tests/x.rs"), &src).is_empty());
             }

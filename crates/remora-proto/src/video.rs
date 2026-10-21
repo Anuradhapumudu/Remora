@@ -118,12 +118,22 @@ impl FragmentHeader {
 }
 
 /// One fragment ready to seal: the clear-header flags and the plaintext body.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct Fragment {
     /// [`FLAG_KEYFRAME`] / [`FLAG_LAST`] for the clear header.
     pub flags: u8,
     /// Plaintext body ([`FragmentHeader`] + data).
     pub body: Vec<u8>,
+}
+
+impl std::fmt::Debug for Fragment {
+    // The body is screen content in plaintext: its size only (INV9, N4).
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Fragment")
+            .field("flags", &self.flags)
+            .field("bytes", &self.body.len())
+            .finish()
+    }
 }
 
 /// Why a frame cannot be sent.
@@ -249,7 +259,6 @@ pub enum ReassemblyEvent {
 }
 
 /// A frame still missing fragments.
-#[derive(Debug)]
 struct Partial {
     frame_id: u32,
     frag_count: u16,
@@ -259,6 +268,20 @@ struct Partial {
     /// made only after every limit was checked.
     parts: BTreeMap<u16, Vec<u8>>,
     bytes: usize,
+}
+
+impl std::fmt::Debug for Partial {
+    // The parts are screen content in plaintext: counts only (INV9, N4).
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Partial")
+            .field("frame_id", &self.frame_id)
+            .field("frag_count", &self.frag_count)
+            .field("keyframe", &self.keyframe)
+            .field("capture_ts_us", &self.capture_ts_us)
+            .field("received", &self.parts.len())
+            .field("bytes", &self.bytes)
+            .finish()
+    }
 }
 
 /// Frame IDs given up recently, remembered so that their stray fragments are

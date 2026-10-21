@@ -25,6 +25,9 @@ fn n4_fragments_print_no_content() {
     let frags = packetize(7, 1_000, true, &data, VIDEO_FRAGMENT_DATA).unwrap();
     for f in &frags {
         assert_clean("Fragment", &format!("{f:?}"), &data);
+        // Still useful: the flags and the size.
+        let want = format!("Fragment {{ flags: {}, bytes: {} }}", f.flags, f.body.len());
+        assert_eq!(format!("{f:?}"), want);
     }
 }
 
@@ -37,7 +40,12 @@ fn n4_a_reassembler_holding_part_of_a_frame_prints_no_content() {
     for f in &frags[..2] {
         assert!(r.push(f.flags, &f.body).is_empty());
     }
-    assert_clean("Reassembler", &format!("{r:?}"), &data);
+    let shown = format!("{r:?}");
+    assert_clean("Reassembler", &shown, &data);
+    assert!(
+        shown.contains("frame_id: 7") && shown.contains("received: 2"),
+        "{shown}"
+    );
     // And the completed frame, as an event.
     let ev = r.push(frags[2].flags, &frags[2].body);
     assert!(matches!(ev[0], ReassemblyEvent::Frame(_)));

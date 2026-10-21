@@ -117,8 +117,8 @@ pub fn find_leaks(text: &str, canaries: &[Canary]) -> Vec<Leak> {
 /// frame"). Base64 is not searched: it depends on the run's alignment.
 pub fn find_windows(text: &str, name: &'static str, data: &[u8], window: usize) -> Vec<Leak> {
     let mut leaks = Vec::new();
-    if window == 0 || data.len() < window {
-        return leaks;
+    if window == 0 {
+        return leaks; // `windows(0)` would panic
     }
     for run in data.windows(window) {
         let list = run.iter().map(u8::to_string).collect::<Vec<_>>().join(", ");
@@ -212,6 +212,10 @@ mod tests {
         let short = format!("{:?}", &frame[0..15]);
         assert!(find_windows(&short, "frame", &frame, 16).is_empty());
         assert!(find_windows("bytes: 40", "frame", &frame, 16).is_empty());
+        // A frame exactly one window long; a zero window finds nothing.
+        let exact = format!("{:?}", &frame[..16]);
+        assert_eq!(find_windows(&exact, "frame", &frame[..16], 16).len(), 1);
+        assert!(find_windows(&exact, "frame", &frame, 0).is_empty());
     }
 
     use super::*;
