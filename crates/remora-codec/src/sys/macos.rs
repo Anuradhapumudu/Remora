@@ -24,7 +24,8 @@ use objc2_core_media::{
 };
 use objc2_core_video::{
     CVImageBuffer, CVPixelBuffer, CVPixelBufferCreate, CVPixelBufferGetBaseAddressOfPlane,
-    CVPixelBufferGetBytesPerRowOfPlane, CVPixelBufferGetHeightOfPlane, CVPixelBufferGetWidth,
+    CVPixelBufferGetBytesPerRowOfPlane, CVPixelBufferGetHeight, CVPixelBufferGetHeightOfPlane,
+    CVPixelBufferGetPixelFormatType, CVPixelBufferGetPlaneCount, CVPixelBufferGetWidth,
     CVPixelBufferLockBaseAddress, CVPixelBufferLockFlags, CVPixelBufferPool,
     CVPixelBufferUnlockBaseAddress, kCVPixelBufferHeightKey, kCVPixelBufferIOSurfacePropertiesKey,
     kCVPixelBufferPixelFormatTypeKey, kCVPixelBufferWidthKey,
@@ -591,7 +592,31 @@ impl SyntheticSource {
     /// ([`crate::barcode`]); numbers count 0, 1, 2, … from the first frame
     /// this source made, marked or not (phase4-criteria P7).
     pub fn next_frame_marked(&mut self) -> Result<(u32, PixelBufferRef), CodecError> {
-        Err(CodecError::Unsupported("RED: not yet"))
+        let number = u32::try_from(self.frame).unwrap_or(u32::MAX);
+        let frame = self.next_frame()?;
+        let buf = frame.as_cv();
+        // SAFETY: valid buffer; flags 0 = read/write lock.
+        os("CVPixelBufferLockBaseAddress", unsafe {
+            CVPixelBufferLockBaseAddress(buf, CVPixelBufferLockFlags(0))
+        })?;
+        let base = CVPixelBufferGetBaseAddressOfPlane(buf, 0).cast::<u8>();
+        let stride = CVPixelBufferGetBytesPerRowOfPlane(buf, 0);
+        let rows = CVPixelBufferGetHeightOfPlane(buf, 0);
+        let stamped = !base.is_null()
+            && stride.checked_mul(rows).is_some_and(|len| {
+                // SAFETY: while locked, the luma plane is `stride * rows`
+                // writable bytes at `base`.
+                let luma = unsafe { std::slice::from_raw_parts_mut(base, len) };
+                crate::barcode::stamp(luma, stride, CVPixelBufferGetWidth(buf), rows, number)
+            });
+        // SAFETY: matched with the lock above.
+        unsafe { CVPixelBufferUnlockBaseAddress(buf, CVPixelBufferLockFlags(0)) };
+        if !stamped {
+            return Err(CodecError::Unsupported(
+                "frame smaller than the barcode strip",
+            ));
+        }
+        Ok((number, frame))
     }
 
     /// Returns the next frame: a vertical bar sweeping across a gradient, so
@@ -937,8 +962,46 @@ impl DecodedFrame {
     /// to the GPU). Fails if the picture is not 8-bit NV12 or its planes
     /// are not what their sizes say.
     pub fn with_nv12<R>(&self, f: impl FnOnce(&Nv12<'_>) -> R) -> Result<R, CodecError> {
-        let _ = f;
-        Err(CodecError::Unsupported("RED: not yet"))
+        let buf = self.image.as_cv();
+        if CVPixelBufferGetPixelFormatType(buf) != kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange
+            || CVPixelBufferGetPlaneCount(buf) != 2
+        {
+            return Err(CodecError::Unsupported("picture is not 8-bit NV12"));
+        }
+        // SAFETY: valid buffer; read-only lock (we never write the planes).
+        os("CVPixelBufferLockBaseAddress", unsafe {
+            CVPixelBufferLockBaseAddress(buf, CVPixelBufferLockFlags::ReadOnly)
+        })?;
+        let _unlock = UnlockOnDrop(buf);
+        let plane = |i: usize| -> Option<(&[u8], usize)> {
+            let base = CVPixelBufferGetBaseAddressOfPlane(buf, i).cast::<u8>();
+            let stride = CVPixelBufferGetBytesPerRowOfPlane(buf, i);
+            let len = stride.checked_mul(CVPixelBufferGetHeightOfPlane(buf, i))?;
+            // SAFETY: while the buffer is locked (until `_unlock` drops, after
+            // `f` returns), plane `i` is `stride * rows` readable bytes at
+            // `base`. The slices never leave this function: `f` gets them
+            // for the call only.
+            (!base.is_null()).then(|| (unsafe { std::slice::from_raw_parts(base, len) }, stride))
+        };
+        let ((y, y_stride), (uv, uv_stride)) = plane(0)
+            .zip(plane(1))
+            .ok_or(CodecError::Bitstream("picture planes not readable"))?;
+        let width = u32::try_from(CVPixelBufferGetWidth(buf)).unwrap_or(0);
+        let height = u32::try_from(CVPixelBufferGetHeight(buf)).unwrap_or(0);
+        let nv12 = Nv12::new(width, height, y, y_stride, uv, uv_stride).ok_or(
+            CodecError::Bitstream("picture planes smaller than the picture"),
+        )?;
+        Ok(f(&nv12))
+    }
+}
+
+/// Unlocks a read-only-locked pixel buffer when dropped (also on panic).
+struct UnlockOnDrop<'a>(&'a CVPixelBuffer);
+
+impl Drop for UnlockOnDrop<'_> {
+    fn drop(&mut self) {
+        // SAFETY: matched with the read-only lock in `with_nv12`.
+        unsafe { CVPixelBufferUnlockBaseAddress(self.0, CVPixelBufferLockFlags::ReadOnly) };
     }
 }
 

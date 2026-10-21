@@ -287,6 +287,30 @@ The phase report lists the whole deferred list row by row (CLAUDE.md).
   and decoding the real capture stream end to end (step 7); the decode
   thread in `remora-viewer` releases each picture.
 
+* **Step 6 (2026-10-21).** Viewer window and P7 (architecture D41).
+  Tests: `remora-codec/tests/p7_barcode.rs` (11, every OS: barcode round
+  trips through luma and the renderer's RGB, ±60 noise, every one- and
+  two-cell error reads as "no number" — all 780 pairs checked; `Nv12::new`
+  bounds), `remora-viewer/tests/p7_frames.rs` (4, macOS, real encoder →
+  `VtDecoder` → renderer offscreen → read back). **P7:** 90 of 90 frames
+  drawn once, in order, each showing its own number; with frames 40–41
+  lost, 0–39 then 60–89 (nothing until the keyframe); with 51 before 50
+  and 70 twice, 0–49 then 60–70, never backwards, never twice. **Plants,
+  each seen failing then removed:** a renderer that keeps the first
+  picture ("drawn frame 1: number 0 after 0 (repeat)"), chroma bound as
+  luma ("drawn frame 0: barcode unreadable"), the decoder's frame-gap rule
+  removed ("drawn frame 40: barcode unreadable" — the step-5 finding seen
+  in pixels: a frame decoded after a lost one is visibly wrong). **Window
+  smoke run** (temporary harness, not committed; 1920 × 1248 synthetic
+  stream): present mode `Immediate`, format `Bgra8Unorm`; the R3 line
+  each second. Its CPU time for upload + acquire + draw + present was
+  p50 ≈ 2 ms, p95 ≈ 2.5 ms — **not** a P1/P2 measurement (that is to GPU
+  completion, step 7), but above the spike's 0.75–0.80 ms p95 for upload
+  + draw alone and above the 1.5 ms stage budget, so step 7 must measure
+  it properly before anything is concluded. When the window is hidden,
+  macOS gives no drawable and frames are decoded but not drawn (the
+  stats show 0 fps).
+
 ## 12. Changes to criteria
 
 * **2026-10-19 — owner approval.** R1–R5 approved as proposed. R1 and R2 are

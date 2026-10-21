@@ -201,8 +201,28 @@ impl<'a> Nv12<'a> {
         uv: &'a [u8],
         uv_stride: usize,
     ) -> Option<Self> {
-        let _ = (width, height, y, y_stride, uv, uv_stride);
-        None // RED: not yet
+        // Bytes a plane needs: every row but the last at `stride`, the last
+        // only its used bytes.
+        let needs = |row_bytes: usize, rows: usize, stride: usize| {
+            (stride >= row_bytes)
+                .then(|| stride.checked_mul(rows - 1)?.checked_add(row_bytes))
+                .flatten()
+        };
+        let (w, h) = (usize::try_from(width).ok()?, usize::try_from(height).ok()?);
+        if w == 0 || h == 0 {
+            return None;
+        }
+        let y_ok = needs(w, h, y_stride).is_some_and(|n| y.len() >= n);
+        let uv_ok =
+            needs(2 * w.div_ceil(2), h.div_ceil(2), uv_stride).is_some_and(|n| uv.len() >= n);
+        (y_ok && uv_ok).then_some(Self {
+            width,
+            height,
+            y,
+            y_stride,
+            uv,
+            uv_stride,
+        })
     }
 
     /// Picture width in pixels.

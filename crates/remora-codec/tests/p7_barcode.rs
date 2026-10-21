@@ -111,6 +111,32 @@ fn p7_a_wrong_cell_reads_as_no_number_never_another_number() {
 }
 
 #[test]
+fn p7_any_two_wrong_cells_read_as_no_number() {
+    // Every pair of the 40 data + check cells (780 pairs), for a few
+    // numbers: the documented claim that CRC-8 (0x07) catches all one- and
+    // two-cell errors in this strip, checked rather than assumed.
+    let flip = |y: &mut [u8], cell: usize| {
+        for row in 0..HEIGHT {
+            for px in &mut y[row * W + cell * CELL..row * W + (cell + 1) * CELL] {
+                *px = if *px == 235 { 16 } else { 235 };
+            }
+        }
+    };
+    for v in [0u32, 1, 0xDEAD_BEEF, u32::MAX] {
+        let mut y = plane(128);
+        stamp(&mut y, W, W, H, v);
+        for a in 2..42 {
+            for b in a + 1..42 {
+                let mut z = y.clone();
+                flip(&mut z, a);
+                flip(&mut z, b);
+                assert_eq!(read_luma(&z, W, W, H), None, "{v:#x}: cells {a} and {b}");
+            }
+        }
+    }
+}
+
+#[test]
 fn p7_no_strip_reads_as_no_number() {
     assert_eq!(read_luma(&plane(16), W, W, H), None);
     assert_eq!(read_luma(&plane(235), W, W, H), None);

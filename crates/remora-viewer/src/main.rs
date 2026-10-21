@@ -12,6 +12,8 @@
 #![forbid(unsafe_code)]
 
 mod decode;
+#[cfg(target_os = "macos")]
+mod window;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -87,19 +89,68 @@ fn main() -> ExitCode {
             Ok(exit::OK)
         }
         Some(Command::Identity { identity_file }) => identity(identity_file).map(|()| exit::OK),
-        Some(Command::Connect(args)) => tokio::runtime::Builder::new_multi_thread()
-            .enable_all()
-            .build()
-            .context("starting the async runtime")
-            .and_then(|rt| rt.block_on(run_connect(args))),
+        Some(Command::Connect(args)) => connect_command(args),
     };
+    ExitCode::from(exit_code(result))
+}
+
+/// The exit code for a command's result, printing the error if any.
+fn exit_code(result: anyhow::Result<u8>) -> u8 {
     match result {
-        Ok(code) => ExitCode::from(code),
+        Ok(code) => code,
         Err(e) => {
             println!("failed: {e:#}");
-            ExitCode::from(exit::ERROR)
+            exit::ERROR
         }
     }
+}
+
+fn runtime() -> anyhow::Result<tokio::runtime::Runtime> {
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .context("starting the async runtime")
+}
+
+/// macOS: the window owns the main thread and the session runs on its
+/// own (phase4-criteria R1); the session's output and exit codes are
+/// unchanged.
+#[cfg(target_os = "macos")]
+fn connect_command(args: ConnectArgs) -> anyhow::Result<u8> {
+    use window::Event;
+    window::run(move |proxy, close| {
+        let show_proxy = proxy.clone();
+        let counters_proxy = proxy.clone();
+        let display = Display {
+            show: Box::new(move |p| {
+                let _ = show_proxy.send_event(Event::Picture(p));
+            }),
+            on_counters: Box::new(move |c| {
+                let _ = counters_proxy.send_event(Event::Counters(c));
+            }),
+            close: Some(close),
+        };
+        let code = exit_code(runtime().and_then(|rt| rt.block_on(run_connect(args, display))));
+        let _ = proxy.send_event(Event::Ended(code));
+    })
+}
+
+/// Other systems: no window or decoder yet (Phase 6.5).
+#[cfg(not(target_os = "macos"))]
+fn connect_command(args: ConnectArgs) -> anyhow::Result<u8> {
+    let display = Display {
+        show: (),
+        on_counters: Box::new(|_| {}),
+        close: None,
+    };
+    runtime().and_then(|rt| rt.block_on(run_connect(args, display)))
+}
+
+/// Where decoded pictures go, and how the window asks to end the session.
+struct Display {
+    show: decode::Show,
+    on_counters: Box<dyn FnOnce(Arc<decode::Counters>) + Send>,
+    close: Option<tokio::sync::oneshot::Receiver<()>>,
 }
 
 fn identity(file: Option<PathBuf>) -> anyhow::Result<()> {
@@ -116,7 +167,7 @@ fn identity(file: Option<PathBuf>) -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn run_connect(args: ConnectArgs) -> anyhow::Result<u8> {
+async fn run_connect(args: ConnectArgs, display: Display) -> anyhow::Result<u8> {
     // The code is checked before any network traffic (A07: expiry).
     let code = ConnectionCode::parse(args.code.trim(), unix_now()).map_err(|e| {
         anyhow!(
@@ -204,12 +255,13 @@ async fn run_connect(args: ConnectArgs) -> anyhow::Result<u8> {
         host_id.short_code()
     );
     let (client, mut events) = connect(addr, config, code.nonce).await?;
-    let mut decoder = decode::Decoder::start(client.clone()).context("decoder thread")?;
-    let code = session_loop(&mut events, &mut decoder).await;
-    let v = decoder.finish();
+    let mut decoder =
+        decode::Decoder::start(client.clone(), display.show).context("decoder thread")?;
+    (display.on_counters)(decoder.counters());
+    let code = session_loop(&client, &mut events, &mut decoder, display.close).await;
+    let (decoded, refused, failed, dropped) = decoder.finish();
     println!(
-        "video: {} frames decoded, {} refused, {} failed, {} dropped",
-        v.decoded, v.refused, v.failed, v.dropped
+        "video: {decoded} frames decoded, {refused} refused, {failed} failed, {dropped} dropped"
     );
     drop(client);
     Ok(code)
@@ -217,11 +269,26 @@ async fn run_connect(args: ConnectArgs) -> anyhow::Result<u8> {
 
 /// Shows the session's events until it ends; returns the exit code.
 async fn session_loop(
+    client: &remora_net::ViewerClient,
     events: &mut tokio::sync::mpsc::UnboundedReceiver<ViewerEvent>,
     decoder: &mut decode::Decoder,
+    mut close: Option<tokio::sync::oneshot::Receiver<()>>,
 ) -> u8 {
     let mut outcome: Option<u8> = None;
-    while let Some(ev) = events.recv().await {
+    loop {
+        let ev = tokio::select! {
+            ev = events.recv() => match ev {
+                Some(ev) => ev,
+                None => break,
+            },
+            // The window was closed: end the session the normal way and
+            // keep reading until the connection reports how it ended.
+            _ = async { if let Some(c) = close.as_mut() { let _ = c.await; } }, if close.is_some() => {
+                close = None;
+                client.disconnect();
+                continue;
+            }
+        };
         match ev {
             ViewerEvent::ShowSas { sas, host } => {
                 println!(
