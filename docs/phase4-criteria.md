@@ -240,7 +240,14 @@ The phase report lists the whole deferred list row by row (CLAUDE.md).
   repeated (CI's test job; the mutation job runs it with `M8_PACKETS` =
   20 000, still 20 rotations, as it does A04 with 3 samples: 10⁶ per
   mutant would put the session shard over its 120-minute limit; the media
-  mutants were re-run at 20 000 with the same result). **Mutation:** the new session media code first left 17
+  mutants were re-run at 20 000 with the same result). *Slip:* the first
+  version of that change read the variable as `M8_packets` (a scripted
+  rename hit it), so CI ignored it, the session shard ran 2 minutes per
+  mutant and timed out, and the local "re-run at 20 000" had in fact run
+  10⁶. Fixed in the next commit, the local re-run repeated at a real
+  20 000 (60 mutants: 55 caught, 4 unviable, 1 justified equivalent), and
+  the Mutants workflow now fails if a test stops reading a variable it
+  sets (planted rename caught). **Mutation:** the new session media code first left 17
   survivors (key lifetime not pinned, current/next key not shown to
   survive the grace window, unusable-but-authentic datagrams and three
   drop counters never checked); new tests kill 16, one is equivalent

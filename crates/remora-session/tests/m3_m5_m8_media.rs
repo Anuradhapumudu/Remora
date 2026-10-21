@@ -289,15 +289,15 @@ fn m5_a_replayed_datagram_is_dropped_and_counted() {
 #[test]
 fn m8_counters_strictly_increase_and_never_repeat_over_a_million_packets() {
     // 10^6 as M8 asks. The mutation job (which reruns this once per mutant)
-    // sets M8_packets lower, like A04_SAMPLES: any count still shows a
+    // sets M8_PACKETS lower, like A04_SAMPLES: any count still shows a
     // repeat or a missed rotation, the full count is CI's normal test run.
-    let packets: u64 = std::env::var("M8_packets")
+    let packets: u64 = std::env::var("M8_PACKETS")
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(1_000_000);
     assert!(
         packets >= 20_000,
-        "M8_packets={packets}: too few to rotate 20 times"
+        "M8_PACKETS={packets}: too few to rotate 20 times"
     );
     let per_key = packets / 20;
     let h = device("host");
