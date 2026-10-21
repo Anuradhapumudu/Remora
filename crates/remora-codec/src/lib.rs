@@ -292,6 +292,24 @@ pub struct DecodeStats {
 
 #[cfg(test)]
 mod tests {
+    /// N4 (phase4-criteria §6, INV9): an encoded frame prints its size,
+    /// never its bytes (compressed screen content).
+    #[test]
+    fn n4_encoded_frame_debug_prints_no_content() {
+        let data: Vec<u8> = (0..4096u32).map(|i| (i * 73 + 151) as u8).collect();
+        let now = std::time::Instant::now();
+        let f = super::EncodedFrame {
+            seq: 5,
+            keyframe: true,
+            data: data.clone(),
+            submitted: now,
+            completed: now,
+        };
+        let leaks = remora_testkit::canary::find_windows(&format!("{f:?}"), "frame", &data, 16);
+        assert!(leaks.is_empty(), "{leaks:?}");
+        assert!(format!("{f:?}").contains("bytes: 4096"));
+    }
+
     use super::*;
 
     #[test]

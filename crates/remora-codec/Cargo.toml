@@ -24,5 +24,8 @@ objc2-video-toolbox = { workspace = true, features = [
 objc2-core-media = { workspace = true, features = ["CMSampleBuffer", "CMBlockBuffer", "CMFormatDescription", "CMTime", "CMBase", "objc2-core-video"] }
 objc2-core-video = { workspace = true, features = ["CVBuffer", "CVImageBuffer", "CVPixelBuffer", "CVPixelBufferPool", "CVReturn", "CVBase"] }
 
+[dev-dependencies]
+remora-testkit = { workspace = true }
+
 [lints]
 workspace = true

@@ -215,6 +215,30 @@ pub trait ScreenCapture: Send {
 
 #[cfg(test)]
 mod tests {
+    /// N4 (phase4-criteria §6, INV9): a captured frame's `Debug` names
+    /// exactly these fields — the image is never among them.
+    #[test]
+    fn n4_captured_frame_debug_never_shows_the_image() {
+        let f = CapturedFrame {
+            seq: 3,
+            status: FrameStatus::Complete,
+            arrival: Instant::now(),
+            delivery_ns: Some(5),
+            dirty_rects: vec![Rect {
+                x: 1.0,
+                y: 2.0,
+                w: 3.0,
+                h: 4.0,
+            }],
+            #[cfg(target_os = "macos")]
+            image: None,
+        };
+        assert_eq!(
+            format!("{f:?}"),
+            "CapturedFrame { seq: 3, status: Complete, delivery_ns: Some(5), dirty_rects: 1, .. }"
+        );
+    }
+
     use super::*;
 
     fn cfg(width: u32, height: u32) -> CaptureConfig {

@@ -278,6 +278,51 @@ mod tests {
     }
 
     #[test]
+    fn n3_no_file_writes_in_the_media_crates() {
+        // phase4-criteria §6 N3 (INV9): nothing that could put screen
+        // content on disk in the crates that handle it.
+        let crates = [
+            "remora-capture",
+            "remora-codec",
+            "remora-net",
+            "remora-session",
+            "remora-host",
+            "remora-viewer",
+        ];
+        for call in [
+            "File::create(\"frame.bin\")",
+            "std::fs::write(p, &data)",
+            "OpenOptions::new().write(true)",
+            "File::options().append(true)",
+            "File::create_new(p)",
+        ] {
+            let src = format!("let f = {call};");
+            for c in crates {
+                let path = format!("crates/{c}/src/lib.rs");
+                let v = check_rust(&path, &src);
+                assert_eq!(v.len(), 1, "{call} in {path}");
+                assert_eq!(
+                    v[0].rule,
+                    "file write in a crate that handles screen content"
+                );
+                // Tests may write (temp dirs, fixtures); the key store may.
+                assert!(check_rust(&format!("crates/{c}/tests/x.rs"), &src).is_empty());
+            }
+            assert!(check_rust("crates/remora-app/src/keystore.rs", &src).is_empty());
+            // The one allowed writer: the Phase 2 capture-to-file benchmark.
+            assert!(check_rust("crates/remora-host/src/bench.rs", &src).is_empty());
+        }
+        // Comments and strings may name them.
+        assert!(
+            check_rust(
+                "crates/remora-viewer/src/main.rs",
+                "// never File::create here\nlet s = \"fs::write\";"
+            )
+            .is_empty()
+        );
+    }
+
+    #[test]
     fn flags_unsafe_outside_sys_but_not_inside() {
         let src = "fn f() { unsafe { g() } }";
         let v = check_rust("crates/remora-net/src/lib.rs", src);

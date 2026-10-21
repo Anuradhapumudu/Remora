@@ -284,3 +284,32 @@ pub(crate) fn video_header(flags: u8) -> DatagramHeader {
         layer_id: 0,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used)] // test code
+
+    use remora_proto::limits::VIDEO_FRAGMENT_DATA;
+    use remora_proto::video::packetize;
+    use remora_testkit::canary::find_windows;
+
+    use super::*;
+
+    /// N4 (phase4-criteria §6, INV9): the viewer's media state, holding
+    /// part of a frame, prints no content.
+    #[test]
+    fn n4_media_state_holding_part_of_a_frame_prints_no_content() {
+        let data: Vec<u8> = (0..2 * VIDEO_FRAGMENT_DATA)
+            .map(|i| (i as u8).wrapping_mul(73).wrapping_add(151))
+            .collect();
+        let frags = packetize(3, 9, false, &data, VIDEO_FRAGMENT_DATA).unwrap();
+        let mut m = MediaIn::default();
+        assert!(
+            m.reassembler
+                .push(frags[0].flags, &frags[0].body)
+                .is_empty()
+        );
+        let leaks = find_windows(&format!("{m:?}"), "frame", &data, 16);
+        assert!(leaks.is_empty(), "{leaks:?}");
+    }
+}
