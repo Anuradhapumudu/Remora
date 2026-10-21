@@ -9,6 +9,7 @@
 //! so the TLS layer itself is internally consistent.
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
 use rustls::crypto::{CryptoProvider, WebPkiSupportedAlgorithms, verify_tls13_signature};
@@ -21,6 +22,19 @@ use crate::NetError;
 pub const ALPN: &[u8] = b"remora/1";
 /// SNI / certificate name (never resolved; `.invalid` is reserved).
 pub const SERVER_NAME: &str = "remora.invalid";
+
+/// How long a connection may be completely silent before QUIC declares it
+/// dead. Set explicitly on both sides (the peers use the smaller value)
+/// rather than relying on quinn's default.
+pub const IDLE_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// How often an otherwise silent connection sends a QUIC PING (an
+/// encrypted, ack-eliciting packet with no data). Without it, a session
+/// with nothing to say - a prompt waiting for the host user, a paused
+/// stream, a Phase 3 session with no video - died after [`IDLE_TIMEOUT`]
+/// (owner walkthrough, 2026-10-21: quinn-proto 0.11.19 defaults to a 30 s
+/// idle timeout and **no** keepalive, `src/config/transport.rs`).
+pub const KEEP_ALIVE: Duration = Duration::from_secs(5);
 
 fn provider() -> Arc<CryptoProvider> {
     Arc::new(rustls::crypto::ring::default_provider())

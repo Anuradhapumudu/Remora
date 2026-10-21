@@ -29,7 +29,7 @@ use remora_app::prompts::{HostCommand, SessionBook, no_such_prompt, parse_host_c
 use remora_crypto::identity::IdentityPublic;
 use remora_crypto::sas::Sas;
 use remora_crypto::secret::Otp;
-use remora_net::{HostEvent, HostServer};
+use remora_net::{HostEvent, HostServer, IDLE_TIMEOUT};
 use remora_session::{HostConfig, Identity, SessionId};
 
 /// How long each printed connection code is valid (protocol.md §2: ≤ 5 min).
@@ -218,7 +218,8 @@ impl Ui {
             HostEvent::Active { id } => {
                 let n = match self.number_of(id) {
                     Some(n) => n,
-                    // Trusted mode has no prompt: number it now.
+                    // Every session is prompted, trusted or not (threat
+                    // model §4 item 6); kept so a session never goes unnumbered.
                     None => self.book.insert(Entry { id, pending: None }),
                 };
                 if let Some(e) = self.book.get_mut(n) {
@@ -258,6 +259,18 @@ impl Ui {
                 if let Some(n) = self.number_of(id) {
                     self.book.remove(n);
                     println!("session ended {n} ({code:?})");
+                }
+            }
+            // Walkthrough 2026-10-21: a dead connection used to be printed
+            // as "session ended (Normal)".
+            HostEvent::Lost { id } => {
+                self.inputs.remove(&id);
+                if let Some(n) = self.number_of(id) {
+                    self.book.remove(n);
+                    println!(
+                        "connection lost {n}: no reply from the viewer for {} s - session ended",
+                        IDLE_TIMEOUT.as_secs()
+                    );
                 }
             }
         }

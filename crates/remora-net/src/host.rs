@@ -82,6 +82,14 @@ pub enum HostEvent {
         /// Code sent to the peer.
         code: CloseCode,
     },
+    /// The connection for `id` died without a close from either side: the
+    /// viewer went silent for [`crate::IDLE_TIMEOUT`] (network gone, viewer
+    /// machine asleep or crashed) or reset it. The session is over; this is
+    /// reported instead of [`HostEvent::Closed`], never as an orderly close.
+    Lost {
+        /// Session.
+        id: SessionId,
+    },
 }
 
 /// What the per-connection writer task does, in order.

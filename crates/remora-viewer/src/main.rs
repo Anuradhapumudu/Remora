@@ -22,7 +22,7 @@ use remora_app::cli::{
 use remora_app::keystore::{self, Role};
 use remora_crypto::identity::{DeviceId, IdentityPublic, ShortCode};
 use remora_crypto::secret::Otp;
-use remora_net::{ViewerEvent, connect};
+use remora_net::{IDLE_TIMEOUT, ViewerEvent, connect};
 use remora_proto::code::{CodeKind, ConnectionCode};
 use remora_session::{CloseCode, FailReason, Identity, ViewerConfig, ViewerMode};
 
@@ -215,6 +215,17 @@ async fn run_connect(args: ConnectArgs) -> anyhow::Result<u8> {
             ViewerEvent::Failed { reason, .. } => outcome = Some(report_failure(&reason)),
             ViewerEvent::Closed { local, remote } => {
                 let code = outcome.unwrap_or_else(|| report_close(local, remote));
+                drop(client);
+                return Ok(code);
+            }
+            ViewerEvent::Lost => {
+                let code = outcome.unwrap_or_else(|| {
+                    println!(
+                        "failed: connection lost - no reply from the host for {} s (network down, or the host stopped)",
+                        IDLE_TIMEOUT.as_secs()
+                    );
+                    exit::ERROR
+                });
                 drop(client);
                 return Ok(code);
             }

@@ -50,6 +50,9 @@ pub enum ViewerEvent {
         /// Code the host sent, if it closed.
         remote: Option<CloseCode>,
     },
+    /// The connection died without a close from either side: the host went
+    /// silent for [`crate::IDLE_TIMEOUT`] or reset it.
+    Lost,
 }
 
 /// Handle to a running viewer connection.
