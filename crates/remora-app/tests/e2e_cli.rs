@@ -625,3 +625,25 @@ fn f_ux5_values_in_the_wrong_place_name_the_host_line_to_copy() {
         "a refused attempt reached the host"
     );
 }
+
+/// F-UX6 (walkthrough 2026-10-21, twice): `--device 8531 422 5411-5`
+/// without quotes was a clap error ("unexpected argument '422'"). The
+/// device code is printed with spaces, so it must also work typed that
+/// way - and still be checked in full (A16).
+#[test]
+fn f_ux6_an_unquoted_device_code_is_accepted_and_still_checked() {
+    let dir = tmp_dir();
+    let mut host = start_host(&dir, &[]);
+    let other = tmp_dir();
+    let (_, other_device) = viewer_identity(&other);
+    let mut args = vec!["--password", host.password.as_str(), "--device"];
+    args.extend(other_device.split(' '));
+    assert_eq!(args.len(), 6, "a device code prints as three groups");
+    let mut viewer = connect_viewer(&dir, &host.code, &args);
+    viewer.expect("identity mismatch", 15);
+    assert_eq!(viewer.wait_exit(10), 3);
+    assert!(
+        !host.app.sees_within("prompt ", 1000),
+        "never reaches the host's prompt"
+    );
+}
