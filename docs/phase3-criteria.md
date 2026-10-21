@@ -590,7 +590,7 @@ the underlying protocol check (here A22) is unchanged.
 | 4. Wrong password | ✅ viewer `failed: authentication failed (wrong or used password, or not trusted)`; host one `handshake_failed` WARN (`attempt=1/3`), note "the password is unchanged", new code, same password |
 | 5. Deny | ✅ viewer `rejected by the host (a new attempt needs a fresh code and password)`; host `session ended 1 (Rejected)`; the typo `denny 1` got the explicit F-UX1 error |
 | 6. Trusted mode across restart | ✅ **2026-10-21** (after the F-L1 fix, screenshots): `--pin` with the host's identity, no password; safety codes matched (628 577); prompted as required (threat model §4 item 6); `accept 1` → `SESSION ACTIVE` on both; `disconnect 1` → `session ended 1 (Normal)` on the host and `session ended` on the viewer. Host restarted: same `identity:` (`5fdd9140…`) and `device:` (8531 422 5411-5); reconnect with the **new** code and the **same** `--pin` → safety codes matched (814 307), active, normal disconnect. Not visible in the screenshots: how long the session stayed up (F-L1's "over a minute" is covered by `remora-net/tests/liveness.rs`, not by this run). Earlier the same day: first try found **F-L1** and **F-UX5** (below). **Bonus:** reusing the spent code was refused — host `handshake_failed reason=connection code nonce already used`, viewer the generic `authentication failed` (A05/A04 as designed) |
-| 7. Wrong device | **not yet run** — two attempts on 2026-10-21 stopped at argument parsing: the device code was typed without quotes (`error: unexpected argument '422'`, finding **F-UX6**, fixed), and it was the **host's own** device code, which would match rather than test a mismatch. Covered by `a16_viewer_asking_for_device_x_refuses_a_code_for_device_y` |
+| 7. Wrong device | ✅ **2026-10-21** (screenshot 12:58, commit 5c8bf6a): `connect '<code>' --device 0539 023 4826-0` (unquoted, the viewer's own code) → `identity mismatch: this code is for device 8531 422 5411-5, not 0539 023 4826-0 which you asked for - not connecting`, `exit code: 3`, no password asked, no prompt on the host. The refusal happened before any contact: the **same** code then connected with the correct `--device 8531 422 5411-5` (prompt 1, safety code 214 762), so the nonce was never spent. Earlier attempts stopped at argument parsing (F-UX6, fixed; `echo $?` pasted onto the command line) or used the host's own code. Also covered by `a16_viewer_asking_for_device_x_refuses_a_code_for_device_y` |
 
 **F-UX4** (found in the deny run): the owner typed `deny 1` into the
 **viewer's** terminal — nothing there said that the decision is made at the
@@ -657,6 +657,10 @@ person at the host to accept or deny (nothing to type here)` (F-UX4); the
 line ran as a shell command after the viewer exited (`zsh: command not
 found: accept`). Harmless; noted as input for the Phase 4.5 GUI, where
 the viewer shows a waiting state with nothing to type.
+The step-7 run repeated it with `quit` (typed into the viewer during an
+active session; `zsh: command not found: quit` after the host quit and
+the viewer exited). Same cause, same answer: the Phase 4 viewer window
+and the 4.5 GUI take keyboard input away from the shell.
 
 ## 11. Changes to criteria
 
