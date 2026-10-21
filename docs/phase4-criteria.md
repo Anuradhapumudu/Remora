@@ -410,6 +410,14 @@ The phase report lists the whole deferred list row by row (CLAUDE.md).
   run shows whether the VM's growth levels off (warm-up) or keeps rising
   (a leak). Until then M7 "memory bounded" is **met on the M4, failing in
   CI**.
+  *Update (`6ae4182`, same runner image):* the test **passed** on the VM
+  (Test step, `m7_memory_stays_bounded_under_a_hostile_stream ... ok`),
+  but a passing test's output is captured, so the curve was not printed.
+  One fail at +14 MB and one pass with no code change in between: the
+  VM's result varies from run to run. CI now runs the test three more times
+  with `--nocapture` and writes every curve to the job summary (step "M7
+  memory curve", measurement only, any failing run fails CI). Still
+  **open**; the threshold is unchanged.
 * Standing rule (owner, 2026-10-20): **a UX change to a security-relevant
   flow needs its own attack test** — phase3-criteria §10.8, the F-UX1
   prompt-number confused-deputy case. Applies to the Phase 4 viewer window

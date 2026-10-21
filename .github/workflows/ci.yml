@@ -71,6 +71,21 @@ jobs:
             echo "$line"
             echo "\`$line\`" >> "$GITHUB_STEP_SUMMARY"
           done
+      # Diagnosis of M7 memory on this VM (phase4-criteria §12, open): a
+      # passing test's output is captured, so the per-500-frame curve only
+      # showed when it failed. Three more runs, always printed; the check
+      # itself is unchanged and any failing run fails the step.
+      - name: M7 memory curve (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          set -o pipefail
+          echo "### M7 memory curve" >> "$GITHUB_STEP_SUMMARY"
+          status=0
+          for run in 1 2 3; do
+            cargo test -p remora-codec --test m7_decode_memory --locked -- --nocapture 2>&1 | tee m7_memory.log || status=1
+            grep "^M7 memory" m7_memory.log | sed "s/^/run $run: /" >> "$GITHUB_STEP_SUMMARY"
+          done
+          exit "$status"
 
       - name: Install cargo-deny and cargo-audit
         uses: taiki-e/install-action@861a07ce7084f55488e375df125cdc99bba60eb7 # v2.87.23
