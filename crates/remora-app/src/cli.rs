@@ -29,6 +29,33 @@ pub enum CliError {
     BadIdentity,
 }
 
+/// What kind of value a piece of text looks like - by its shape only, so
+/// an error can say which line of the host's output belongs in a field
+/// (walkthrough finding F-UX5). Nothing here is trusted or acted on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Looks {
+    /// `remora1:...` - the host's `code:` line.
+    ConnectionCode,
+    /// 64 hex digits - an `identity:` line.
+    IdentityKey,
+    /// 6 digits - the host's `password:` line.
+    Password,
+    /// A valid device code - a `device:` line.
+    DeviceCode,
+}
+
+/// The kind of value `text` looks like, if any.
+pub fn looks_like(_text: &str) -> Option<Looks> {
+    None
+}
+
+/// A hint for a value refused in the field that wants `want`: the host
+/// line to copy, and what the value looks like if it is another field's.
+/// Never repeats the value itself (it may be the password).
+pub fn misplaced(_want: Looks, _text: &str) -> String {
+    String::new()
+}
+
 /// Printed to stderr on **every** run that loads the device key file
 /// (walkthrough finding F-UX2): while keys live in a plain file, the person
 /// running the app must see that, every time, so the file storage cannot

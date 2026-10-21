@@ -3,7 +3,8 @@
 
 use rand_core::OsRng;
 use remora_app::cli::{
-    CliError, format_sas, identity_hex, offer_code, parse_identity, short_code_of,
+    CliError, Looks, format_sas, identity_hex, looks_like, misplaced, offer_code, parse_identity,
+    short_code_of,
 };
 use remora_crypto::identity::{DeviceId, IdentityKeypair};
 use remora_proto::code::{CandidateKind, CodeKind, ConnectionCode};
@@ -63,4 +64,70 @@ fn offer_code_carries_key_nonce_expiry_and_address() {
 fn short_code_of_is_the_device_ids_short_code() {
     let k = IdentityKeypair::generate(&mut OsRng).public();
     assert_eq!(short_code_of(&k), DeviceId::of(&k).short_code());
+}
+
+// F-UX5 (walkthrough 2026-10-21): the owner's real mistakes, from the
+// screenshots - the password as the code, the code or the host's identity
+// as --pin, a device code where a key belongs.
+const CODE: &str = "remora1:AQBq2D4cW7dGxEyBTCGlr2KFrSwMYF_dkUBj0T6KG-ZbhSq5V6VD63vPf4arFz12PoonUGuFD5C2WjvCzk_sw9_Fcw8ODg_QLe8BQH8AAAHIM4VUNHI";
+const KEY: &str = "5fdd914063d13e8a1be65b852ab957a543eb7bcf7f86ab173d763e8a27506b85";
+
+#[test]
+fn f_ux5_looks_like_recognises_each_host_line_by_shape() {
+    assert_eq!(looks_like(CODE), Some(Looks::ConnectionCode));
+    assert_eq!(looks_like(KEY), Some(Looks::IdentityKey));
+    assert_eq!(looks_like(&KEY.to_uppercase()), Some(Looks::IdentityKey));
+    assert_eq!(looks_like("957588"), Some(Looks::Password));
+    assert_eq!(looks_like(" 957588 "), Some(Looks::Password));
+    // A real device code from the walkthrough (check digit valid).
+    assert_eq!(looks_like("8531 422 5411-5"), Some(Looks::DeviceCode));
+    assert_eq!(looks_like("853142254115"), Some(Looks::DeviceCode));
+    // Near misses are nothing in particular.
+    assert_eq!(looks_like("8531 422 5411-4"), None, "bad check digit");
+    assert_eq!(looks_like(&KEY[1..]), None, "63 hex digits");
+    assert_eq!(looks_like("95758"), None);
+    assert_eq!(looks_like("hello"), None);
+    assert_eq!(looks_like(""), None);
+}
+
+#[test]
+fn f_ux5_misplaced_names_the_line_to_copy_and_what_was_given() {
+    let m = misplaced(Looks::ConnectionCode, "957588");
+    assert!(m.contains("'code:'") && m.contains("password"), "{m}");
+    let m = misplaced(Looks::IdentityKey, CODE);
+    assert!(
+        m.contains("'identity:'") && m.contains("connection code"),
+        "{m}"
+    );
+    let m = misplaced(Looks::IdentityKey, "8531 422 5411-5");
+    assert!(
+        m.contains("'identity:'") && m.contains("device code"),
+        "{m}"
+    );
+    let m = misplaced(Looks::ConnectionCode, KEY);
+    assert!(m.contains("'code:'") && m.contains("identity key"), "{m}");
+    // Unrecognisable input still gets the line to copy.
+    let m = misplaced(Looks::Password, "hello");
+    assert!(m.contains("'password:'"), "{m}");
+    // The right kind with a typo: no "looks like" claim.
+    let m = misplaced(Looks::IdentityKey, &KEY[1..]);
+    assert!(
+        m.contains("'identity:'") && !m.contains("looks like"),
+        "{m}"
+    );
+}
+
+#[test]
+fn f_ux5_a_hint_never_repeats_the_value() {
+    // It may be the password typed into the wrong field.
+    for (want, text) in [
+        (Looks::ConnectionCode, "957588"),
+        (Looks::IdentityKey, "957588"),
+        (Looks::DeviceCode, "957588"),
+        (Looks::IdentityKey, CODE),
+        (Looks::Password, KEY),
+    ] {
+        let m = misplaced(want, text);
+        assert!(!m.contains(text.trim()), "{want:?}: {m}");
+    }
 }

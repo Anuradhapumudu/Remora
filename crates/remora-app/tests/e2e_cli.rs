@@ -594,3 +594,34 @@ fn f_ux4_viewer_says_the_host_decides() {
         "{wait}"
     );
 }
+
+/// F-UX5 (walkthrough 2026-10-21): the owner's real first attempts at
+/// step 6 - each must be refused before any network traffic, say which
+/// host line belongs there, and never echo the password.
+#[test]
+fn f_ux5_values_in_the_wrong_place_name_the_host_line_to_copy() {
+    let dir = tmp_dir();
+    let mut host = start_host(&dir, &[]);
+    let attempts: [(&str, Vec<&str>, &str); 3] = [
+        // the password where the code goes
+        (&host.password, vec!["--pin", &host.identity], "'code:'"),
+        // the code as --pin
+        (&host.code, vec!["--pin", &host.code], "'identity:'"),
+        // a device code as --pin
+        (&host.code, vec!["--pin", &host.device], "'identity:'"),
+    ];
+    for (code, extra, want) in attempts {
+        let mut viewer = connect_viewer(&dir, code, &extra);
+        let line = viewer.expect("failed:", 10);
+        assert!(line.contains(want), "{line}");
+        assert!(
+            !line.contains(&host.password),
+            "echoed the password: {line}"
+        );
+        assert_ne!(viewer.wait_exit(10), 0);
+    }
+    assert!(
+        !host.app.sees_within("prompt ", 1000),
+        "a refused attempt reached the host"
+    );
+}
