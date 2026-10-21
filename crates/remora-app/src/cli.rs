@@ -45,15 +45,55 @@ pub enum Looks {
 }
 
 /// The kind of value `text` looks like, if any.
-pub fn looks_like(_text: &str) -> Option<Looks> {
-    None
+pub fn looks_like(text: &str) -> Option<Looks> {
+    let t = text.trim();
+    let all = |f: fn(&u8) -> bool| t.as_bytes().iter().all(f);
+    if t.starts_with(remora_proto::code::PREFIX) {
+        Some(Looks::ConnectionCode)
+    } else if t.len() == 64 && all(u8::is_ascii_hexdigit) {
+        Some(Looks::IdentityKey)
+    } else if t.len() == 6 && all(u8::is_ascii_digit) {
+        Some(Looks::Password)
+    } else if ShortCode::parse(t).is_ok() {
+        Some(Looks::DeviceCode)
+    } else {
+        None
+    }
+}
+
+impl Looks {
+    fn name(self) -> &'static str {
+        match self {
+            Looks::ConnectionCode => "a connection code",
+            Looks::IdentityKey => "an identity key",
+            Looks::Password => "a password",
+            Looks::DeviceCode => "a device code",
+        }
+    }
+
+    fn line(self) -> &'static str {
+        match self {
+            Looks::ConnectionCode => "code:",
+            Looks::IdentityKey => "identity:",
+            Looks::Password => "password:",
+            Looks::DeviceCode => "device:",
+        }
+    }
 }
 
 /// A hint for a value refused in the field that wants `want`: the host
 /// line to copy, and what the value looks like if it is another field's.
 /// Never repeats the value itself (it may be the password).
-pub fn misplaced(_want: Looks, _text: &str) -> String {
-    String::new()
+pub fn misplaced(want: Looks, text: &str) -> String {
+    let copy = format!("copy the host's '{}' line", want.line());
+    match looks_like(text) {
+        Some(got) if got != want => format!(
+            "that looks like {} (a '{}' line) - {copy}",
+            got.name(),
+            got.line()
+        ),
+        _ => copy,
+    }
 }
 
 /// Printed to stderr on **every** run that loads the device key file

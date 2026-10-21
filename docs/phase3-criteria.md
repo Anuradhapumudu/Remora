@@ -547,9 +547,14 @@ adds (real NAT traversal, STUN parser fuzzing, QUIC retry).
 5. Deny: `deny <n>` ⇒ viewer prints `rejected` and exits 2; a retry needs
    the new `code:` / `password:` the host printed.
 6. Trusted mode: `cargo run -p remora-viewer -- identity` prints the
-   viewer's `identity:`; start the host with `serve --trust <that key>`,
-   then connect with `--pin <host identity>` instead of `--password`.
-7. Wrong device: connect with `--device <some other device code>` ⇒
+   viewer's `identity:`; start the host with `serve --trust <that key>`.
+   Connect with `connect '<the host's code: line>' --pin <the host's
+   identity: line>` — no password in trusted mode. Accept on the host,
+   then **stay connected for over a minute** (F-L1: the session must not
+   end by itself). Restart the host: same `identity:` and `device:`;
+   connect again with its **new** `code:` and the **same** `--pin`.
+7. Wrong device: `connect '<the host's code: line>' --device '<the
+   viewer's own device: line>'` (quoted — a device code has spaces) ⇒
    `identity mismatch`, exit 3, and the host never prompts.
 
 
@@ -622,7 +627,17 @@ places (the password as the code, the code or the host's identity as
 `<code>` and `<host identity>` without naming the host's output lines;
 the errors (`not a Remora connection code`, `--pin: an identity key is
 64 hexadecimal digits`) did not say which line to copy either. Fix: the
-errors name the host line to use (follow-up commit).
+errors name the host line to copy, and say what the value looks like
+when it is another field's (`connection code: not a Remora connection
+code - that looks like a password (a 'password:' line) - copy the host's
+'code:' line`); the value itself is never repeated (it may be the
+password). `--help` names the host line for each argument. Tests: unit
+(shape recognition on the walkthrough's real values, a planted echo of
+the value is caught) and e2e with the three real mistakes (refused
+before any traffic, the host never prompts); mutation run on the new
+functions 14 caught, 1 unviable, 0 missed — run by hand, since
+`cli.rs` is not in the CI mutation gate. Steps 6–7 above now name the
+host lines and the quoting.
 
 ## 11. Changes to criteria
 

@@ -17,7 +17,8 @@ use std::sync::Arc;
 use anyhow::{Context, anyhow};
 use clap::{Parser, Subcommand};
 use remora_app::cli::{
-    exit, format_sas, identity_hex, key_file_warning, parse_identity, short_code_of, unix_now,
+    Looks, exit, format_sas, identity_hex, key_file_warning, misplaced, parse_identity,
+    short_code_of, unix_now,
 };
 use remora_app::keystore::{self, Role};
 use remora_crypto::identity::{DeviceId, IdentityPublic, ShortCode};
@@ -47,7 +48,7 @@ enum Command {
 
 #[derive(clap::Args)]
 struct ConnectArgs {
-    /// The host's connection code (`remora1:...`).
+    /// The host's connection code (its `code:` line, `remora1:...`).
     code: String,
     /// Key file (default: the per-user config directory).
     #[arg(long)]
@@ -58,10 +59,12 @@ struct ConnectArgs {
     /// The host's one-time password (asked on stdin if not given).
     #[arg(long, conflicts_with = "pin")]
     password: Option<String>,
-    /// Trusted mode: the host's pinned identity key (64 hex digits).
+    /// Trusted mode: the host's identity key (its `identity:` line, 64 hex
+    /// digits); replaces the password.
     #[arg(long)]
     pin: Option<String>,
-    /// The device code of the host you mean to reach; refuse any other.
+    /// The device code of the host you mean to reach (the host's `device:`
+    /// line, in quotes: --device '8531 422 5411-5'); refuse any other.
     #[arg(long)]
     device: Option<String>,
 }
@@ -110,7 +113,12 @@ fn identity(file: Option<PathBuf>) -> anyhow::Result<()> {
 
 async fn run_connect(args: ConnectArgs) -> anyhow::Result<u8> {
     // The code is checked before any network traffic (A07: expiry).
-    let code = ConnectionCode::parse(args.code.trim(), unix_now()).context("connection code")?;
+    let code = ConnectionCode::parse(args.code.trim(), unix_now()).map_err(|e| {
+        anyhow!(
+            "connection code: {e} - {}",
+            misplaced(Looks::ConnectionCode, &args.code)
+        )
+    })?;
     if code.kind != CodeKind::Offer {
         return Err(anyhow!("this is an answer code, not a host's offer code"));
     }
@@ -125,7 +133,8 @@ async fn run_connect(args: ConnectArgs) -> anyhow::Result<u8> {
     // A16: the user asked for a specific device; refuse a code for another
     // one before connecting at all.
     if let Some(want) = &args.device {
-        let want = ShortCode::parse(want).context("--device")?;
+        let want = ShortCode::parse(want)
+            .map_err(|e| anyhow!("--device: {e} - {}", misplaced(Looks::DeviceCode, want)))?;
         if !want.matches(&host_id) {
             println!(
                 "identity mismatch: this code is for device {}, not {} which you asked for - not connecting",
@@ -138,7 +147,8 @@ async fn run_connect(args: ConnectArgs) -> anyhow::Result<u8> {
 
     let mode = match &args.pin {
         Some(pin) => {
-            let pinned = parse_identity(pin).context("--pin")?;
+            let pinned = parse_identity(pin)
+                .map_err(|e| anyhow!("--pin: {e} - {}", misplaced(Looks::IdentityKey, pin)))?;
             // A19: the pinned device now presents another key. Hard failure,
             // never a silent re-pin and never a fallback to a password.
             if pinned != host_key {
@@ -156,7 +166,8 @@ async fn run_connect(args: ConnectArgs) -> anyhow::Result<u8> {
                 Some(p) => p.clone(),
                 None => ask_password()?,
             };
-            let otp = Otp::parse(typed.trim()).context("password")?;
+            let otp = Otp::parse(typed.trim())
+                .map_err(|e| anyhow!("password: {e} - {}", misplaced(Looks::Password, &typed)))?;
             // Bind the session to the key in the code: the host's cert must
             // have this device ID (80 bits), so a substituted key fails.
             ViewerMode::Password {

@@ -115,6 +115,10 @@ fn f_ux5_misplaced_names_the_line_to_copy_and_what_was_given() {
         m.contains("'identity:'") && !m.contains("looks like"),
         "{m}"
     );
+    // Right shape, but damaged or expired: no "looks like a connection
+    // code" for a connection code (mutation-gate finding).
+    let m = misplaced(Looks::ConnectionCode, "remora1:damaged");
+    assert!(m.contains("'code:'") && !m.contains("looks like"), "{m}");
 }
 
 #[test]
