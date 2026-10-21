@@ -505,6 +505,13 @@ The phase report lists the whole deferred list row by row (CLAUDE.md).
      and 0 pictures may exist. A leak of our own decoder objects fails
      anywhere, the CI VM included. A leak *inside* VideoToolbox can only
      be seen by the memory limit, which is why (1) stays.
+  Implemented test-first (`a4581a0` RED): `m7_live_sessions_and_pictures_
+  are_counted` and the per-500-frame count check in the memory test.
+  **Plants, each seen failing then removed:** a failed decoder session
+  leaked with `mem::forget` instead of dropped, and an extra live
+  reference kept for every picture (both fail the count check at the
+  first 500 frames). Mutation of the counting code: 4 mutants, 4 caught.
+  On the M4: `M7 memory limit: checked (+0.0 MB, limit +8 MB)`.
 * Standing rule (owner, 2026-10-20): **a UX change to a security-relevant
   flow needs its own attack test** — phase3-criteria §10.8, the F-UX1
   prompt-number confused-deputy case. Applies to the Phase 4 viewer window

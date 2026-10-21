@@ -8,8 +8,8 @@
 use std::ffi::{c_int, c_void};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::ptr::{self, NonNull};
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use objc2_core_foundation::{
@@ -949,6 +949,25 @@ pub struct DecodedFrame {
     /// The video frame it came from (`frame_id` on the wire).
     pub frame_id: u32,
     image: PixelBufferRef,
+    _alive: Alive,
+}
+
+/// Counts objects of one kind while they exist: +1 when made, −1 when
+/// dropped (M7: the decoder's own objects are bounded, checked by
+/// counting on any machine — phase4-criteria §12, 2026-10-22).
+struct Alive(Arc<AtomicU64>);
+
+impl Alive {
+    fn new(count: &Arc<AtomicU64>) -> Self {
+        count.fetch_add(1, Ordering::Relaxed);
+        Self(Arc::clone(count))
+    }
+}
+
+impl Drop for Alive {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::Relaxed);
+    }
 }
 
 impl DecodedFrame {
@@ -1025,7 +1044,10 @@ impl std::fmt::Debug for DecodedFrame {
 pub struct VtDecoder {
     gate: DecodeGate,
     stats: DecodeStats,
-    session: Option<DecodeSession>,
+    session: Option<(DecodeSession, Alive)>,
+    /// Live decoder sessions and pictures ([`DecodeStats`]).
+    sessions_alive: Arc<AtomicU64>,
+    pictures_alive: Arc<AtomicU64>,
     /// The id of the last frame offered to `decode`.
     last_frame_id: Option<u32>,
 }
@@ -1043,6 +1065,8 @@ impl VtDecoder {
             gate: DecodeGate::new(limit),
             stats: DecodeStats::default(),
             session: None,
+            sessions_alive: Arc::default(),
+            pictures_alive: Arc::default(),
             last_frame_id: None,
         }
     }
@@ -1075,19 +1099,23 @@ impl VtDecoder {
             };
             match created {
                 Ok(s) => {
-                    self.session = Some(s);
+                    self.session = Some((s, Alive::new(&self.sessions_alive)));
                     self.stats.sessions_created += 1;
                 }
                 Err(e) => return Err(self.failed(DecodeError::Configure(e))),
             }
         }
-        let Some(session) = &self.session else {
+        let Some((session, _)) = &self.session else {
             return Err(self.failed(DecodeError::NoPicture));
         };
         match session.decode(&admitted.frame.to_avcc()) {
             Ok(image) => {
                 self.stats.decoded += 1;
-                Ok(DecodedFrame { frame_id, image })
+                Ok(DecodedFrame {
+                    frame_id,
+                    image,
+                    _alive: Alive::new(&self.pictures_alive),
+                })
             }
             Err(e) => Err(self.failed(e)),
         }
@@ -1104,9 +1132,13 @@ impl VtDecoder {
         e
     }
 
-    /// Counters.
+    /// Counters, with the live sessions and pictures as of now.
     pub fn stats(&self) -> DecodeStats {
-        self.stats
+        DecodeStats {
+            sessions_alive: self.sessions_alive.load(Ordering::Relaxed),
+            pictures_alive: self.pictures_alive.load(Ordering::Relaxed),
+            ..self.stats
+        }
     }
 }
 
