@@ -584,8 +584,8 @@ the underlying protocol check (here A22) is unchanged.
 | 3. Accept | ✅ safety codes matched (854 929); `accept 1` → `SESSION ACTIVE 1` on the host, `SESSION ACTIVE` on the viewer; the F-UX3 note explained the new pair. `disconnect 1` not shown in the screenshots |
 | 4. Wrong password | ✅ viewer `failed: authentication failed (wrong or used password, or not trusted)`; host one `handshake_failed` WARN (`attempt=1/3`), note "the password is unchanged", new code, same password |
 | 5. Deny | ✅ viewer `rejected by the host (a new attempt needs a fresh code and password)`; host `session ended 1 (Rejected)`; the typo `denny 1` got the explicit F-UX1 error |
-| 6. Trusted mode across restart | **not run by hand** — covered by the e2e tests `f1_trusted_mode_with_pinned_keys` and `a19_pinned_host_whose_key_changed_is_a_hard_failure` (real binaries) |
-| 7. Wrong device | **not run by hand** — covered by `a16_viewer_asking_for_device_x_refuses_a_code_for_device_y` |
+| 6. Trusted mode across restart | **2026-10-21, partly:** first connect ✅ (`--pin` with the host's identity, no password; safety codes matched, 241 383; the host still prompted, as required by threat model §4 item 6; `accept 1` → `SESSION ACTIVE`). ❌ **The session then ended by itself after ~30 s** (finding **F-L1** below, fixed). Host restart ✅ same identity (`5fdd9140…`) and device code after restart. Reconnect with `--pin` after the restart: **not yet shown**. Also covered by the e2e tests `f1_trusted_mode_with_pinned_keys` and `a19_pinned_host_whose_key_changed_is_a_hard_failure` (real binaries) |
+| 7. Wrong device | **not yet run** — 2026-10-21 attempt stopped at argument parsing: the device code has spaces and was not quoted (`error: unexpected argument '422'`), and it was the host's own code (which would match). Covered by `a16_viewer_asking_for_device_x_refuses_a_code_for_device_y` |
 
 **F-UX4** (found in the deny run): the owner typed `deny 1` into the
 **viewer's** terminal — nothing there said that the decision is made at the
@@ -595,6 +595,34 @@ the host to accept or deny (nothing to type here)` (e2e test
 `f_ux4_viewer_says_the_host_decides`, planted weaker wording caught).
 Phase 7 GUI: the viewer shows a "waiting for the host" state with no input
 that looks actionable.
+
+**F-L1** (2026-10-21, step 6) — **correctness bug, not UX.** The trusted
+session ended on its own ~30 s after `SESSION ACTIVE`; the host printed
+`session ended 1 (Normal)` and the viewer `failed: connection closed
+(None)`. Reproduced by script (27 s after accept, identical output).
+Cause: nothing is sent once a Phase 3 session is active, and quinn's
+default is a 30 s idle timeout with no keepalive, so QUIC declared the
+healthy connection dead; the host then reported the dead connection
+through the user-disconnect path, hence "Normal". The same silence cut
+the 60 s prompt (§3.4) to 30 s, and would end any Phase 4 session whose
+stream is paused. Fixed (architecture.md D37): 5 s keepalive + explicit
+30 s idle timeout on both sides; a dead connection is reported as
+**connection lost** on both sides. Tests in `remora-net/tests/liveness.rs`
+were seen failing first (RED commit), a planted removal of the keepalive
+is caught, 4/4 mutants caught. **Why the e2e tests missed it:** every
+session test ended within a few seconds, far below the 30 s timeout —
+no test ever held a silent session open. Same lesson as T3 in
+phase4-criteria §12: ask what a test would still pass with; here, any
+timer longer than the test.
+
+**F-UX5** (2026-10-21, steps 6–7): every connect attempt in the first
+step-6 try was refused before reaching the host, with values in the wrong
+places (the password as the code, the code or the host's identity as
+`--pin`, an unquoted device code). The instructions given by Claude said
+`<code>` and `<host identity>` without naming the host's output lines;
+the errors (`not a Remora connection code`, `--pin: an identity key is
+64 hexadecimal digits`) did not say which line to copy either. Fix: the
+errors name the host line to use (follow-up commit).
 
 ## 11. Changes to criteria
 

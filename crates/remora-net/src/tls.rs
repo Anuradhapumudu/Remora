@@ -25,7 +25,10 @@ pub const SERVER_NAME: &str = "remora.invalid";
 
 /// How long a connection may be completely silent before QUIC declares it
 /// dead. Set explicitly on both sides (the peers use the smaller value)
-/// rather than relying on quinn's default.
+/// rather than relying on quinn's default. A dead connection is noticed
+/// after `IDLE_TIMEOUT` to `IDLE_TIMEOUT + KEEP_ALIVE` of silence: a
+/// keepalive sent into the silence restarts the timer once (quinn-proto
+/// 0.11.19 `packet_builder.rs:243-246`).
 pub const IDLE_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// How often an otherwise silent connection sends a QUIC PING (an
@@ -44,8 +47,18 @@ fn cfg_err(e: impl std::fmt::Display) -> NetError {
     NetError::Config(e.to_string())
 }
 
+/// quinn's defaults plus the explicit [`IDLE_TIMEOUT`] and [`KEEP_ALIVE`]
+/// (the default keeps datagrams enabled). Used by both sides.
+fn transport() -> Result<Arc<quinn::TransportConfig>, NetError> {
+    let mut t = quinn::TransportConfig::default();
+    t.max_idle_timeout(Some(IDLE_TIMEOUT.try_into().map_err(cfg_err)?));
+    t.keep_alive_interval(Some(KEEP_ALIVE));
+    Ok(Arc::new(t))
+}
+
 /// A server configuration with a freshly generated self-signed certificate,
-/// ALPN [`ALPN`] and QUIC datagrams enabled.
+/// ALPN [`ALPN`], QUIC datagrams enabled, and the liveness settings
+/// ([`IDLE_TIMEOUT`], [`KEEP_ALIVE`]).
 pub fn server_config() -> Result<quinn::ServerConfig, NetError> {
     let ck = rcgen::generate_simple_self_signed(vec![SERVER_NAME.to_owned()]).map_err(cfg_err)?;
     let cert = ck.cert.der().clone();
@@ -58,7 +71,9 @@ pub fn server_config() -> Result<quinn::ServerConfig, NetError> {
         .map_err(cfg_err)?;
     tls.alpn_protocols = vec![ALPN.to_vec()];
     let quic = quinn::crypto::rustls::QuicServerConfig::try_from(Arc::new(tls)).map_err(cfg_err)?;
-    Ok(quinn::ServerConfig::with_crypto(Arc::new(quic)))
+    let mut config = quinn::ServerConfig::with_crypto(Arc::new(quic));
+    config.transport_config(transport()?);
+    Ok(config)
 }
 
 /// A client configuration that accepts **any** server certificate (the
@@ -77,7 +92,9 @@ pub fn client_config() -> Result<quinn::ClientConfig, NetError> {
         .with_no_client_auth();
     tls.alpn_protocols = vec![ALPN.to_vec()];
     let quic = quinn::crypto::rustls::QuicClientConfig::try_from(tls).map_err(cfg_err)?;
-    Ok(quinn::ClientConfig::new(Arc::new(quic)))
+    let mut config = quinn::ClientConfig::new(Arc::new(quic));
+    config.transport_config(transport()?);
+    Ok(config)
 }
 
 /// Accepts any certificate (see the module docs for why that is safe

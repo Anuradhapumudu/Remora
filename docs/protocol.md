@@ -210,6 +210,7 @@ where `h` is the final Noise handshake hash. Rationale: threat model §6.3.
 | Any message too large / malformed | Close with `ProtocolViolation`. |
 | Handshake not complete in 10 s | Close with `Timeout`. |
 | Host user does not answer prompt in 60 s | `SessionReject{reason = Timeout}`. |
+| Connection silent for 30 s (no packet at all) | QUIC idle timeout: the connection is dead and both sides report **connection lost** locally (nothing can be sent, so there is no close code). Never reported as an orderly close. Each side sends a QUIC PING after 5 s without sending anything, so a healthy session with nothing to say (prompt waiting, stream paused) never gets there. A dead link is noticed after 30–35 s (`remora_net::IDLE_TIMEOUT`, `KEEP_ALIVE`; owner walkthrough 2026-10-21, architecture.md D37). |
 
 ## 4. Reliable channel framing
 

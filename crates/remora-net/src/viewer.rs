@@ -13,6 +13,7 @@ use tokio::sync::mpsc;
 
 use tokio::time::Instant;
 
+use crate::wire::is_lost;
 use crate::{
     FramedStream, NetError, SERVER_NAME, TICK, client_config, close, close_code_of, exporter,
 };
@@ -94,6 +95,18 @@ pub async fn connect(
     Ok((ViewerClient { commands }, rx))
 }
 
+/// How the connection ended, when the host (or the network) ended it.
+fn ended(err: &quinn::ConnectionError) -> ViewerEvent {
+    if is_lost(err) {
+        ViewerEvent::Lost
+    } else {
+        ViewerEvent::Closed {
+            local: None,
+            remote: close_code_of(err),
+        }
+    }
+}
+
 fn now(start: Instant) -> Millis {
     Millis(u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX))
 }
@@ -158,14 +171,14 @@ async fn drive(
                 Ok(Some(frame)) => pending = session.on_frame(&frame, now(start), &mut OsRng),
                 _ => {
                     let err = conn.closed().await;
-                    let _ = events.send(ViewerEvent::Closed { local: None, remote: close_code_of(&err) });
+                    let _ = events.send(ended(&err));
                     return;
                 }
             },
             dgram = conn.read_datagram() => match dgram {
                 Ok(d) => pending = session.on_datagram(&d),
                 Err(err) => {
-                    let _ = events.send(ViewerEvent::Closed { local: None, remote: close_code_of(&err) });
+                    let _ = events.send(ended(&err));
                     return;
                 }
             },

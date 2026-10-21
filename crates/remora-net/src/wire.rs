@@ -38,6 +38,16 @@ pub fn close_code_of(err: &quinn::ConnectionError) -> Option<CloseCode> {
         .find(|&code| to_varint(code) == c.error_code)
 }
 
+/// Whether `err` means the connection died without a close from either
+/// side: silent for [`crate::IDLE_TIMEOUT`], or reset by a peer that lost
+/// its state. Reported as "lost", never as an orderly close.
+pub(crate) fn is_lost(err: &quinn::ConnectionError) -> bool {
+    matches!(
+        err,
+        quinn::ConnectionError::TimedOut | quinn::ConnectionError::Reset
+    )
+}
+
 /// Stream 0: `u16` big-endian length prefix, then the frame.
 pub struct FramedStream {
     tx: FrameSender,

@@ -59,6 +59,14 @@ fn past_idle() -> Duration {
     IDLE_TIMEOUT + Duration::from_secs(5)
 }
 
+/// The latest a dead connection is noticed: a keepalive PING sent into the
+/// silence restarts quinn's idle timer once (quinn-proto 0.11.19
+/// `packet_builder.rs:243-246`: the first ack-eliciting packet sent after
+/// a receive resets it), so up to one interval later than the timeout.
+fn detection_bound() -> Duration {
+    IDLE_TIMEOUT + KEEP_ALIVE
+}
+
 #[test]
 fn keepalive_is_well_inside_the_idle_timeout() {
     // quinn: "Must be set lower than the idle_timeout of both peers to be
@@ -174,13 +182,15 @@ async fn a_network_that_goes_silent_is_reported_as_lost_not_as_a_normal_close() 
         .is_some()
     );
     relay.cut();
-    let secs = past_idle().as_secs();
+    let secs = (detection_bound() + Duration::from_secs(5)).as_secs();
     let host_end = host
         .wait_for(secs, |e| {
             matches!(e, HostEvent::Closed { .. } | HostEvent::Lost { .. })
         })
         .await;
     assert_eq!(host_end, Some(HostEvent::Lost { id }), "host side");
-    let viewer_end = viewer_wait(&mut vev, Duration::from_secs(5), ended).await;
+    // Each side notices on its own clock: up to one KEEP_ALIVE later than
+    // the other (see detection_bound). Measured: 5.03 s after the host.
+    let viewer_end = viewer_wait(&mut vev, KEEP_ALIVE + Duration::from_secs(5), ended).await;
     assert_eq!(viewer_end, Some(ViewerEvent::Lost), "viewer side");
 }

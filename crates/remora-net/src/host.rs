@@ -18,7 +18,7 @@ use remora_session::{
 use tokio::sync::mpsc;
 use tokio::time::Instant;
 
-use crate::wire::FrameSender;
+use crate::wire::{FrameSender, is_lost};
 use crate::{FramedStream, NetError, TICK, close, exporter, floor_deadline, server_config};
 
 /// What the host UI / CLI is told.
@@ -206,6 +206,24 @@ impl Drop for HostServer {
 impl Shared {
     fn now(&self) -> Millis {
         Millis(u64::try_from(self.start.elapsed().as_millis()).unwrap_or(u64::MAX))
+    }
+
+    /// Performs the actions of a session whose connection died (see
+    /// [`is_lost`]): nothing can be sent any more, and the end is reported
+    /// as [`HostEvent::Lost`] - not as the orderly close the session layer
+    /// chose for it (walkthrough 2026-10-21: it used to print "Normal").
+    fn lost(&self, actions: Vec<HostAction>) {
+        let mut rest = Vec::new();
+        for action in actions {
+            match action {
+                HostAction::Send { .. } => {}
+                HostAction::Close { id, .. } => {
+                    let _ = self.events.send(HostEvent::Lost { id });
+                }
+                other => rest.push(other),
+            }
+        }
+        self.apply(rest, None);
     }
 
     /// Performs the session's actions. `arrival` is when the frame that
@@ -415,10 +433,14 @@ async fn run_connection(incoming: quinn::Incoming, shared: Arc<Shared>) {
         }
     };
     reader.await;
-    let _ = conn.closed().await;
+    let err = conn.closed().await;
     // The connection is gone: end the session (frees its slot) and forget it.
     let actions = lock(&shared.host).disconnect(id);
-    shared.apply(actions, None);
+    if is_lost(&err) {
+        shared.lost(actions);
+    } else {
+        shared.apply(actions, None);
+    }
     lock(&shared.host).forget(id);
     lock(&shared.conns).remove(&id);
 }
