@@ -57,7 +57,7 @@ use crate::bitstream::{
 use crate::h264::{DecodeGate, SizeLimit, SpsInfo};
 use crate::{
     Codec, CodecError, DecodeError, DecodeStats, EncodedFrame, EncoderConfig, EncoderEvent,
-    EncoderSink, H264Profile, TuneValue,
+    EncoderSink, H264Profile, Nv12, TuneValue,
 };
 
 /// Submit timestamps are kept for this many in-flight frames (power of two).
@@ -587,6 +587,13 @@ impl SyntheticSource {
         Ok(Self { pool, frame: 0 })
     }
 
+    /// The next frame with its number drawn in as a barcode strip
+    /// ([`crate::barcode`]); numbers count 0, 1, 2, … from the first frame
+    /// this source made, marked or not (phase4-criteria P7).
+    pub fn next_frame_marked(&mut self) -> Result<(u32, PixelBufferRef), CodecError> {
+        Err(CodecError::Unsupported("RED: not yet"))
+    }
+
     /// Returns the next frame: a vertical bar sweeping across a gradient, so
     /// every frame differs (like a moving test pattern on screen).
     pub fn next_frame(&mut self) -> Result<PixelBufferRef, CodecError> {
@@ -923,6 +930,15 @@ impl DecodedFrame {
     /// The picture.
     pub fn image(&self) -> &PixelBufferRef {
         &self.image
+    }
+
+    /// Calls `f` with the picture's NV12 planes, locked read-only for the
+    /// duration of the call (phase4-criteria R2: the viewer uploads them
+    /// to the GPU). Fails if the picture is not 8-bit NV12 or its planes
+    /// are not what their sizes say.
+    pub fn with_nv12<R>(&self, f: impl FnOnce(&Nv12<'_>) -> R) -> Result<R, CodecError> {
+        let _ = f;
+        Err(CodecError::Unsupported("RED: not yet"))
     }
 }
 

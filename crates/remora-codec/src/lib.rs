@@ -11,6 +11,7 @@
 
 use std::time::{Duration, Instant};
 
+pub mod barcode;
 pub mod bitstream;
 pub mod h264;
 mod sys;
@@ -171,6 +172,69 @@ pub enum CodecError {
     /// Not available on this machine / OS.
     #[error("not supported: {0}")]
     Unsupported(&'static str),
+}
+
+/// A decoded picture's two NV12 planes, borrowed while the picture is
+/// locked: luma (`width × height` bytes per row used) and interleaved
+/// chroma (`2 × ⌈width/2⌉` bytes per row used, `⌈height/2⌉` rows). Only
+/// [`Nv12::new`] makes one, and it checks that both slices really hold
+/// that many rows at those strides, so a renderer can copy them without
+/// trusting the decoder. `Debug` prints sizes only (INV9).
+#[derive(Clone, Copy)]
+pub struct Nv12<'a> {
+    width: u32,
+    height: u32,
+    y: &'a [u8],
+    y_stride: usize,
+    uv: &'a [u8],
+    uv_stride: usize,
+}
+
+impl<'a> Nv12<'a> {
+    /// Checks the planes against the size and strides; `None` if a slice
+    /// is too short, a stride too small, or a dimension zero.
+    pub fn new(
+        width: u32,
+        height: u32,
+        y: &'a [u8],
+        y_stride: usize,
+        uv: &'a [u8],
+        uv_stride: usize,
+    ) -> Option<Self> {
+        let _ = (width, height, y, y_stride, uv, uv_stride);
+        None // RED: not yet
+    }
+
+    /// Picture width in pixels.
+    pub fn width(&self) -> u32 {
+        self.width
+    }
+
+    /// Picture height in pixels.
+    pub fn height(&self) -> u32 {
+        self.height
+    }
+
+    /// Luma plane and its stride (bytes per row).
+    pub fn y(&self) -> (&'a [u8], usize) {
+        (self.y, self.y_stride)
+    }
+
+    /// Chroma plane (Cb, Cr interleaved) and its stride.
+    pub fn uv(&self) -> (&'a [u8], usize) {
+        (self.uv, self.uv_stride)
+    }
+}
+
+impl std::fmt::Debug for Nv12<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Nv12")
+            .field("width", &self.width)
+            .field("height", &self.height)
+            .field("y_stride", &self.y_stride)
+            .field("uv_stride", &self.uv_stride)
+            .finish()
+    }
 }
 
 /// Why a frame produced no picture. **Every** case means the decoder needs

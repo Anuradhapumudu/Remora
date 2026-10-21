@@ -64,7 +64,9 @@ once a workspace member actually uses it.
 | windows | 0.62.2 | — | capture, codec, input (Windows) | Official Microsoft bindings |
 | x11rb | 0.14.0 | — | capture, input (Linux) | Pure-Rust X11 protocol |
 | openh264 | 0.9.8 | 0.9.8 (0.9.9 < 14 days) | codec | Software H.264 fallback |
-| wgpu | 30.0.1 | — | viewer | GPU rendering (Metal / D3D12 / Vulkan) |
+| wgpu | 30.0.1, default features **off**, `std` + `wgsl` + `metal` | 30.0.1 (2026-08-22) | viewer (macOS) | The Phase 4 video window and offscreen P7 rendering (phase4-criteria R1/R2). Metal backend only: the window is macOS-only until Phase 6.5, and every other backend would add code we do not run. Pulls naga 30.0.1 (shader compiler) and objc2-metal / objc2-quartz-core 0.3.2 |
+| winit | 0.30.13, default features **off**, `rwh_06` | 0.30.13 (2026-03-02) | viewer (macOS) | The window and its event loop (R1, R5). No X11/Wayland features. 0.31 is beta only. Uses the older objc2 0.5 / objc2-app-kit 0.2 family itself, so both objc2 generations are in the lock (cargo deny reports the duplicate; it is not a RustCrypto crate, D3 is unaffected) |
+| pollster | 1.0.1 | 1.0.1 (2026-07-10) | viewer (macOS) | Blocks on wgpu's adapter/device futures once at start-up (no async runtime on the window thread) |
 | slint | 1.18.1 (`unstable-wgpu-30`) | — | viewer, host | UI; shares our wgpu 30 device. MSRV 1.92 → workspace MSRV |
 | axum | 0.8.9 | — | signal | WebSocket signaling server |
 | tracing / tracing-subscriber | 0.1.44 / 0.3.23 | — | all | Structured logging (with secret redaction) |
@@ -80,6 +82,14 @@ crates.io release date. Three were < 14 days old and were locked to the
 previous release, in both `Cargo.lock` and `fuzz/Cargo.lock`:
 `cc` 1.8.0 → **1.6.0** (1.7.0 was also < 14 days), `libc` 0.2.191 →
 **0.2.190**, `zeroize` 1.9.1 → **1.9.0**.
+
+**2026-10-21, Phase 4 step 6 (wgpu + winit + pollster):** 123 new
+packages, each checked by `check-crate-age.py`. Nine were < 14 days old and
+were locked to the newest release that is not: `combine` 4.6.9 → **4.6.8**,
+`equivalent` 1.0.3 → **1.0.2**, `litrs` 1.0.1 → **1.0.0**, `redox_syscall`
+0.9.5 → **0.9.4**, `toml_datetime` 1.1.2 → **1.1.1**, `toml_edit` 0.25.17 →
+**0.25.15**, `toml_parser` 1.1.5 → **1.1.3**, `zerocopy` / `zerocopy-derive`
+0.8.63 → **0.8.60**. No version already in the lock changed.
 
 **Security-fix exceptions.** A release younger than 14 days may be adopted
 only when it is the **first patched release** for RustSec advisories that
