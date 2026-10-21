@@ -17,7 +17,8 @@ thiserror = { workspace = true }
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2-core-foundation = { workspace = true, features = ["CFArray", "CFDictionary", "CFNumber", "CFString", "CFBase"] }
 objc2-video-toolbox = { workspace = true, features = [
-    "VTBase", "VTCompressionProperties", "VTCompressionSession", "VTErrors", "VTSession",
+    "VTBase", "VTCompressionProperties", "VTCompressionSession", "VTDecompressionProperties",
+    "VTDecompressionSession", "VTErrors", "VTSession",
     "VTVideoEncoderList", "objc2-core-media", "objc2-core-video",
 ] }
 objc2-core-media = { workspace = true, features = ["CMSampleBuffer", "CMBlockBuffer", "CMFormatDescription", "CMTime", "CMBase", "objc2-core-video"] }

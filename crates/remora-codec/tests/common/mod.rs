@@ -65,6 +65,13 @@ pub(crate) struct Sps {
     pub(crate) chroma_format_idc: u64,
     pub(crate) bit_depth_minus8: u64,
     pub(crate) scaling_lists: bool,
+    /// Deltas to write for each scaling list (default: 0s, every entry
+    /// coded). The writer stops a list where nextScale reaches 0, as the
+    /// parser must.
+    pub(crate) scaling_deltas: Option<Vec<Vec<i64>>>,
+    pub(crate) log2_max_frame_num_minus4: u64,
+    pub(crate) log2_max_poc_lsb_minus4: u64,
+    pub(crate) max_num_ref_frames: u64,
     pub(crate) poc_type: u64,
     pub(crate) poc_cycle: Vec<i64>,
     pub(crate) width_mbs: u64,
@@ -72,6 +79,10 @@ pub(crate) struct Sps {
     pub(crate) frame_mbs_only: bool,
     /// left, right, top, bottom (in crop units).
     pub(crate) crop: Option<(u64, u64, u64, u64)>,
+    /// `vui_parameters_present_flag`, followed by a few (unread) bits.
+    pub(crate) vui: bool,
+    /// A stray 1 bit after `rbsp_stop_one_bit` (only without VUI).
+    pub(crate) junk_after_trailing: bool,
 }
 
 impl Default for Sps {
@@ -83,12 +94,18 @@ impl Default for Sps {
             chroma_format_idc: 1,
             bit_depth_minus8: 0,
             scaling_lists: false,
+            scaling_deltas: None,
+            log2_max_frame_num_minus4: 0,
+            log2_max_poc_lsb_minus4: 0,
+            max_num_ref_frames: 1,
             poc_type: 2,
             poc_cycle: Vec::new(),
             width_mbs: 120,
             height_map_units: 68,
             frame_mbs_only: true,
             crop: Some((0, 0, 0, 4)),
+            vui: false,
+            junk_after_trailing: false,
         }
     }
 }
@@ -131,18 +148,27 @@ impl Sps {
                 for i in 0..lists {
                     w.u(1, 1); // list present
                     let size = if i < 6 { 16 } else { 64 };
-                    // Deltas 0 keep nextScale at 8: every entry is coded.
-                    for _ in 0..size {
-                        w.se(0);
+                    match self.scaling_deltas.as_ref().and_then(|d| d.get(i)) {
+                        Some(deltas) => {
+                            for &d in deltas {
+                                w.se(d);
+                            }
+                        }
+                        // Deltas 0 keep nextScale at 8: every entry is coded.
+                        None => {
+                            for _ in 0..size {
+                                w.se(0);
+                            }
+                        }
                     }
                 }
             }
         }
-        w.ue(0); // log2_max_frame_num_minus4
+        w.ue(self.log2_max_frame_num_minus4);
         w.ue(self.poc_type);
         match self.poc_type {
             0 => {
-                w.ue(0);
+                w.ue(self.log2_max_poc_lsb_minus4);
             }
             1 => {
                 w.u(1, 0).se(0).se(0).ue(self.poc_cycle.len() as u64);
@@ -152,7 +178,7 @@ impl Sps {
             }
             _ => {}
         }
-        w.ue(1).u(1, 0); // max_num_ref_frames, gaps
+        w.ue(self.max_num_ref_frames).u(1, 0); // gaps_in_frame_num_allowed
         w.ue(self.width_mbs - 1).ue(self.height_map_units - 1);
         w.u(1, u64::from(self.frame_mbs_only));
         if !self.frame_mbs_only {
@@ -167,7 +193,15 @@ impl Sps {
                 w.u(1, 0);
             }
         }
-        w.u(1, 0); // no VUI
+        if self.vui {
+            w.u(1, 1).u(5, 0b10110); // VUI the parser does not read
+        } else {
+            w.u(1, 0);
+            if self.junk_after_trailing {
+                // Our stop bit, then zeros; `nal` adds one more 1 bit.
+                w.u(1, 1).u(3, 0);
+            }
+        }
         w.nal(0x67)
     }
 }

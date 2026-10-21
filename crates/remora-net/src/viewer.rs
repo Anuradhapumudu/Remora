@@ -56,8 +56,9 @@ pub enum ViewerEvent {
     Lost,
 }
 
-/// Handle to a running viewer connection.
-#[derive(Debug)]
+/// Handle to a running viewer connection. Clones control the same
+/// connection; it ends when the last one is dropped or one disconnects.
+#[derive(Debug, Clone)]
 pub struct ViewerClient {
     pub(crate) commands: mpsc::UnboundedSender<ViewerCommand>,
 }

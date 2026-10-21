@@ -83,17 +83,23 @@ fn m7_the_host_forces_at_most_one_keyframe_per_interval_for_all_viewers() {
     let t = a.now.plus(10_000);
     a.now = t;
     b.now = t;
+    let i = KEYFRAME_REQUEST_INTERVAL_MS;
+    let at = |c: &mut Conn, ms: u64| c.now = t.plus(ms);
     assert_eq!(ask(&mut host, &mut a), Some(1));
     // Viewer B asks within the interval: answered by the same keyframe.
-    b.now = t.plus(KEYFRAME_REQUEST_INTERVAL_MS - 1);
+    at(&mut b, i - 1);
     assert_eq!(ask(&mut host, &mut b), Some(0));
     assert_eq!(host.state(b.id), Some(State::Active), "not a violation");
-    // After the interval, B's next request is answered.
-    b.now = t.plus(KEYFRAME_REQUEST_INTERVAL_MS);
+    // A again, one interval after its first: a new keyframe.
+    at(&mut a, i);
+    assert_eq!(ask(&mut host, &mut a), Some(1));
+    // B, one interval after its own request (so the viewer sends it) but
+    // 1 ms short of one after A's: the host holds it back.
+    at(&mut b, 2 * i - 1);
+    assert_eq!(ask(&mut host, &mut b), Some(0));
+    // B once more, an interval later: answered.
+    at(&mut b, 3 * i - 1);
     assert_eq!(ask(&mut host, &mut b), Some(1));
-    // A, asking at its own pace, just inside the host's interval from B's.
-    a.now = b.now.plus(KEYFRAME_REQUEST_INTERVAL_MS - 1);
-    assert_eq!(ask(&mut host, &mut a), Some(0));
 }
 
 #[test]

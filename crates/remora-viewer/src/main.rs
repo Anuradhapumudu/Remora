@@ -1,7 +1,8 @@
 //! Remora viewer: views and controls a remote Remora host.
 //!
 //! Phase 3: `connect` runs the authenticated handshake against a host's
-//! connection code on loopback and shows the safety code; no screen yet.
+//! connection code on loopback and shows the safety code. Phase 4: it
+//! decodes the video it receives (step 5); the window comes in step 6.
 //!
 //! Output lines (stable prefixes; the end-to-end tests read them):
 //! `safety code:`, `SESSION ACTIVE`, `rejected by the host`, `identity
@@ -9,6 +10,8 @@
 //! `session ended`. Exit codes: see [`remora_app::cli::exit`].
 
 #![forbid(unsafe_code)]
+
+mod decode;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -201,6 +204,22 @@ async fn run_connect(args: ConnectArgs) -> anyhow::Result<u8> {
         host_id.short_code()
     );
     let (client, mut events) = connect(addr, config, code.nonce).await?;
+    let mut decoder = decode::Decoder::start(client.clone()).context("decoder thread")?;
+    let code = session_loop(&mut events, &mut decoder).await;
+    let v = decoder.finish();
+    println!(
+        "video: {} frames decoded, {} refused, {} failed, {} dropped",
+        v.decoded, v.refused, v.failed, v.dropped
+    );
+    drop(client);
+    Ok(code)
+}
+
+/// Shows the session's events until it ends; returns the exit code.
+async fn session_loop(
+    events: &mut tokio::sync::mpsc::UnboundedReceiver<ViewerEvent>,
+    decoder: &mut decode::Decoder,
+) -> u8 {
     let mut outcome: Option<u8> = None;
     while let Some(ev) = events.recv().await {
         match ev {
@@ -224,28 +243,23 @@ async fn run_connect(args: ConnectArgs) -> anyhow::Result<u8> {
                 )
             }
             ViewerEvent::StreamResumed => println!("stream resumed"),
-            // Phase 4 step 6 draws these; until then they are discarded.
-            ViewerEvent::Video(_) => {}
+            ViewerEvent::Video(frame) => decoder.offer(frame),
             ViewerEvent::Failed { reason, .. } => outcome = Some(report_failure(&reason)),
             ViewerEvent::Closed { local, remote } => {
-                let code = outcome.unwrap_or_else(|| report_close(local, remote));
-                drop(client);
-                return Ok(code);
+                return outcome.unwrap_or_else(|| report_close(local, remote));
             }
             ViewerEvent::Lost => {
-                let code = outcome.unwrap_or_else(|| {
+                return outcome.unwrap_or_else(|| {
                     println!(
                         "failed: connection lost - no reply from the host for {} s (network down, or the host stopped)",
                         IDLE_TIMEOUT.as_secs()
                     );
                     exit::ERROR
                 });
-                drop(client);
-                return Ok(code);
             }
         }
     }
-    Ok(outcome.unwrap_or(exit::ERROR))
+    outcome.unwrap_or(exit::ERROR)
 }
 
 fn report_failure(reason: &FailReason) -> u8 {

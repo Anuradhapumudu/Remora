@@ -148,6 +148,198 @@ fn m7_sps_features_remora_never_sends_are_refused() {
 }
 
 #[test]
+fn m7_sps_limits_are_exact() {
+    // Each limit accepted at its value and refused one above it.
+    let ok = |s: Sps, what: &str| assert!(parse_sps(&s.nal()).is_ok(), "{what}");
+    let no = |s: Sps, what: &str| {
+        let r = parse_sps(&s.nal());
+        assert!(matches!(r, Err(StreamError::Sps(_))), "{what}: {r:?}");
+    };
+    let d = Sps::default;
+    ok(
+        Sps {
+            log2_max_frame_num_minus4: 12,
+            ..d()
+        },
+        "frame_num 16 bits",
+    );
+    no(
+        Sps {
+            log2_max_frame_num_minus4: 13,
+            ..d()
+        },
+        "frame_num 17 bits",
+    );
+    let poc0 = |lsb| Sps {
+        poc_type: 0,
+        log2_max_poc_lsb_minus4: lsb,
+        ..d()
+    };
+    ok(poc0(12), "poc lsb 16 bits");
+    no(poc0(13), "poc lsb 17 bits");
+    let poc1 = |n| Sps {
+        poc_type: 1,
+        poc_cycle: vec![-3; n],
+        ..d()
+    };
+    ok(poc1(255), "255-entry cycle");
+    no(poc1(256), "256-entry cycle");
+    ok(
+        Sps {
+            max_num_ref_frames: 16,
+            ..d()
+        },
+        "16 references",
+    );
+    no(
+        Sps {
+            max_num_ref_frames: 17,
+            ..d()
+        },
+        "17 references",
+    );
+    ok(Sps { sps_id: 31, ..d() }, "sps_id 31");
+    ok(
+        Sps {
+            profile_idc: 77,
+            ..d()
+        },
+        "Main",
+    );
+    // Cropped to exactly zero rows (1088 coded, 544 units of 2 rows).
+    no(
+        Sps {
+            crop: Some((0, 0, 0, 544)),
+            ..d()
+        },
+        "zero height",
+    );
+    no(
+        Sps {
+            crop: Some((0, 0, 544, 0)),
+            ..d()
+        },
+        "zero height, top",
+    );
+    no(
+        Sps {
+            crop: Some((0, 960, 0, 0)),
+            ..d()
+        },
+        "zero width, right",
+    );
+    // Field coded: a vertical crop unit is 4 rows.
+    let i = info(
+        &Sps {
+            frame_mbs_only: false,
+            crop: Some((0, 0, 1, 1)),
+            ..Sps::sized(120, 34)
+        }
+        .nal(),
+    );
+    assert_eq!(i.height, 1088 - 8);
+}
+
+#[test]
+fn m7_sps_vui_and_trailing_bits() {
+    // With VUI the parser stops at the flag (the decoder reads the VUI).
+    let i = info(
+        &Sps {
+            vui: true,
+            ..Sps::default()
+        }
+        .nal(),
+    );
+    assert_eq!((i.width, i.height), (1920, 1080));
+    // Without VUI, anything after the stop bit is refused.
+    let r = parse_sps(
+        &Sps {
+            junk_after_trailing: true,
+            ..Sps::default()
+        }
+        .nal(),
+    );
+    assert!(matches!(r, Err(StreamError::Sps(_))), "{r:?}");
+}
+
+#[test]
+fn m7_scaling_lists_that_end_early_are_read_exactly() {
+    // nextScale reaching 0 ends a list early (H.264 7.3.2.1.1.1): the
+    // parser must stop reading deltas exactly there, or every later field
+    // (the size among them) is read from the wrong bits.
+    let lists = vec![
+        vec![-8],        // 8 - 8 = 0 at once
+        vec![5, -13],    // 13, then 0
+        vec![120, -128], // 128, then 0
+        vec![0; 16],
+        vec![1; 16], // 9, 10, … never 0: all 16 coded
+        vec![-8],
+        vec![-8],
+        vec![-8],
+    ];
+    let s = Sps {
+        scaling_lists: true,
+        scaling_deltas: Some(lists),
+        ..Sps::sized(80, 45).high()
+    };
+    let i = info(&s.nal());
+    assert_eq!((i.width, i.height), (1280, 720));
+    // A delta outside -128..=127 is refused.
+    for bad in [128, -129] {
+        let s = Sps {
+            scaling_lists: true,
+            scaling_deltas: Some(vec![vec![bad]]),
+            ..Sps::default().high()
+        };
+        assert!(
+            matches!(parse_sps(&s.nal()), Err(StreamError::Sps(_))),
+            "delta {bad}"
+        );
+    }
+    for edge in [127, -128] {
+        let mut lists = vec![vec![edge, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]];
+        lists.extend(std::iter::repeat_n(vec![-8], 7));
+        let s = Sps {
+            scaling_lists: true,
+            scaling_deltas: Some(lists),
+            ..Sps::default().high()
+        };
+        assert!(parse_sps(&s.nal()).is_ok(), "delta {edge}");
+    }
+}
+
+#[test]
+fn m7_boundaries_of_the_frame_checks() {
+    let l = SizeLimit::new(1920, 1080);
+    // Coded height over the limit (1104 > 1080 rounded up to 1088) while
+    // the displayed picture fits (cropped by 24 rows to 1080).
+    let s = Sps {
+        crop: Some((0, 0, 0, 12)),
+        ..Sps::sized(120, 69)
+    };
+    assert_eq!(info(&s.nal()).height, 1080);
+    assert!(too_large(&keyframe(&s), l), "coded height alone");
+    // A PPS of exactly the limit is accepted (padding the PPS with 0x80
+    // keeps it non-zero to the end, so nothing is trimmed).
+    let mut big = pps(0, 0);
+    big.resize(MAX_PARAMETER_SET, 0x80);
+    let k = annexb(&[&Sps::default().nal(), &big, IDR]);
+    assert!(parse_frame(&k, SizeLimit::default()).is_ok());
+    // pps_id 255 is the largest allowed.
+    let k = annexb(&[&Sps::default().nal(), &pps(255, 0), IDR]);
+    assert!(parse_frame(&k, SizeLimit::default()).is_ok());
+    // A valid SPS body behind another NAL header is not an SPS.
+    let mut not_sps = Sps::default().nal();
+    for header in [0x68, 0x65, 0x61] {
+        not_sps[0] = header;
+        assert!(
+            matches!(parse_sps(&not_sps), Err(StreamError::Sps(_))),
+            "header {header:#x}"
+        );
+    }
+}
+
+#[test]
 fn m7_sps_that_is_not_an_sps_or_is_cut_short_is_refused() {
     assert!(parse_sps(&[]).is_err());
     assert!(parse_sps(&pps(0, 0)).is_err(), "a PPS");
@@ -201,6 +393,19 @@ fn m7_pictures_over_8k_are_refused_and_8k_is_not() {
         ..Sps::sized(480, 136)
     };
     assert!(too_large(&keyframe(&s), any), "field-coded height");
+}
+
+#[test]
+fn m7_an_sps_alone_never_declares_more_than_8k() {
+    // Without a frame or a viewer limit (the fuzz target calls parse_sps
+    // directly): every SpsInfo is within 7680 × 4320, so its u32 fields
+    // can never be a saturated or wrapped size.
+    let too_large = |s: Sps| matches!(parse_sps(&s.nal()), Err(StreamError::TooLarge { .. }));
+    assert!(too_large(Sps::sized(481, 270)));
+    assert!(too_large(Sps::sized(480, 271)));
+    assert!(too_large(Sps::sized(1 << 31, 1 << 31)));
+    let i = info(&Sps::sized(480, 270).nal());
+    assert_eq!((i.width, i.height), (MAX_WIDTH, MAX_HEIGHT));
 }
 
 #[test]

@@ -1290,6 +1290,7 @@ dependencies = [
  "anyhow",
  "clap",
  "remora-app",
+ "remora-codec",
  "remora-crypto",
  "remora-net",
  "remora-proto",

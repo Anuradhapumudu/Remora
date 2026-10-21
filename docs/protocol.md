@@ -293,6 +293,21 @@ Notes:
   changes never misplace clicks.
 * **Mouse motion** goes as a media-style datagram (latest-wins, loss harmless);
   buttons/keys go on the reliable channel so a click is never lost.
+* **`RecoveryRequest` (tag 9), Phase 4:** viewer → host, Active only, no
+  fields yet ("send a keyframe"; lost frame ids for LTR recovery come
+  later). Sent when the viewer's decoder cannot continue: a frame refused
+  by the checks below, a decode error, or a gap in frame ids. The viewer
+  sends at most one per 500 ms; the host forces at most one keyframe per
+  500 ms for all viewers together (`KEYFRAME_REQUEST_INTERVAL_MS`). A host
+  sending one is a protocol violation.
+* **Video bitstream (Phase 4: H.264 only).** Each reassembled frame is an
+  Annex B access unit. The viewer accepts only what Remora's encoder sends
+  and refuses the rest **before the decoder sees it** (§7 limits;
+  `remora_codec::h264`): NAL unit types 1, 5, 6, 7, 8, 9; an IDR keyframe
+  carries exactly one SPS and one PPS, every other frame none; the SPS is
+  8-bit 4:2:0 Baseline/Main/High within the viewer's size limit (displayed
+  **and** coded size). The viewer has no limit to tell the host yet
+  (`Capabilities`, roadmap D-31).
 
 ## 6. Media datagrams
 
@@ -387,7 +402,9 @@ Enforced before allocation; violations are `ProtocolViolation` unless noted.
 | Bytes held for reassembly, all frames | 32 MiB (oldest frame evicted; Phase 4 addition — 16 × 8 MiB would be 128 MiB) |
 | Media datagram sent by the host | 1100 B (Phase 4) |
 | Media keys a viewer holds at once | 4 (oldest superseded key forgotten first) |
-| Video resolution | ≤ negotiated `max_width × max_height`, ≤ 7680×4320 |
+| Video resolution | ≤ negotiated `max_width × max_height`, ≤ 7680×4320 (Phase 4: the viewer's own limit, not negotiated, roadmap D-31; coded size ≤ the limit rounded up to 16 × 32) — refused before the decoder is configured |
+| NAL units per video frame | 256 |
+| H.264 SPS / PPS NAL unit | 256 B |
 | Pending handshakes on host | 4 |
 | Handshake attempts per source IP | 10 per minute |
 | Protobuf nesting depth | prost default (100) — our schema never nests > 4 |

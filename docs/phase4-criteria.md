@@ -258,6 +258,35 @@ The phase report lists the whole deferred list row by row (CLAUDE.md).
   the existing targets `media_open` (header + AEAD), `video_reassembly`
   (fragment body) and `messages` (key announcements).
 
+* **Step 5 (2026-10-21).** H.264 decode behind checks (architecture D40).
+  Tests: `remora-codec/tests/m7_h264.rs` (26, every OS: frame and SPS
+  rules, exact limits, the gate), `m7_hostile_decode.rs` (7, VideoToolbox),
+  `m7_decode_memory.rs` (1, own process), `remora-session/tests/
+  m7_keyframe_request.rs` (5), `remora-net/tests/m7_keyframe_request.rs`
+  (1, real QUIC), the decode probe. **M7 on the M4:** a real 60-frame
+  stream decodes; a 1080p keyframe to a 720p viewer and an 8K+ SPS create
+  **no** decoder session; 600 random/random-slice frames and 507
+  truncated ones: no crash, no decode call near the 5 s watchdog, a real
+  keyframe decodes afterwards; memory over 3000 hostile frames (1100
+  decoder sessions created and dropped): footprint 111 → 95 MB, IOSurfaces
+  0.3 → 0.3 MB (limit +8 MB). **Probe:** `VT_PROBE decode=ok frames=30/30`
+  locally; CI now requires both probe lines. **Fuzz** `h264_frame`: 10 min,
+  40.4 M runs, 0 crashes; corpus minimised to 858 inputs (seeded from real
+  encoder output). **Plants, each seen failing then removed:** no viewer
+  size check (oversized test), no 8K check in `parse_sps`, coded size not
+  checked, a decode call that sleeps 7 s (watchdog names call 1), every
+  decoded picture leaked (first missed by `footprint`, §12; caught after),
+  the gate not waiting after a decode error (two places), no frame-gap
+  rule, a probe whose decoder refuses everything (prints `decode=BROKEN`
+  and fails). **Mutation:** `h264.rs` 156 mutants, 152 caught, 4 unviable,
+  0 missed, with only the tests that exist on Linux (where CI's shard
+  runs); one equivalent `+ 256` was removed from the code instead of
+  excluded. Session `request_keyframe`/`on_active`/`on_pending`: 19
+  mutants, 13 caught, 5 unviable, 1 timeout (an existing `on_pending`
+  mutant that hangs), 0 missed. **Not yet:** the viewer window (step 6)
+  and decoding the real capture stream end to end (step 7); the decode
+  thread in `remora-viewer` releases each picture.
+
 ## 12. Changes to criteria
 
 * **2026-10-19 — owner approval.** R1–R5 approved as proposed. R1 and R2 are
@@ -326,6 +355,23 @@ The phase report lists the whole deferred list row by row (CLAUDE.md).
   5. *M7 memory bound,* fixed before measuring: footprint growth ≤ 8 MB
      over 3000 hostile frames after a 300-frame warm-up, in its own test
      process.
+* **2026-10-21 — M7 read precisely (step 5; no threshold changes, flagged
+  to the owner).**
+  1. *"Viewer memory bounded" counted the wrong memory.* The planned
+     measure, process footprint, did not move when a planted bug leaked
+     every decoded picture (~100 MB): decoded pictures are IOSurfaces,
+     which `footprint` does not count. The test now counts footprint
+     **plus** the IOSurface memory mapped into the process (`vmmap
+     --summary`), same 8 MB threshold; the planted leak then fails it
+     ("memory grew 91 317 862 bytes"). Counting more memory only makes the
+     check stricter. **P5 (viewer memory, step 7) must count IOSurfaces
+     the same way**, or it would miss a leak of pictures too.
+  2. *A lost frame was a silent wrong picture.* VideoToolbox decoded a P
+     frame whose reference had never been given to it and reported
+     success. The decoder now treats a gap in frame ids like a decode error
+     (wait for a keyframe, ask for one): test
+     `m7_a_missing_frame_waits_for_a_keyframe`, seen failing first. This
+     adds a check; P7 (no repeats, no reordering) is unaffected.
 * Standing rule (owner, 2026-10-20): **a UX change to a security-relevant
   flow needs its own attack test** — phase3-criteria §10.8, the F-UX1
   prompt-number confused-deputy case. Applies to the Phase 4 viewer window

@@ -28,7 +28,7 @@ use remora_proto::video::{PacketizeError, packetize};
 
 use crate::fail::{AuthDetail, Violation};
 use crate::limiter::Limiter;
-use crate::media::{MediaOut, video_header};
+use crate::media::{KEYFRAME_REQUEST_INTERVAL_MS, MediaOut, video_header};
 use crate::{
     AppMessage, CloseCode, FailReason, HANDSHAKE_TIMEOUT_MS, Millis, PROMPT_TIMEOUT_MS,
     PROTOCOL_VERSION, State, Step,
@@ -260,6 +260,9 @@ pub struct Host {
     pub(crate) next_frame_id: u32,
     /// Packets per media key before rotation (protocol.md §6: 2³²).
     pub(crate) rotate_after: u64,
+    /// When a viewer's keyframe request last forced a keyframe (any
+    /// session: the encoder is shared).
+    pub(crate) keyframe_requested: Option<Millis>,
 }
 
 /// One nonce the host put in an offer code.
@@ -293,6 +296,7 @@ impl Host {
             capture: crate::CaptureStatus::Running,
             next_frame_id: 0,
             rotate_after: MAX_PACKETS_PER_KEY,
+            keyframe_requested: None,
         }
     }
 
@@ -466,7 +470,7 @@ impl Host {
             HostSessionState::Msg3(hs) => self.on_msg3(id, frame, hs, now, rng, &mut out),
             HostSessionState::Pending { est, .. } => Self::on_pending(frame, est),
             HostSessionState::Active { est, media } => {
-                self.on_active(id, frame, est, media, &mut out)
+                self.on_active(id, frame, est, media, now, &mut out)
             }
         };
         match result {
@@ -1018,10 +1022,26 @@ impl Host {
         frame: &[u8],
         mut est: Established,
         media: MediaOut,
+        now: Millis,
         out: &mut Vec<HostAction>,
     ) -> Result<HostSessionState, Ending> {
         let env = decrypt_envelope(&mut est, frame).map_err(|r| Ending::Failed(r, false))?;
         match env.msg {
+            Some(envelope::Msg::Control(Control {
+                kind: Some(control::Kind::Recovery(_)),
+            })) => {
+                // A viewer's decoder needs a keyframe (phase4-criteria M7).
+                // One forced keyframe serves every viewer, so requests
+                // inside the interval are answered by the last one.
+                if self
+                    .keyframe_requested
+                    .is_none_or(|t| now.0 >= t.0.saturating_add(KEYFRAME_REQUEST_INTERVAL_MS))
+                {
+                    self.keyframe_requested = Some(now);
+                    out.push(HostAction::ForceKeyframe);
+                }
+                Ok(HostSessionState::Active { est, media })
+            }
             Some(envelope::Msg::Input(input)) => {
                 out.push(HostAction::Deliver {
                     id,

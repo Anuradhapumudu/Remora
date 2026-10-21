@@ -54,19 +54,23 @@ jobs:
 
       - name: Test
         run: cargo test --workspace --locked
-      # Phase 4 step 1: does this runner's VideoToolbox hardware-encode? The
-      # answer decides which codec the Phase 4 media tests use in CI
-      # (phase4-criteria §8). "unavailable" passes; a broken encoder fails.
+      # Phase 4 steps 1 and 5: can this runner's VideoToolbox encode and
+      # decode? The answer decides which codec the Phase 4 media tests use
+      # in CI (phase4-criteria §8). "unavailable" passes; broken fails.
       - name: VideoToolbox probe (macOS)
         if: runner.os == 'macOS'
         run: |
           set -o pipefail
           cargo test -p remora-codec --test vt_probe --locked -- --ignored --nocapture 2>&1 | tee vt_probe.log
-          line=$(grep -m1 '^VT_PROBE ' vt_probe.log || true)
-          if [ -z "$line" ]; then echo "::error::the probe printed no VT_PROBE line"; exit 1; fi
-          echo "$line"
           echo "### VideoToolbox probe" >> "$GITHUB_STEP_SUMMARY"
-          echo "\`$line\`" >> "$GITHUB_STEP_SUMMARY"
+          # One line each for encode (step 1) and decode (step 5); a missing
+          # line is a probe that did not run, never a pass.
+          for what in encode decode; do
+            line=$(grep -m1 "^VT_PROBE $what=" vt_probe.log || true)
+            if [ -z "$line" ]; then echo "::error::the probe printed no VT_PROBE $what= line"; exit 1; fi
+            echo "$line"
+            echo "\`$line\`" >> "$GITHUB_STEP_SUMMARY"
+          done
 
       - name: Install cargo-deny and cargo-audit
         uses: taiki-e/install-action@861a07ce7084f55488e375df125cdc99bba60eb7 # v2.87.23

@@ -15,12 +15,13 @@ use remora_crypto::sas::Sas;
 use remora_crypto::secret::{Exporter, Otp};
 
 use remora_proto::messages::{
-    Control, Envelope, Goodbye, Mode, ViewerHello, control, decode_host_hello, envelope,
+    Control, Envelope, Goodbye, Mode, RecoveryRequest, ViewerHello, control, decode_host_hello,
+    envelope,
 };
 
 use crate::fail::Violation;
 use crate::host::{Identity, decrypt_envelope};
-use crate::media::{MediaIn, MediaStats};
+use crate::media::{KEYFRAME_REQUEST_INTERVAL_MS, MediaIn, MediaStats};
 use crate::{CloseCode, FailReason, HANDSHAKE_TIMEOUT_MS, Millis, PROTOCOL_VERSION, State, Step};
 
 /// How the viewer authenticates.
@@ -112,6 +113,8 @@ pub struct ViewerSession {
     pub(crate) state: ViewerState,
     pub(crate) deadline: Millis,
     pub(crate) media: MediaIn,
+    /// When the last keyframe request was sent.
+    pub(crate) keyframe_requested: Option<Millis>,
 }
 
 impl std::fmt::Debug for ViewerSession {
@@ -149,6 +152,7 @@ impl ViewerSession {
                 state: ViewerState::Hello { vh, nonce },
                 deadline: now.plus(HANDSHAKE_TIMEOUT_MS),
                 media: MediaIn::default(),
+                keyframe_requested: None,
             },
             first,
         )
@@ -266,8 +270,24 @@ impl ViewerSession {
     /// decode, phase4-criteria M7): asks the host for one. Active only, and
     /// at most once per [`KEYFRAME_REQUEST_INTERVAL_MS`](crate::media::KEYFRAME_REQUEST_INTERVAL_MS).
     pub fn request_keyframe(&mut self, now: Millis) -> Option<ViewerAction> {
-        let _ = now;
-        None // RED: not yet
+        let ViewerState::Active(est) = &mut self.state else {
+            return None;
+        };
+        if self
+            .keyframe_requested
+            .is_some_and(|t| now.0 < t.0.saturating_add(KEYFRAME_REQUEST_INTERVAL_MS))
+        {
+            return None;
+        }
+        let env = Envelope {
+            msg: Some(envelope::Msg::Control(Control {
+                kind: Some(control::Kind::Recovery(RecoveryRequest {})),
+            })),
+        }
+        .encode_to_vec();
+        let frame = est.encrypt(&env).ok()?;
+        self.keyframe_requested = Some(now);
+        Some(ViewerAction::Send(frame))
     }
 
     /// One-click disconnect from any state.

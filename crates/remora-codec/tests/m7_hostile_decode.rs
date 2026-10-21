@@ -99,7 +99,8 @@ fn m7_random_bytes_and_random_slices_never_crash_or_hang() {
                 annexb(&[&p])
             }
             // A real frame now and then, so the decoder is in every state.
-            _ => real[i % real.len()].1.clone(),
+            // (i / 4 walks through all of them, keyframe included.)
+            _ => real[(i / 4) % real.len()].1.clone(),
         });
     }
     inputs.push(real[0].1.clone());
@@ -157,6 +158,35 @@ fn m7_after_a_decode_error_the_decoder_waits_for_a_keyframe() {
     );
     assert!(dec.decode(3, &real[0].1).is_ok());
     assert!(dec.decode(4, &real[1].1).is_ok());
+}
+
+#[test]
+fn m7_a_missing_frame_waits_for_a_keyframe() {
+    // Frame 2 never arrives (lost, given up by the reassembler, or dropped
+    // because the decoder was busy): frame 3 predicts from a picture the
+    // decoder never saw, and VideoToolbox need not report that as an
+    // error. A gap in frame ids is treated like a decode error.
+    let real = encode(640, 360, 4, 0);
+    let mut dec = VtDecoder::new(SizeLimit::default());
+    dec.decode(0, &real[0].1).unwrap();
+    dec.decode(1, &real[1].1).unwrap();
+    let r = dec.decode(3, &real[3].1);
+    assert!(
+        matches!(r, Err(DecodeError::Refused(Refusal::WaitingForKeyframe))),
+        "{r:?}"
+    );
+    // A repeated id is a gap too (the reassembler never delivers one).
+    let mut again = VtDecoder::new(SizeLimit::default());
+    again.decode(0, &real[0].1).unwrap();
+    again.decode(1, &real[1].1).unwrap();
+    assert!(again.decode(1, &real[2].1).is_err(), "repeated frame id");
+    // The next keyframe, whatever its id, starts a new chain.
+    assert!(dec.decode(9, &real[0].1).is_ok());
+    assert!(dec.decode(10, &real[1].1).is_ok());
+    // Ids wrap: u32::MAX is followed by 0.
+    let mut wrap = VtDecoder::new(SizeLimit::default());
+    wrap.decode(u32::MAX, &real[0].1).unwrap();
+    assert!(wrap.decode(0, &real[1].1).is_ok());
 }
 
 #[test]
