@@ -17,8 +17,8 @@ use std::sync::Arc;
 use anyhow::{Context, anyhow};
 use clap::{Parser, Subcommand};
 use remora_app::cli::{
-    Looks, exit, format_sas, identity_hex, key_file_warning, misplaced, parse_identity,
-    short_code_of, unix_now,
+    Looks, exit, format_sas, identity_hex, join_device_words, key_file_warning, misplaced,
+    parse_identity, short_code_of, unix_now,
 };
 use remora_app::keystore::{self, Role};
 use remora_crypto::identity::{DeviceId, IdentityPublic, ShortCode};
@@ -64,13 +64,15 @@ struct ConnectArgs {
     #[arg(long)]
     pin: Option<String>,
     /// The device code of the host you mean to reach (the host's `device:`
-    /// line, in quotes: --device '8531 422 5411-5'); refuse any other.
-    #[arg(long)]
+    /// line, e.g. --device 8531 422 5411-5, quotes optional); refuse any
+    /// other.
+    #[arg(long, value_name = "DEVICE CODE")]
     device: Option<String>,
 }
 
 fn main() -> ExitCode {
-    let cli = Cli::parse();
+    // F-UX6: a device code typed without quotes is rejoined first.
+    let cli = Cli::parse_from(join_device_words(std::env::args_os()));
     init_logging();
     let result = match cli.command {
         None => {
@@ -132,9 +134,9 @@ async fn run_connect(args: ConnectArgs) -> anyhow::Result<u8> {
 
     // A16: the user asked for a specific device; refuse a code for another
     // one before connecting at all.
-    if let Some(want) = &args.device {
-        let want = ShortCode::parse(want)
-            .map_err(|e| anyhow!("--device: {e} - {}", misplaced(Looks::DeviceCode, want)))?;
+    if let Some(typed) = &args.device {
+        let want = ShortCode::parse(typed)
+            .map_err(|e| anyhow!("--device: {e} - {}", misplaced(Looks::DeviceCode, typed)))?;
         if !want.matches(&host_id) {
             println!(
                 "identity mismatch: this code is for device {}, not {} which you asked for - not connecting",

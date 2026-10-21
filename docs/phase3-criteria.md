@@ -554,7 +554,7 @@ adds (real NAT traversal, STUN parser fuzzing, QUIC retry).
    end by itself). Restart the host: same `identity:` and `device:`;
    connect again with its **new** `code:` and the **same** `--pin`.
 7. Wrong device: `connect '<the host's code: line>' --device '<the
-   viewer's own device: line>'` (quoted — a device code has spaces) ⇒
+   viewer's own device: line>'` (quotes optional since F-UX6) ⇒
    `identity mismatch`, exit 3, and the host never prompts.
 
 
@@ -589,8 +589,8 @@ the underlying protocol check (here A22) is unchanged.
 | 3. Accept | ✅ safety codes matched (854 929); `accept 1` → `SESSION ACTIVE 1` on the host, `SESSION ACTIVE` on the viewer; the F-UX3 note explained the new pair. `disconnect 1` not shown in the screenshots |
 | 4. Wrong password | ✅ viewer `failed: authentication failed (wrong or used password, or not trusted)`; host one `handshake_failed` WARN (`attempt=1/3`), note "the password is unchanged", new code, same password |
 | 5. Deny | ✅ viewer `rejected by the host (a new attempt needs a fresh code and password)`; host `session ended 1 (Rejected)`; the typo `denny 1` got the explicit F-UX1 error |
-| 6. Trusted mode across restart | **2026-10-21, partly:** first connect ✅ (`--pin` with the host's identity, no password; safety codes matched, 241 383; the host still prompted, as required by threat model §4 item 6; `accept 1` → `SESSION ACTIVE`). ❌ **The session then ended by itself after ~30 s** (finding **F-L1** below, fixed). Host restart ✅ same identity (`5fdd9140…`) and device code after restart. Reconnect with `--pin` after the restart: **not yet shown**. Also covered by the e2e tests `f1_trusted_mode_with_pinned_keys` and `a19_pinned_host_whose_key_changed_is_a_hard_failure` (real binaries) |
-| 7. Wrong device | **not yet run** — 2026-10-21 attempt stopped at argument parsing: the device code has spaces and was not quoted (`error: unexpected argument '422'`), and it was the host's own code (which would match). Covered by `a16_viewer_asking_for_device_x_refuses_a_code_for_device_y` |
+| 6. Trusted mode across restart | ✅ **2026-10-21** (after the F-L1 fix, screenshots): `--pin` with the host's identity, no password; safety codes matched (628 577); prompted as required (threat model §4 item 6); `accept 1` → `SESSION ACTIVE` on both; `disconnect 1` → `session ended 1 (Normal)` on the host and `session ended` on the viewer. Host restarted: same `identity:` (`5fdd9140…`) and `device:` (8531 422 5411-5); reconnect with the **new** code and the **same** `--pin` → safety codes matched (814 307), active, normal disconnect. Not visible in the screenshots: how long the session stayed up (F-L1's "over a minute" is covered by `remora-net/tests/liveness.rs`, not by this run). Earlier the same day: first try found **F-L1** and **F-UX5** (below). **Bonus:** reusing the spent code was refused — host `handshake_failed reason=connection code nonce already used`, viewer the generic `authentication failed` (A05/A04 as designed) |
+| 7. Wrong device | **not yet run** — two attempts on 2026-10-21 stopped at argument parsing: the device code was typed without quotes (`error: unexpected argument '422'`, finding **F-UX6**, fixed), and it was the **host's own** device code, which would match rather than test a mismatch. Covered by `a16_viewer_asking_for_device_x_refuses_a_code_for_device_y` |
 
 **F-UX4** (found in the deny run): the owner typed `deny 1` into the
 **viewer's** terminal — nothing there said that the decision is made at the
@@ -638,6 +638,25 @@ before any traffic, the host never prompts); mutation run on the new
 functions 14 caught, 1 unviable, 0 missed — run by hand, since
 `cli.rs` is not in the CI mutation gate. Steps 6–7 above now name the
 host lines and the quoting.
+
+**F-UX6** (2026-10-21, step 7, twice): `--device 8531 422 5411-5`
+without quotes failed with clap's `unexpected argument '422'` — the code is
+*printed* in three groups, so it gets typed that way. Fixed: the viewer
+rejoins up to two digit-and-dash words after `--device` before parsing
+(`remora_app::cli::join_device_words`), so a connection code or another
+option is never taken, and the joined text is still checked in full
+(check digit, A16). A first attempt (clap `num_args = 1..=3`) was
+rejected before commit: it swallowed the host code when the device code
+came first. Tests: unit (both orders, quoted, stops at options, at most
+three words) and e2e (unquoted wrong device → identity mismatch, exit 3,
+no prompt); mutation run 22 caught, 1 unviable, 0 missed (by hand).
+
+**Observation, no change:** in the step-6 run the owner typed `accept 1`
+into the **viewer** terminal as well, after it printed `waiting for the
+person at the host to accept or deny (nothing to type here)` (F-UX4); the
+line ran as a shell command after the viewer exited (`zsh: command not
+found: accept`). Harmless; noted as input for the Phase 4.5 GUI, where
+the viewer shows a waiting state with nothing to type.
 
 ## 11. Changes to criteria
 

@@ -3,8 +3,8 @@
 
 use rand_core::OsRng;
 use remora_app::cli::{
-    CliError, Looks, format_sas, identity_hex, looks_like, misplaced, offer_code, parse_identity,
-    short_code_of,
+    CliError, Looks, format_sas, identity_hex, join_device_words, looks_like, misplaced,
+    offer_code, parse_identity, short_code_of,
 };
 use remora_crypto::identity::{DeviceId, IdentityKeypair};
 use remora_proto::code::{CandidateKind, CodeKind, ConnectionCode};
@@ -134,4 +134,42 @@ fn f_ux5_a_hint_never_repeats_the_value() {
         let m = misplaced(want, text);
         assert!(!m.contains(text.trim()), "{want:?}: {m}");
     }
+}
+
+fn argv(words: &[&str]) -> Vec<std::ffi::OsString> {
+    words.iter().map(Into::into).collect()
+}
+
+#[test]
+fn f_ux6_device_words_are_rejoined_only_after_device() {
+    let j = |w: &[&str]| join_device_words(argv(w));
+    // The walkthrough's input, after the code ...
+    assert_eq!(
+        j(&["v", "connect", CODE, "--device", "8531", "422", "5411-5"]),
+        argv(&["v", "connect", CODE, "--device", "8531 422 5411-5"])
+    );
+    // ... and before it: the code is never taken as part of the device.
+    assert_eq!(
+        j(&["v", "connect", "--device", "8531", "422", "5411-5", CODE]),
+        argv(&["v", "connect", "--device", "8531 422 5411-5", CODE])
+    );
+    // Quoted (one word) is left alone, in either order.
+    let quoted = argv(&["v", "connect", "--device", "8531 422 5411-5", CODE]);
+    assert_eq!(join_device_words(quoted.clone()), quoted);
+    // Stops at another option and takes at most three words in all.
+    assert_eq!(
+        j(&["v", "--device", "8531", "422", "--password", "957588"]),
+        argv(&["v", "--device", "8531 422", "--password", "957588"])
+    );
+    assert_eq!(
+        j(&["v", "--device", "1", "2", "3", "4"]),
+        argv(&["v", "--device", "1 2 3", "4"])
+    );
+    // Digits elsewhere are never joined; --device at the end is kept.
+    assert_eq!(
+        j(&["v", "--password", "957", "588"]),
+        argv(&["v", "--password", "957", "588"])
+    );
+    assert_eq!(j(&["v", "--device"]), argv(&["v", "--device"]));
+    assert_eq!(j(&["v", "--device", CODE]), argv(&["v", "--device", CODE]));
 }

@@ -154,7 +154,7 @@ job checks the table's shape and that no gate disappears.
 
 | # | Gate (owner's words) | Set | Blocks | Status |
 |---|---|---|---|---|
-| G-1 | "I'll run the two-terminal walkthrough myself (including the wrong-password, deny, trusted-mode and wrong-device steps in §10.7) and confirm before you begin Phase 4 work" (2026-10-19); "Stop and hold at the end of step 3 … will send results before step 4 starts" (2026-10-20) | 2026-10-19 | Phase 4 step 4 onward | OPEN — accept, wrong password and deny reported 2026-10-20 (screenshots, phase3-criteria §10.8); trusted mode across restart and wrong device not yet run by hand; owner running the walkthrough |
+| G-1 | "I'll run the two-terminal walkthrough myself (including the wrong-password, deny, trusted-mode and wrong-device steps in §10.7) and confirm before you begin Phase 4 work" (2026-10-19); "Stop and hold at the end of step 3 … will send results before step 4 starts" (2026-10-20) | 2026-10-19 | Phase 4 step 4 onward | OPEN — accept, wrong password and deny reported 2026-10-20; **trusted mode across restart ✅ 2026-10-21** (phase3-criteria §10.8; the first try found F-L1, a 30 s idle disconnect, fixed); **wrong device (step 7) not yet run** — two attempts stopped at argument parsing (F-UX6, fixed) |
 
 ## Process slips (recorded so the list above stays trustworthy)
 

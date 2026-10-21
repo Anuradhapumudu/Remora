@@ -1,5 +1,6 @@
 //! Helpers shared by the host and viewer command-line apps.
 
+use std::ffi::OsString;
 use std::net::SocketAddr;
 use std::path::Path;
 
@@ -94,6 +95,43 @@ pub fn misplaced(want: Looks, text: &str) -> String {
         ),
         _ => copy,
     }
+}
+
+/// Rejoins a device code typed without quotes: `--device 8531 422 5411-5`
+/// becomes `--device "8531 422 5411-5"` (walkthrough finding F-UX6 - the
+/// code is printed in three groups, so people type it that way). Only up
+/// to two words right after `--device` that are made of digits and dashes
+/// are joined, so a connection code or another option is never taken; the
+/// result is still checked in full by `ShortCode::parse`.
+pub fn join_device_words(args: impl IntoIterator<Item = OsString>) -> Vec<OsString> {
+    let digits_and_dashes = |a: &OsString| {
+        a.to_str()
+            .is_some_and(|s| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit() || b == b'-'))
+    };
+    let mut out: Vec<OsString> = Vec::new();
+    let mut args = args.into_iter().peekable();
+    while let Some(arg) = args.next() {
+        let is_device = arg == "--device";
+        out.push(arg);
+        if !is_device {
+            continue;
+        }
+        let Some(first) = args.next_if(digits_and_dashes) else {
+            continue;
+        };
+        let mut joined = first;
+        for _ in 0..2 {
+            match args.next_if(digits_and_dashes) {
+                Some(word) => {
+                    joined.push(" ");
+                    joined.push(word);
+                }
+                None => break,
+            }
+        }
+        out.push(joined);
+    }
+    out
 }
 
 /// Printed to stderr on **every** run that loads the device key file
