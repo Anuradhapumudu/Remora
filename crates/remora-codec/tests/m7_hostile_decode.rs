@@ -197,3 +197,30 @@ fn m7_a_decoded_frame_never_prints_its_pixels() {
     let s = format!("{f:?}");
     assert_eq!(s, "DecodedFrame { frame_id: 42, width: 640, height: 360 }");
 }
+
+/// M7 "memory bounded", checked by counting instead of measuring
+/// (phase4-criteria §12, owner 2026-10-22): the decoder's own objects —
+/// decoder sessions and decoded pictures — are counted while they exist,
+/// so a leak of either shows on any machine, the CI VM included.
+#[test]
+fn m7_live_sessions_and_pictures_are_counted() {
+    let real = encode(640, 360, 2, 0);
+    let mut dec = VtDecoder::new(SizeLimit::default());
+    assert_eq!(live(&dec), (0, 0), "nothing before the first keyframe");
+    let picture = dec.decode(0, &real[0].1).unwrap();
+    assert_eq!(live(&dec), (1, 1), "one session, one picture held");
+    drop(picture);
+    assert_eq!(live(&dec), (1, 0), "the picture is gone when dropped");
+    // A keyframe whose slice is garbage: a new session is configured, the
+    // decode fails, and the failed session is dropped.
+    let (sps, pps) = parameter_sets(&real[0].1);
+    let mut idr = vec![0x65];
+    idr.extend_from_slice(&random_bytes(&mut 0x1234_5678_9ABC_DEF1, 2000));
+    assert!(dec.decode(1, &annexb(&[&sps, &pps, &idr])).is_err());
+    assert_eq!(live(&dec).0, 0, "a failed session is not kept");
+}
+
+fn live(dec: &VtDecoder) -> (u64, u64) {
+    let s = dec.stats();
+    (s.sessions_alive, s.pictures_alive)
+}

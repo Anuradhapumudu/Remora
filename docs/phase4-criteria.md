@@ -489,6 +489,22 @@ The phase report lists the whole deferred list row by row (CLAUDE.md).
   (the earlier proposal) would not fix that. The streaming e2e test
   passed on the same run. Reported to the owner with a new proposal; no
   threshold changed.
+* **2026-10-22 — M7 "memory bounded": how it is checked (owner: "ok" to
+  the proposal of the same day).** Closes the open entry above.
+  1. The **+8 MB limit** (footprint + IOSurfaces, unchanged) is checked
+     on **real Macs**: the M4 before acceptance, and any hardware CI.
+  2. On a **virtual machine** (`sysctl kern.hv_vmm_present` = 1) the
+     footprint cannot measure 8 MB (swings of tens of MB, readings 5 MB
+     apart with nothing in between), so the test prints the numbers and
+     the line `M7 memory limit: NOT checked (virtual machine …)`. Never
+     silent: the CI step fails unless the test printed either that line
+     or `M7 memory limit: checked …`, and puts it in the job summary.
+  3. **New, on every machine:** the decoder counts its live decoder
+     sessions and decoded pictures (`DecodeStats::sessions_alive`,
+     `pictures_alive`); after every 500 hostile frames at most 1 session
+     and 0 pictures may exist. A leak of our own decoder objects fails
+     anywhere, the CI VM included. A leak *inside* VideoToolbox can only
+     be seen by the memory limit, which is why (1) stays.
 * Standing rule (owner, 2026-10-20): **a UX change to a security-relevant
   flow needs its own attack test** — phase3-criteria §10.8, the F-UX1
   prompt-number confused-deputy case. Applies to the Phase 4 viewer window

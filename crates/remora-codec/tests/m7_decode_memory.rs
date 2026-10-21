@@ -59,6 +59,16 @@ fn m7_memory_stays_bounded_under_a_hostile_stream() {
     for part in 1..=6 {
         let (d, _) = decode_all(dec, run.by_ref().take(500).collect());
         dec = d;
+        // Checked on every machine: the decoder's own objects are bounded
+        // (pictures are dropped by `decode_all` as they come).
+        let s = dec.stats();
+        assert!(
+            s.sessions_alive <= 1 && s.pictures_alive == 0,
+            "after {} frames: {} decoder sessions, {} pictures alive",
+            part * 500,
+            s.sessions_alive,
+            s.pictures_alive
+        );
         last = footprint();
         println!(
             "M7 memory after {} frames: footprint {:.1} MB",
@@ -66,13 +76,22 @@ fn m7_memory_stays_bounded_under_a_hostile_stream() {
             last as f64 / 1048576.0
         );
     }
-    // A measurement that cannot be trusted fails rather than passes: two
-    // readings with no work between them must agree.
+    // On a virtual machine the footprint swings by tens of MB on its own
+    // (GitHub's VM: 70 … 109 … 61 MB in one run, two readings 5 MB apart
+    // with nothing in between), so it cannot measure an 8 MB growth there.
+    // The limit is checked on real Macs only, and the test says which
+    // (owner decision 2026-10-22, phase4-criteria §12); never skipped
+    // silently: CI requires one of the two lines below.
+    let vm = virtual_machine();
     let again = footprint();
-    assert!(
-        last.abs_diff(again) <= 4 * 1024 * 1024,
-        "footprint unstable: {last} then {again} bytes with nothing in between"
-    );
+    if !vm {
+        // A measurement that cannot be trusted fails rather than passes:
+        // two readings with no work between them must agree.
+        assert!(
+            last.abs_diff(again) <= 4 * 1024 * 1024,
+            "footprint unstable: {last} then {again} bytes with nothing in between"
+        );
+    }
     let after = (last, iosurfaces());
     let s = dec.stats();
     let mb = |b: u64| b as f64 / 1048576.0;
@@ -90,7 +109,32 @@ fn m7_memory_stays_bounded_under_a_hostile_stream() {
         mb(footprint())
     );
     let (b, a) = (before.0 + before.1, after.0 + after.1);
+    if vm {
+        println!(
+            "M7 memory limit: NOT checked (virtual machine, kern.hv_vmm_present=1); \
+             live decoder sessions and pictures checked"
+        );
+        return;
+    }
     assert!(a <= b + GROWTH_LIMIT, "memory grew {} bytes", a - b);
+    println!(
+        "M7 memory limit: checked (+{:.1} MB, limit +8 MB); live decoder sessions and pictures checked",
+        mb(a.saturating_sub(b))
+    );
+}
+
+/// Whether this macOS runs in a virtual machine (`sysctl
+/// kern.hv_vmm_present`: 1 in a VM, 0 on hardware).
+fn virtual_machine() -> bool {
+    let out = std::process::Command::new("/usr/sbin/sysctl")
+        .args(["-n", "kern.hv_vmm_present"])
+        .output()
+        .expect("sysctl");
+    match String::from_utf8_lossy(&out.stdout).trim() {
+        "1" => true,
+        "0" => false,
+        other => panic!("kern.hv_vmm_present: {other:?}"),
+    }
 }
 
 /// Size of the IOSurface memory mapped into this process (`vmmap`'s

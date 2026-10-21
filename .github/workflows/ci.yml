@@ -71,21 +71,22 @@ jobs:
             echo "$line"
             echo "\`$line\`" >> "$GITHUB_STEP_SUMMARY"
           done
-      # Diagnosis of M7 memory on this VM (phase4-criteria §12, open): a
-      # passing test's output is captured, so the per-500-frame curve only
-      # showed when it failed. Three more runs, always printed; the check
-      # itself is unchanged and any failing run fails the step.
-      - name: M7 memory curve (macOS)
+      # M7 memory (phase4-criteria §12, owner 2026-10-22): the +8 MB limit
+      # is checked on real Macs only; on a VM the test checks the decoder's
+      # live sessions and pictures and says the limit was NOT checked. A
+      # run that prints neither line did not check anything: it fails.
+      - name: M7 memory (macOS)
         if: runner.os == 'macOS'
         run: |
           set -o pipefail
-          echo "### M7 memory curve" >> "$GITHUB_STEP_SUMMARY"
-          status=0
-          for run in 1 2 3; do
-            cargo test -p remora-codec --test m7_decode_memory --locked -- --nocapture 2>&1 | tee m7_memory.log || status=1
-            grep "^M7 memory" m7_memory.log | sed "s/^/run $run: /" >> "$GITHUB_STEP_SUMMARY"
-          done
-          exit "$status"
+          cargo test -p remora-codec --test m7_decode_memory --locked -- --nocapture 2>&1 | tee m7_memory.log
+          line=$(grep -m1 "^M7 memory limit: " m7_memory.log || true)
+          if [ -z "$line" ]; then echo "::error::the M7 memory test printed no 'M7 memory limit:' line"; exit 1; fi
+          {
+            echo "### M7 memory"
+            echo "\`$line\`"
+            grep "^M7 memory after\|^M7 memory: " m7_memory.log | sed 's/^/    /'
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Install cargo-deny and cargo-audit
         uses: taiki-e/install-action@861a07ce7084f55488e375df125cdc99bba60eb7 # v2.87.23

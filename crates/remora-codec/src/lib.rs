@@ -288,6 +288,10 @@ pub struct DecodeStats {
     pub failed: u64,
     /// Decoder sessions created (one per accepted change of SPS/PPS).
     pub sessions_created: u64,
+    /// Decoder sessions that exist now (0 or 1).
+    pub sessions_alive: u64,
+    /// Decoded pictures that exist now (handed out and not yet dropped).
+    pub pictures_alive: u64,
 }
 
 #[cfg(test)]
