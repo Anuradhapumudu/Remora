@@ -246,7 +246,7 @@ def start_session(source, window=True, timing=False, width=1920):
     prompt = host.expect("prompt ")[2]
     n = prompt.split(":")[0].split()[1]
     host.send(f"accept {n}")
-    viewer.expect("SESSION ACTIVE")
+    viewer.active_t = viewer.expect("SESSION ACTIVE")[1]
     return host, viewer, n
 
 
@@ -374,14 +374,34 @@ def step_p1(a, rep):
         fps = len(sent_in) / a.seconds
         rep.say(f"P3 frames sent {len(sent_in)} ({fps:.1f} fps), drawn {len(drawn)}; "
                 f"viewer {counters}; stats lines saying occluded: {occluded}")
-        c = {k: int(v) for v, k in re.findall(r"(\d+) (decoded|refused|failed|dropped)", counters)}
+        # P3 judges the measured window only: the viewer's running totals
+        # from its once-a-second stats line at the start and at the end of
+        # it (±1 s). Drops before the window is clicked to the front (the
+        # picture cannot be shown yet) are warm-up, not P3.
+        def stats_at(t):
+            last = None
+            for when, line in vl:
+                if line.startswith("stats: ") and when <= t:
+                    last = line
+            return {k: int(v) for k, v in re.findall(r"(refused|failed|dropped) (\d+)", last or "")}
+        begin = viewer.active_t + a.warmup
+        s0, s1 = stats_at(begin), stats_at(begin + a.seconds)
+        c = {k: s1.get(k, 0) - s0.get(k, 0) for k in ("refused", "failed", "dropped")}
+        rep.say(f"   in the measured {a.seconds} s: refused {c['refused']}, failed {c['failed']},"
+                f" dropped {c['dropped']} (whole session: {counters})")
 
         valid = a.source != "screen" or fps >= MOTION_MIN_FPS
         if not valid:
             rep.say(f"   only {fps:.1f} fps captured: the motion page was not on screen")
-        if occluded and len(drawn) < P3_MIN_DRAWN * a.seconds / 60:
+        # "no drawable N (occluded)" is a running total, so the word stays in
+        # every later stats line once the window was covered for a moment
+        # (e.g. before it was clicked). Covered DURING the measurement shows
+        # as frames received but not drawn.
+        not_drawn = len(sent_in) - len(drawn)
+        if occluded and not_drawn > 0.02 * max(1, len(sent_in)):
             valid = False
-            rep.say("   the viewer window was covered (occluded): click it to the front next time")
+            rep.say(f"   {not_drawn} frames not drawn while the viewer window was covered:"
+                    " click it to the front and keep your hands off")
         p95_1, p95_2 = pct(p1, 95), pct(p2, 95)
         min_drawn = int(P3_MIN_DRAWN * a.seconds / 60)
         rep.verdict(f"P1 run {run}", p95_1 < P1_P95_MS, f"p95 {p95_1:.2f} ms (limit < {P1_P95_MS})", valid)
