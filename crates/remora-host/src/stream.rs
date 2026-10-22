@@ -460,12 +460,19 @@ mod tests {
     /// T2's open item: "the first frame after resume is a keyframe".
     #[test]
     fn after_capture_resumes_the_first_frame_is_a_keyframe() {
+        // The encoder delivers on its own thread: wait until the 20
+        // frames are out before interrupting, or one could be recorded
+        // after the pause (seen on GitHub's VM).
+        let (go, wait) = mpsc::channel();
         let (rec, s) = run(vec![
             Step::Frames(20),
+            Step::Wait(wait),
             Step::Interrupt,
             Step::Resume,
             Step::Frames(5),
         ]);
+        rec.wait_videos(20);
+        go.send(()).unwrap();
         rec.wait_videos(25);
         s.stop();
         let all = rec.all();
