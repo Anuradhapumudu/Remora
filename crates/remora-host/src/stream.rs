@@ -203,10 +203,10 @@ fn display_us(shown: Instant) -> u64 {
 
 fn pause_reason(r: InterruptReason) -> PauseReason {
     match r {
-        InterruptReason::DisplayUnavailable => PauseReason::DisplayUnavailable,
+        InterruptReason::DisplayAsleep => PauseReason::DisplayAsleep,
         InterruptReason::AccessLost => PauseReason::AccessLost,
         InterruptReason::Other => PauseReason::Other,
-        InterruptReason::DisplayRemoved { remaining } => PauseReason::DisplayRemoved {
+        InterruptReason::DisplayUnavailable { remaining } => PauseReason::DisplayUnavailable {
             remaining_ms: u32::try_from(remaining.as_millis()).unwrap_or(u32::MAX),
         },
     }
@@ -416,9 +416,9 @@ mod tests {
                                 std::thread::sleep(Duration::from_millis(5));
                             }
                         }
-                        Step::Interrupt => sink(CaptureEvent::Interrupted(
-                            InterruptReason::DisplayUnavailable,
-                        )),
+                        Step::Interrupt => {
+                            sink(CaptureEvent::Interrupted(InterruptReason::DisplayAsleep))
+                        }
                         Step::Resume => sink(CaptureEvent::Resumed),
                         Step::Stop => sink(CaptureEvent::Stopped(CaptureError::PermissionDenied)),
                         Step::Wait(rx) => rx.recv().unwrap(),
@@ -511,7 +511,7 @@ mod tests {
         rec.wait_videos(25);
         s.stop();
         let all = rec.all();
-        let paused = Rec::Capture(CaptureStatus::Interrupted(PauseReason::DisplayUnavailable));
+        let paused = Rec::Capture(CaptureStatus::Interrupted(PauseReason::DisplayAsleep));
         let at = all.iter().position(|r| *r == paused).expect("paused");
         assert_eq!(all[at + 1], Rec::Capture(CaptureStatus::Running));
         let k = keyframes(&all[at + 2..]);
@@ -576,17 +576,17 @@ mod tests {
     /// session in milliseconds; an absurd one saturates (the session then
     /// clamps it to the protocol's bound).
     #[test]
-    fn d29_display_removed_keeps_its_time_left() {
-        let r = |remaining| pause_reason(InterruptReason::DisplayRemoved { remaining });
+    fn d29_display_unavailable_keeps_its_time_left() {
+        let r = |remaining| pause_reason(InterruptReason::DisplayUnavailable { remaining });
         assert_eq!(
             r(Duration::from_secs(120)),
-            PauseReason::DisplayRemoved {
+            PauseReason::DisplayUnavailable {
                 remaining_ms: 120_000
             }
         );
         assert_eq!(
             r(Duration::from_secs(u64::MAX)),
-            PauseReason::DisplayRemoved {
+            PauseReason::DisplayUnavailable {
                 remaining_ms: u32::MAX
             }
         );

@@ -379,20 +379,21 @@ async fn t1_capture_pause_and_resume_reach_the_viewer_over_quic() {
     );
 
     host.server
-        .capture_changed(CaptureStatus::Interrupted(PauseReason::DisplayUnavailable));
+        .capture_changed(CaptureStatus::Interrupted(PauseReason::DisplayAsleep));
     assert_eq!(
         viewer_wait(&mut vev, 5, |e| matches!(e, ViewerEvent::StreamPaused(_))).await,
-        Some(ViewerEvent::StreamPaused(PauseReason::DisplayUnavailable))
+        Some(ViewerEvent::StreamPaused(PauseReason::DisplayAsleep))
     );
     // D-29: "removed" carries the time left; the host's countdown runs.
     assert_eq!(host.server.pause_remaining(), None);
-    host.server
-        .capture_changed(CaptureStatus::Interrupted(PauseReason::DisplayRemoved {
+    host.server.capture_changed(CaptureStatus::Interrupted(
+        PauseReason::DisplayUnavailable {
             remaining_ms: 120_000,
-        }));
+        },
+    ));
     assert_eq!(
         viewer_wait(&mut vev, 5, |e| matches!(e, ViewerEvent::StreamPaused(_))).await,
-        Some(ViewerEvent::StreamPaused(PauseReason::DisplayRemoved {
+        Some(ViewerEvent::StreamPaused(PauseReason::DisplayUnavailable {
             remaining_ms: 120_000
         }))
     );

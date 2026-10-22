@@ -217,17 +217,20 @@ pub fn short_code_of(key: &IdentityPublic) -> ShortCode {
     remora_crypto::identity::DeviceId::of(key).short_code()
 }
 
-/// How often the host and the viewer repeat the "display removed" line in
+/// How often the host and the viewer repeat the "display unavailable" line in
 /// the terminal while the host waits (roadmap D-29; the viewer's window
 /// title counts down every second).
 pub const WAIT_LINE_EVERY: std::time::Duration = std::time::Duration::from_secs(10);
 
-/// What both sides show while the host waits for its removed display
-/// (roadmap D-29). Whole seconds, rounded up: "0 s left" only when the
-/// time is really up.
-pub fn display_removed_text(left: std::time::Duration) -> String {
+/// What both sides show while the host waits for its unavailable display:
+/// the lid closed with the Mac awake, or disconnected (roadmap D-29). Not
+/// "off": display sleep also turns it off and starts no countdown (T2).
+/// Whole seconds, rounded up: "0 s left" only when the time is really up.
+pub fn display_unavailable_text(left: std::time::Duration) -> String {
     let secs = left.as_millis().div_ceil(1000);
-    format!("Display removed. Waiting, {secs} s left.")
+    format!(
+        "The host's display is unavailable (lid closed or disconnected). Waiting, {secs} s left."
+    )
 }
 
 /// Seconds since the Unix epoch (0 if the clock is before 1970).
@@ -272,12 +275,24 @@ mod tests {
     use super::*;
 
     #[test]
-    fn d29_display_removed_text_rounds_up_to_whole_seconds() {
-        let t = |ms| display_removed_text(std::time::Duration::from_millis(ms));
-        assert_eq!(t(120_000), "Display removed. Waiting, 120 s left.");
-        assert_eq!(t(41_001), "Display removed. Waiting, 42 s left.");
-        assert_eq!(t(1), "Display removed. Waiting, 1 s left.");
-        assert_eq!(t(0), "Display removed. Waiting, 0 s left.");
+    fn d29_display_unavailable_text_rounds_up_to_whole_seconds() {
+        let t = |ms| display_unavailable_text(std::time::Duration::from_millis(ms));
+        assert_eq!(
+            t(120_000),
+            "The host's display is unavailable (lid closed or disconnected). Waiting, 120 s left."
+        );
+        assert_eq!(
+            t(41_001),
+            "The host's display is unavailable (lid closed or disconnected). Waiting, 42 s left."
+        );
+        assert_eq!(
+            t(1),
+            "The host's display is unavailable (lid closed or disconnected). Waiting, 1 s left."
+        );
+        assert_eq!(
+            t(0),
+            "The host's display is unavailable (lid closed or disconnected). Waiting, 0 s left."
+        );
     }
 
     #[test]

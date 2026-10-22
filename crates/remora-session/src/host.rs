@@ -256,7 +256,7 @@ pub struct Host {
     pub(crate) nonces: VecDeque<IssuedNonce>,
     /// What screen capture is doing (phase4-criteria §7).
     pub(crate) capture: crate::CaptureStatus,
-    /// While the captured display is removed: when the host gives up
+    /// While the captured display is unavailable: when the host gives up
     /// (D-29), so a viewer approved later is told the time actually left.
     pub(crate) pause_deadline: Option<Millis>,
     /// `frame_id` of the next video frame (one stream for all sessions).
@@ -750,10 +750,10 @@ impl Host {
     ///
     /// A session approved while capture is interrupted is told it is paused
     /// right after `SessionAccept` (with the time actually left if the
-    /// display was removed); one approved while it is stopped closes with
+    /// display is unavailable); one approved while it is stopped closes with
     /// `CaptureStopped`.
     ///
-    /// `Interrupted(DisplayRemoved { remaining_ms })` sets a deadline
+    /// `Interrupted(DisplayUnavailable { remaining_ms })` sets a deadline
     /// `now + remaining_ms` (D-29). The capture reports it only when the
     /// deadline is new (the display went missing, again), so it is always
     /// sent, even if the status looks the same as before.
@@ -764,16 +764,16 @@ impl Host {
     ) -> Vec<HostAction> {
         use crate::{CaptureStatus, PauseReason};
         let mut out = Vec::new();
-        let removed = matches!(
+        let unavailable = matches!(
             status,
-            CaptureStatus::Interrupted(PauseReason::DisplayRemoved { .. })
+            CaptureStatus::Interrupted(PauseReason::DisplayUnavailable { .. })
         );
-        if status == self.capture && !removed {
+        if status == self.capture && !unavailable {
             return out;
         }
         let was = std::mem::replace(&mut self.capture, status);
         self.pause_deadline = match status {
-            CaptureStatus::Interrupted(PauseReason::DisplayRemoved { remaining_ms }) => {
+            CaptureStatus::Interrupted(PauseReason::DisplayUnavailable { remaining_ms }) => {
                 Some(now.plus(u64::from(remaining_ms)))
             }
             _ => None,
@@ -850,7 +850,7 @@ impl Host {
         self.capture
     }
 
-    /// While the captured display is removed: milliseconds at `now` until
+    /// While the captured display is unavailable: milliseconds at `now` until
     /// the host gives up waiting (D-29). `None` otherwise.
     pub fn pause_remaining(&self, now: Millis) -> Option<u32> {
         self.pause_deadline

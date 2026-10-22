@@ -149,7 +149,7 @@ pub enum InterruptReason { DisplayUnavailable, AccessLost, Other }
 |---|---|---|
 | T1 | Sans-IO, fake capture: every event in every session state | actions exactly as above; no media action while interrupted; mutation gate covers it |
 | T2 | macOS, real: `pmset displaysleepnow`, then wake (`caffeinate -u -t 2`); 5 cycles in one session | `Interrupted` ≤ 1 s after sleep; `Resumed` ≤ 2 s after wake; first frame after resume is a keyframe; same session throughout; no memory growth across cycles (≤ 2 MB) |
-| T3 | Lid close, captured display removed | Both **testable** (corrections 2026-10-20, §12), run in step 7. **Lid close / open** (owner closes the lid): `Interrupted` on close, `Resumed` ≤ 2 s after the display is back on open, same session. **Captured display removed** (a `CGVirtualDisplay` is captured, then destroyed — Phase 2's tooling; real hardware may differ): `Interrupted` ≤ 1 s, no crash, no CPU spin while absent; if it returns within 2 minutes the stream resumes in the same session with a keyframe, if not the session ends with `CaptureStopped` (never `Normal`, never another display; decision D-29, architecture D38). While it waits, both sides show "Display removed. Waiting, N s left." (`StreamState` reason 4 + `remaining_ms`, done 2026-10-22, architecture D43; the overlay is roadmap D-33). Only **physical** monitor unplug stays untested (roadmap D-16) |
+| T3 | Lid close, captured display removed | Both **testable** (corrections 2026-10-20, §12), run in step 7. **Lid close / open** (owner closes the lid): `Interrupted` on close, `Resumed` ≤ 2 s after the display is back on open, same session. **Captured display removed** (a `CGVirtualDisplay` is captured, then destroyed — Phase 2's tooling; real hardware may differ): `Interrupted` ≤ 1 s, no crash, no CPU spin while absent; if it returns within 2 minutes the stream resumes in the same session with a keyframe, if not the session ends with `CaptureStopped` (never `Normal`, never another display; decision D-29, architecture D38). While it waits, both sides show "The host's display is unavailable (lid closed or disconnected). Waiting, N s left." (`StreamState` reason 4 + `remaining_ms`, done 2026-10-22, architecture D43; wording and names D44, 2026-10-23; the overlay is roadmap D-33). A closed lid with the Mac awake leaves the display list too and gets the same countdown (D44). Only **physical** monitor unplug stays untested (roadmap D-16) |
 | T4 | Policy rule: no `-3815`, `SCStream` or other OS names in remora-session / remora-net | scanner passes; plant fails |
 
 ## 8. Functional
@@ -196,6 +196,67 @@ screen-recording grant, at the very end), **D-10** (benchmark drift: P8).
 Before Phase 4 finishes, D-17 must have been examined (done 2026-10-19:
 docs/d17-video-surface-options.md).
 The phase report lists the whole deferred list row by row (CLAUDE.md).
+
+## 11c. T3 with the Mac asleep: expected result, written before the run (gate G-2)
+
+Written 2026-10-23, before the owner runs `scripts/macos/phase4-session.py
+t3-lid --mac-sleeps` (roadmap G-2). The run is compared against this; any
+difference is a finding, not something to explain away afterwards.
+
+**Setup.** Host and viewer run on the **same Mac** over loopback. The
+runner prevents only display and idle sleep (`caffeinate -di`, as Phase
+2's lid test, where the Mac slept ≈ 29 s), so closing the lid sleeps the
+Mac. The run counts only if the power log shows `Entering Sleep state due
+to 'Clamshell Sleep'` (the awake run of 2026-10-23 showed `Entering
+DarkWake state …` instead).
+
+**What the clocks do while the Mac sleeps (read, not assumed).** Rust's
+`Instant` on Apple systems is `CLOCK_UPTIME_RAW`, which "does not
+increment while the system is asleep" (std 1.99.1,
+`library/std/src/sys/time/unix.rs:55-67`). tokio's clock is
+`std::time::Instant::now()` (tokio 1.53.2 `src/time/clock.rs:15-16`) and
+quinn's runtime clock is tokio's (quinn 0.11.12 `src/runtime/tokio.rs:37-38`).
+So the QUIC idle timeout (30 s), the keep-alive and the 2-minute display
+wait all **stand still while the Mac sleeps**; only short maintenance
+wakes advance them.
+
+**Expected, step by step:**
+
+1. **Lid closed:** within about 1 s the host prints `capture paused
+   (DisplayAsleep)` and the viewer `stream paused (the host's display is
+   asleep)`. If the built-in display leaves the display list before the
+   Mac is fully asleep, an `unavailable … 120 s left` line may follow;
+   whether it does is recorded, not predicted. Then the Mac sleeps.
+2. **After 30–35 s:** **nothing.** The viewer is on the same sleeping Mac,
+   so it is asleep too, and its idle clock is not running: no `failed:
+   connection lost` line. D37's "the viewer reports connection lost after
+   30–35 s" needs the viewer on **another machine**, which this run
+   cannot show; that case is described below for Phase 5.
+3. **Lid opened:** no reconnect happens and none is needed. The same QUIC
+   connection simply continues, because no timeout ran during sleep.
+   Remora has no automatic reconnect at all. Capture's restart loop finds
+   the display listed: the host prints `capture resumed` **≤ 2 s after the
+   power log's `Display is turned on`**, the first frame after it is a
+   **keyframe**, and the viewer prints `stream resumed` in the **same
+   session**. If a countdown had started in step 1, it continues from
+   about where it stood, not 30 s lower.
+
+**PASS if:** the Mac really slept (power log), the session is the same one
+afterwards, `capture resumed` ≤ 2 s after the display came on (+1 s for
+the power log's whole-second times), keyframe first, and no `connection
+lost`. A session that ends on wake is a FAIL against this expectation and
+is reported with its logs.
+
+**For information: the two-machine case (Phase 5, not run here).** The
+host Mac sleeps; the viewer on another machine hears nothing for 30 s and
+prints `failed: connection lost - no reply from the host for 30 s
+(network down, or the host stopped)` (D37; `remora-viewer` main.rs). When
+the lid opens, the host's own connection has not timed out yet (its clock
+stood still); its packets reach a viewer that has already closed the
+connection, and the host's session ends — at once if the viewer's QUIC
+stack answers with a stateless reset, otherwise by the host's own idle
+timeout about 30 s later (**unverified** which; to be checked in Phase 5). The person at the viewer must connect again with a new code: there
+is no automatic reconnect.
 
 ## 11b. Progress notes
 
@@ -473,6 +534,24 @@ The phase report lists the whole deferred list row by row (CLAUDE.md).
   *before* "GPU draw done" (−0.5 to −1.1 ms): `present()` only queues the
   frame. P4's "drawn → present returned" is therefore reported as
   measured (negative), information only.
+
+* **Step 7d, the owner's measuring session (2026-10-23, M4, AC power,
+  `results/phase4/`).** All steps PASS; numbers and the row-by-row
+  comparison go in the phase report. **Finding from T3 (lid):** the
+  runner keeps the Mac awake (`caffeinate -dims`), so closing the lid did
+  **not** sleep the Mac ("Entering DarkWake state due to 'Clamshell
+  Sleep'"): **our own test setup changed the behaviour being tested** —
+  T3 as run tested a closed lid with the Mac awake, not the normal case
+  where the Mac sleeps. In that state the built-in display leaves the
+  display list, so both sides counted down from 120 s ("display
+  removed"); the lid was opened at 10 s left. This contradicted D38 and
+  the `GoneTimer` docs ("lid closed stays listed, never expires").
+  Owner decision (option A, architecture D44): keep the 2-minute end,
+  correct the docs, say "unavailable (lid closed or disconnected)", and
+  rename the wire reasons (1 *display asleep*, 4 *display unavailable*;
+  values unchanged). The run with the Mac really sleeping is roadmap
+  gate **G-2** (before the phase report is final); its expected result
+  is written in §11c before it is run.
 
 ## 12. Changes to criteria
 

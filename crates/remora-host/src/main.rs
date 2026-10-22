@@ -53,7 +53,7 @@ enum Command {
         /// Display to capture (default: the main display; see list-displays).
         #[arg(long)]
         display_id: Option<u32>,
-        /// Seconds a removed display is waited for (default 120, D-29).
+        /// Seconds an unavailable display is waited for (default 120, D-29).
         #[arg(long)]
         gone_limit: Option<u64>,
     },

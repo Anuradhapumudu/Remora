@@ -31,8 +31,8 @@ pub struct CaptureConfig {
     pub show_cursor: bool,
     /// Number of surfaces the OS may have in flight (ScreenCaptureKit: 3..=8).
     pub queue_depth: u32,
-    /// How long an interrupted capture waits for a **removed** display to
-    /// come back before it stops ([`DISPLAY_GONE_LIMIT`]; shorter in tests).
+    /// How long an interrupted capture waits for an **unavailable** display
+    /// (not in the OS's display list) to come back before it stops ([`DISPLAY_GONE_LIMIT`]; shorter in tests).
     pub display_gone_limit: Duration,
 }
 
@@ -49,17 +49,28 @@ impl Default for CaptureConfig {
     }
 }
 
-/// How long capture waits for a removed display to come back, then stops
-/// with [`CaptureError::DisplayRemoved`] (roadmap D-29, architecture D38:
-/// a loose cable or a dock reconnect, not days later).
+/// How long capture waits for an unavailable display to come back, then
+/// stops with [`CaptureError::DisplayUnavailable`] (roadmap D-29,
+/// architecture D38, D44: a loose cable, a dock reconnect, a lid closed
+/// for a moment — not days later).
 pub const DISPLAY_GONE_LIMIT: Duration = Duration::from_secs(120);
 
 /// Times how long the captured display has been **missing** while an
-/// interrupted capture retries (D-29). Missing means not in the OS's list
-/// of displays: a removed display. A display that is listed but asleep
-/// (lid closed, display sleep) does not count — that wait is ended by the
-/// session's liveness check when the Mac itself sleeps (D37), or never
-/// while the Mac is awake and someone may wake the display.
+/// interrupted capture retries (D-29). Two cases, told apart by the OS's
+/// list of displays (architecture D44 corrects D38 here):
+///
+/// * **Display sleep** (`pmset displaysleepnow`, idle sleep): the display
+///   stays **listed**. No countdown, never expires; capture resumes when
+///   the display wakes (T2, 2026-10-23: 5 cycles, listed throughout).
+/// * **Lid closed with the Mac awake** (AC power and something preventing
+///   sleep, or an external monitor), or **disconnected**: the display
+///   **leaves the list**. That is "unavailable": a 2-minute countdown,
+///   then capture stops and the session ends. Evidence for the lid case:
+///   the owner's T3 run of 2026-10-23, power log "Entering DarkWake state
+///   due to 'Clamshell Sleep'", both sides counting down from 120 s.
+///
+/// When the Mac itself sleeps the processes stop, and the session's
+/// liveness check ends it on the viewer (D37).
 #[derive(Debug, Clone, Copy)]
 pub struct GoneTimer {
     limit: Duration,
@@ -71,13 +82,13 @@ pub struct GoneTimer {
 pub enum Gone {
     /// The display is listed, as it was: nothing to report.
     Listed,
-    /// The display just went missing: report "removed" with this much time
-    /// left (a new deadline).
+    /// The display just went missing: report "unavailable" with this much
+    /// time left (a new deadline).
     WentMissing(Duration),
     /// Still missing, time not up: nothing new to report.
     StillMissing,
     /// Listed again after being missing: the deadline is gone (report the
-    /// display as unavailable until frames flow again).
+    /// display as asleep until frames flow again).
     Back,
     /// Missing for the limit: capture must stop.
     Expired,
@@ -212,17 +223,19 @@ impl std::fmt::Debug for CapturedFrame {
 /// so nothing above the trait needs to know the OS — architecture D17).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum InterruptReason {
-    /// The display is asleep, closed or gone.
-    DisplayUnavailable,
+    /// The display stopped delivering frames: asleep, or not yet known to
+    /// be gone (the restart loop then checks the display list and reports
+    /// [`InterruptReason::DisplayUnavailable`] if it is missing).
+    DisplayAsleep,
     /// The OS took the capture surface away (Windows: ACCESS_LOST).
     AccessLost,
     /// Another interruption the backend expects to recover from.
     Other,
-    /// The captured display is no longer connected (not in the OS's list
-    /// of displays). Capture stops with [`CaptureError::DisplayRemoved`]
+    /// The captured display left the OS's list of displays (lid closed with
+    /// the Mac awake, or disconnected). Capture stops with [`CaptureError::DisplayUnavailable`]
     /// after `remaining` unless it comes back (roadmap D-29). Reported each
     /// time the display goes missing: every report is a new deadline.
-    DisplayRemoved {
+    DisplayUnavailable {
         /// Time left, from this report, until capture gives up.
         remaining: Duration,
     },
@@ -259,10 +272,12 @@ pub enum CaptureError {
     /// No display to capture.
     #[error("no display found")]
     NoDisplay,
-    /// The captured display was removed and did not come back in time
-    /// ([`DISPLAY_GONE_LIMIT`]). Capture never moves to another display.
-    #[error("the captured display was removed and did not come back")]
-    DisplayRemoved,
+    /// The captured display stayed unavailable (lid closed or disconnected)
+    /// for [`DISPLAY_GONE_LIMIT`]. Capture never moves to another display.
+    #[error(
+        "the captured display stayed unavailable (lid closed or disconnected) and did not come back"
+    )]
+    DisplayUnavailable,
     /// The capture is already running / not running.
     #[error("invalid state: {0}")]
     InvalidState(&'static str),

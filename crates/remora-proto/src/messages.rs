@@ -102,12 +102,14 @@ pub struct StreamState {
     /// `true`: paused; `false`: resumed.
     #[prost(bool, tag = "1")]
     pub paused: bool,
-    /// When paused: 1 display unavailable, 2 access lost, 3 other,
-    /// 4 display removed (a receiver treats unknown values as "other").
+    /// When paused: 1 display asleep, 2 access lost, 3 other, 4 display
+    /// unavailable — lid closed with the Mac awake, or disconnected (a
+    /// receiver treats unknown values as "other"). Names changed
+    /// 2026-10-23, values unchanged.
     /// Must be 0 when resumed.
     #[prost(uint32, tag = "2")]
     pub reason: u32,
-    /// With reason 4 (display removed): milliseconds until the host gives
+    /// With reason 4 (display unavailable): milliseconds until the host gives
     /// up waiting and ends the session, counted from when this message is
     /// sent; the viewer counts down locally from when it received it. Sent
     /// again only if the deadline changes. 0 with every other reason and

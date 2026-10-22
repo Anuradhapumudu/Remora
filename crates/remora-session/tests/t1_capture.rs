@@ -19,7 +19,7 @@ use remora_session::{
     CaptureStatus, CloseCode, FailReason, HostAction, PauseReason, State, ViewerAction, Violation,
 };
 
-const ASLEEP: CaptureStatus = CaptureStatus::Interrupted(PauseReason::DisplayUnavailable);
+const ASLEEP: CaptureStatus = CaptureStatus::Interrupted(PauseReason::DisplayAsleep);
 
 fn sent_to(acts: &[HostAction], id: remora_session::SessionId) -> usize {
     acts.iter()
@@ -55,7 +55,7 @@ fn t1_interruption_pauses_every_active_session_and_keeps_it_active() {
     assert!(!acts.contains(&HostAction::ForceKeyframe));
     a.host_actions(&mut host, acts.clone());
     b.host_actions(&mut host, acts);
-    let paused = ViewerAction::StreamPaused(PauseReason::DisplayUnavailable);
+    let paused = ViewerAction::StreamPaused(PauseReason::DisplayAsleep);
     assert_eq!(viewer_saw(&a, &paused), 1);
     assert_eq!(viewer_saw(&b, &paused), 1);
     assert_eq!(state_of(&host, &a), (Some(State::Active), State::Active));
@@ -66,7 +66,7 @@ fn t1_interruption_pauses_every_active_session_and_keeps_it_active() {
 #[test]
 fn t1_each_reason_reaches_the_viewer_unchanged() {
     for reason in [
-        PauseReason::DisplayUnavailable,
+        PauseReason::DisplayAsleep,
         PauseReason::AccessLost,
         PauseReason::Other,
     ] {
@@ -175,7 +175,7 @@ fn t1_approving_while_paused_tells_the_new_viewer_it_is_paused() {
     );
     c.approve(&mut host);
     assert!(c.log.viewer.contains(&ViewerAction::Active));
-    let paused = ViewerAction::StreamPaused(PauseReason::DisplayUnavailable);
+    let paused = ViewerAction::StreamPaused(PauseReason::DisplayAsleep);
     assert_eq!(viewer_saw(&c, &paused), 1);
     let active_at = c.log.viewer.iter().position(|a| *a == ViewerAction::Active);
     let paused_at = c.log.viewer.iter().position(|a| *a == paused);
@@ -239,7 +239,7 @@ fn t1_viewer_maps_wire_reasons_and_unknown_ones_to_other() {
     let (h, v) = (device("host"), device("viewer"));
     let otp = remora_crypto::secret::Otp::parse("123456").unwrap();
     for (wire, left, want) in [
-        (1, 0, PauseReason::DisplayUnavailable),
+        (1, 0, PauseReason::DisplayAsleep),
         (2, 0, PauseReason::AccessLost),
         (3, 0, PauseReason::Other),
         (77, 0, PauseReason::Other),
@@ -247,11 +247,11 @@ fn t1_viewer_maps_wire_reasons_and_unknown_ones_to_other() {
         (
             4,
             90_000,
-            PauseReason::DisplayRemoved {
+            PauseReason::DisplayUnavailable {
                 remaining_ms: 90_000,
             },
         ),
-        (1, 90_000, PauseReason::DisplayUnavailable),
+        (1, 90_000, PauseReason::DisplayAsleep),
         (77, 90_000, PauseReason::Other),
     ] {
         let mut e = evil_host_viewer_pending(&v, &h, &otp);
@@ -322,8 +322,8 @@ fn t1_a_viewer_sending_stream_state_is_role_confusion() {
 
 // ------------------------------------------- D-29: display removed --
 
-const fn removed(remaining_ms: u32) -> CaptureStatus {
-    CaptureStatus::Interrupted(PauseReason::DisplayRemoved { remaining_ms })
+const fn unavailable(remaining_ms: u32) -> CaptureStatus {
+    CaptureStatus::Interrupted(PauseReason::DisplayUnavailable { remaining_ms })
 }
 
 fn at(ms: u64) -> remora_session::Millis {
@@ -333,14 +333,14 @@ fn at(ms: u64) -> remora_session::Millis {
 /// Roadmap D-29: the viewer is told the display was removed and how long
 /// the host will wait; the host keeps the deadline.
 #[test]
-fn d29_display_removed_tells_the_viewer_the_time_left() {
+fn d29_display_unavailable_tells_the_viewer_the_time_left() {
     let (h, v) = (device("host"), device("viewer"));
     let mut host = host_with(&h, vec![]);
     let mut c = to_active(&mut host, &v, ip(1));
-    let acts = host.capture_changed(removed(120_000), T0);
+    let acts = host.capture_changed(unavailable(120_000), T0);
     c.host_actions(&mut host, acts);
     assert_eq!(
-        viewer_saw(&c, &ViewerAction::StreamPaused(removed_reason(120_000))),
+        viewer_saw(&c, &ViewerAction::StreamPaused(unavailable_reason(120_000))),
         1
     );
     assert_eq!(host.pause_remaining(T0), Some(120_000));
@@ -348,8 +348,8 @@ fn d29_display_removed_tells_the_viewer_the_time_left() {
     assert_eq!(host.pause_remaining(at(500_000)), Some(0), "never negative");
 }
 
-fn removed_reason(remaining_ms: u32) -> PauseReason {
-    PauseReason::DisplayRemoved { remaining_ms }
+fn unavailable_reason(remaining_ms: u32) -> PauseReason {
+    PauseReason::DisplayUnavailable { remaining_ms }
 }
 
 /// A viewer approved during the wait is told the time actually left, not
@@ -359,16 +359,16 @@ fn d29_a_viewer_approved_during_the_wait_gets_the_time_actually_left() {
     let (h, v) = (device("host"), device("viewer"));
     let mut host = host_with(&h, vec![]);
     let mut c = to_prompt(&mut host, &v, ip(1));
-    assert!(host.capture_changed(removed(120_000), T0).is_empty());
+    assert!(host.capture_changed(unavailable(120_000), T0).is_empty());
     let (id, sas) = c.log.prompt().unwrap();
     let acts = host.approve(id, sas, at(42_000)).unwrap();
     c.host_actions(&mut host, acts);
     assert_eq!(
-        viewer_saw(&c, &ViewerAction::StreamPaused(removed_reason(78_000))),
+        viewer_saw(&c, &ViewerAction::StreamPaused(unavailable_reason(78_000))),
         1
     );
     assert_eq!(
-        viewer_saw(&c, &ViewerAction::StreamPaused(removed_reason(120_000))),
+        viewer_saw(&c, &ViewerAction::StreamPaused(unavailable_reason(120_000))),
         0
     );
 }
@@ -381,13 +381,13 @@ fn d29_a_new_deadline_is_sent_even_if_the_status_looks_the_same() {
     let (h, v) = (device("host"), device("viewer"));
     let mut host = host_with(&h, vec![]);
     let mut c = to_active(&mut host, &v, ip(1));
-    let acts = host.capture_changed(removed(120_000), T0);
+    let acts = host.capture_changed(unavailable(120_000), T0);
     c.host_actions(&mut host, acts);
-    let acts = host.capture_changed(removed(120_000), at(50_000));
+    let acts = host.capture_changed(unavailable(120_000), at(50_000));
     assert_eq!(sent_to(&acts, c.id), 1, "the new deadline is sent");
     c.host_actions(&mut host, acts);
     assert_eq!(
-        viewer_saw(&c, &ViewerAction::StreamPaused(removed_reason(120_000))),
+        viewer_saw(&c, &ViewerAction::StreamPaused(unavailable_reason(120_000))),
         2
     );
     assert_eq!(host.pause_remaining(at(50_000)), Some(120_000));
@@ -400,20 +400,17 @@ fn d29_the_deadline_ends_with_the_removal() {
     let (h, v) = (device("host"), device("viewer"));
     let mut host = host_with(&h, vec![]);
     let mut c = to_prompt(&mut host, &v, ip(1));
-    host.capture_changed(removed(120_000), T0);
+    host.capture_changed(unavailable(120_000), T0);
     host.capture_changed(ASLEEP, at(10_000));
     assert_eq!(host.pause_remaining(at(10_000)), None);
     let (id, sas) = c.log.prompt().unwrap();
     let acts = host.approve(id, sas, at(20_000)).unwrap();
     c.host_actions(&mut host, acts);
     assert_eq!(
-        viewer_saw(
-            &c,
-            &ViewerAction::StreamPaused(PauseReason::DisplayUnavailable)
-        ),
+        viewer_saw(&c, &ViewerAction::StreamPaused(PauseReason::DisplayAsleep)),
         1
     );
-    host.capture_changed(removed(120_000), at(30_000));
+    host.capture_changed(unavailable(120_000), at(30_000));
     host.capture_changed(CaptureStatus::Running, at(31_000));
     assert_eq!(host.pause_remaining(at(31_000)), None);
 }

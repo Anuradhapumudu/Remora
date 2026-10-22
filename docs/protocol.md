@@ -307,20 +307,28 @@ Notes:
   when screen capture pauses or resumes, and right after `SessionAccept`
   to a viewer approved while capture is paused. The session stays Active
   while paused; a resume is followed by a keyframe.
-  * `paused = true` needs `reason ≠ 0`: 1 display unavailable (asleep,
-    lid closed), 2 access lost, 3 other, **4 display removed** (added
-    2026-10-22). A viewer shows an unknown reason as "other".
+  * `paused = true` needs `reason ≠ 0`: **1 display asleep** (it stopped
+    delivering frames and is still in the OS's display list, or is not yet
+    known to have left it), 2 access lost, 3 other, **4 display
+    unavailable** (it left the display list: the lid closed with the Mac
+    awake, or disconnected; added 2026-10-22). Names changed 2026-10-23
+    (were "display unavailable" and "display removed": a closed lid also
+    leaves the list, architecture D44); the values did not change. A
+    viewer shows an unknown reason as "other".
     `paused = false` needs `reason = 0` and `remaining_ms = 0`.
   * **`remaining_ms` (added 2026-10-22, roadmap D-29):** with reason 4, the
-    milliseconds until the host stops waiting for its removed display and
+    milliseconds until the host stops waiting for its unavailable display and
     ends the session with `CaptureStopped`. The host sends it **once** when
     the display goes missing, and again only when the deadline changes
     (the display came back and went missing again). A viewer approved
     during the wait gets the time actually left, not the full wait. The
     viewer counts down locally from when the message arrived (no periodic
-    messages; network delay makes its countdown end slightly late, never
-    early). 0 with every other reason; at most 3 600 000 (1 h, §7).
-  * Example, paused / display removed / 120 s left, as a whole `Envelope`:
+    messages). Its countdown reaches 0 later than the host's deadline by
+    the network delay; the host ends the session at its next check of the
+    display list after the deadline (every 2 s while the display is
+    missing), so "0 s left" can show for up to about 2 s before the
+    session ends. 0 with every other reason; at most 3 600 000 (1 h, §7).
+  * Example, paused / display unavailable / 120 s left, as a whole `Envelope`:
     `0a 0b 82 01 08 08 01 10 04 18 c0 a9 07` (a test and a fuzz seed).
 * **Video bitstream (Phase 4: H.264 only).** Each reassembled frame is an
   Annex B access unit. The viewer accepts only what Remora's encoder sends
@@ -451,7 +459,7 @@ but each addition is listed so a later reader knows which builds lack it.
 
 | Date | Addition | A peer without it |
 |---|---|---|
-| 2026-10-22 | `StreamState.remaining_ms` (field 3) and `reason = 4` (display removed), roadmap D-29 | Ignores the field (protobuf skips unknown fields) and shows reason 4 as "other"; the session works, without the countdown. Tested by `a_viewer_without_remaining_ms_still_reads_the_pause` |
+| 2026-10-22 | `StreamState.remaining_ms` (field 3) and `reason = 4` (display unavailable; named "display removed" until 2026-10-23), roadmap D-29 | Ignores the field (protobuf skips unknown fields) and shows reason 4 as "other"; the session works, without the countdown. Tested by `a_viewer_without_remaining_ms_still_reads_the_pause` |
 
 Why not a version bump (owner, 2026-10-22): the major version is part of
 every key-derivation label (`remora/1/…`), so bumping it for an optional

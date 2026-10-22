@@ -188,7 +188,7 @@ struct Display {
 pub(crate) struct Pause {
     /// Why, for a person.
     pub(crate) why: &'static str,
-    /// Display removed (D-29): when the host gives up, on this viewer's
+    /// Display unavailable (D-29): when the host gives up, on this viewer's
     /// clock (counted from when the message arrived).
     pub(crate) deadline: Option<std::time::Instant>,
 }
@@ -196,7 +196,7 @@ pub(crate) struct Pause {
 impl Pause {
     fn of(reason: remora_session::PauseReason) -> Self {
         let deadline = match reason {
-            remora_session::PauseReason::DisplayRemoved { remaining_ms } => Some(
+            remora_session::PauseReason::DisplayUnavailable { remaining_ms } => Some(
                 std::time::Instant::now()
                     + std::time::Duration::from_millis(u64::from(remaining_ms)),
             ),
@@ -208,10 +208,10 @@ impl Pause {
         }
     }
 
-    /// What to show now: the countdown if the display was removed.
+    /// What to show now: the countdown if the display is unavailable.
     pub(crate) fn text(&self) -> String {
         match self.deadline {
-            Some(d) => remora_app::cli::display_removed_text(
+            Some(d) => remora_app::cli::display_unavailable_text(
                 d.saturating_duration_since(std::time::Instant::now()),
             ),
             None => format!("Stream paused: {}.", self.why),
@@ -358,7 +358,7 @@ async fn session_loop(
     // check its own window (P3: 0 authentication failures, 0 frames
     // given up). Counts only, never content (INV9).
     let mut media_line = tokio::time::interval(std::time::Duration::from_secs(1));
-    // D-29: while the host waits for its removed display, say how long is left.
+    // D-29: while the host waits for its unavailable display, say how long is left.
     let mut wait_line = tokio::time::interval(remora_app::cli::WAIT_LINE_EVERY);
     wait_line.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     loop {
@@ -467,12 +467,12 @@ fn report_failure(reason: &FailReason) -> u8 {
 /// What a pause reason means, for a person.
 fn pause_text(reason: remora_session::PauseReason) -> &'static str {
     match reason {
-        remora_session::PauseReason::DisplayUnavailable => {
-            "the host's display is asleep, closed or unavailable"
-        }
+        remora_session::PauseReason::DisplayAsleep => "the host's display is asleep",
         remora_session::PauseReason::AccessLost => "the host's system took the screen away",
         remora_session::PauseReason::Other => "the host's screen capture was interrupted",
-        remora_session::PauseReason::DisplayRemoved { .. } => "the host's display was removed",
+        remora_session::PauseReason::DisplayUnavailable { .. } => {
+            "the host's display is unavailable (lid closed or disconnected)"
+        }
     }
 }
 

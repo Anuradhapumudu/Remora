@@ -86,15 +86,18 @@ pub enum AppMessage {
 /// errors onto these; the session never learns which OS it runs on — D17).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PauseReason {
-    /// The display is asleep, closed or gone (macOS: SCStream error −3815).
-    DisplayUnavailable,
+    /// The display stopped delivering frames: asleep (it stays listed, no
+    /// countdown), or not yet known to be unavailable (macOS: SCStream
+    /// error −3815; `DisplayUnavailable` follows if it left the list).
+    DisplayAsleep,
     /// The OS took the capture surface away (Windows: ACCESS_LOST).
     AccessLost,
     /// Anything else the backend expects to recover from.
     Other,
-    /// The captured display is no longer connected; the host waits for it
-    /// and ends the session when the time runs out (roadmap D-29).
-    DisplayRemoved {
+    /// The captured display is unavailable — it left the OS's display list
+    /// (lid closed with the Mac awake, or disconnected); the host waits for
+    /// it and ends the session when the time runs out (roadmap D-29, D44).
+    DisplayUnavailable {
         /// Milliseconds left until the host gives up: as the capture
         /// reported it (host), or as the host sent it (viewer, counted
         /// from when the message arrived).
@@ -106,31 +109,31 @@ impl PauseReason {
     /// The value in `StreamState.reason` (protocol.md §5).
     pub fn wire(self) -> u32 {
         match self {
-            PauseReason::DisplayUnavailable => 1,
+            PauseReason::DisplayAsleep => 1,
             PauseReason::AccessLost => 2,
             PauseReason::Other => 3,
-            PauseReason::DisplayRemoved { .. } => 4,
+            PauseReason::DisplayUnavailable { .. } => 4,
         }
     }
 
     /// From a paused `StreamState` (reason non-zero, time left bounded:
     /// both checked by the envelope validator). Unknown values are a newer
     /// host's reason: other. The time left only means something with
-    /// "display removed".
+    /// "display unavailable".
     pub fn from_wire(reason: u32, remaining_ms: u32) -> Self {
         match reason {
-            1 => PauseReason::DisplayUnavailable,
+            1 => PauseReason::DisplayAsleep,
             2 => PauseReason::AccessLost,
-            4 => PauseReason::DisplayRemoved { remaining_ms },
+            4 => PauseReason::DisplayUnavailable { remaining_ms },
             _ => PauseReason::Other,
         }
     }
 
     /// `StreamState.remaining_ms` for this reason: 0 unless the display
-    /// was removed.
+    /// is unavailable.
     pub fn remaining_ms(self) -> u32 {
         match self {
-            PauseReason::DisplayRemoved { remaining_ms } => remaining_ms,
+            PauseReason::DisplayUnavailable { remaining_ms } => remaining_ms,
             _ => 0,
         }
     }

@@ -56,7 +56,7 @@ enum StopKind {
 /// Classifies an `SCStream` stop error code (objc2-screen-capture-kit 0.3.2
 /// `SCError.rs` names):
 ///
-/// * `NoCaptureSource` (−3815): display asleep, lid closed, display removed —
+/// * `NoCaptureSource` (−3815): display asleep, lid closed, display disconnected —
 ///   all three **measured** in Phase 2 (phase2-criteria Q4).
 /// * `SystemStoppedStream` (−3821): **unverified**, never observed; treated as
 ///   recoverable because a wrong retry costs a paused stream while a wrong
@@ -64,7 +64,7 @@ enum StopKind {
 /// * Anything else (user declined, user stopped from the menu bar, …): fatal.
 fn classify_stop(code: i64) -> StopKind {
     if code == SCStreamErrorCode::NoCaptureSource.0 as i64 {
-        StopKind::Interrupted(InterruptReason::DisplayUnavailable)
+        StopKind::Interrupted(InterruptReason::DisplayAsleep)
     } else if code == SCStreamErrorCode::SystemStoppedStream.0 as i64 {
         StopKind::Interrupted(InterruptReason::Other)
     } else {
@@ -458,8 +458,8 @@ fn display_pixel_size(display: &SCDisplay) -> (u32, u32) {
 /// <= 2 s after the display wakes).
 const RESTART_POLL: Duration = Duration::from_millis(500);
 
-/// How often while the display is missing from the display list (removed,
-/// D-29). Asking ScreenCaptureKit for the list every 0.5 s cost 2.7 % of a
+/// How often while the display is missing from the display list (lid
+/// closed with the Mac awake, or disconnected; D-29). Asking ScreenCaptureKit for the list every 0.5 s cost 2.7 % of a
 /// core on the M4 (T3, 2026-10-22); a returning monitor has no 2 s target.
 const MISSING_POLL: Duration = Duration::from_secs(2);
 
@@ -607,7 +607,7 @@ fn spawn_restart(ctx: RestartCtx, sink: EventSink) {
 /// Retries every [`RESTART_POLL`] until the display is back and a new
 /// stream starts (it then announces `Resumed`), or the owner stopped,
 /// restarted or dropped the capture, or the display has been missing from
-/// the display list for `display_gone_limit` (then `Stopped(DisplayRemoved)`;
+/// the display list for `display_gone_limit` (then `Stopped(DisplayUnavailable)`;
 /// roadmap D-29). It only ever restarts the same display.
 fn restart_loop(ctx: RestartCtx, mut sink: EventSink) {
     let mut gone: Option<crate::GoneTimer> = None;
@@ -638,18 +638,14 @@ fn restart_loop(ctx: RestartCtx, mut sink: EventSink) {
         match timer.observe(found.is_some(), Instant::now()) {
             crate::Gone::Expired => {
                 drop(c);
-                sink(CaptureEvent::Stopped(CaptureError::DisplayRemoved));
+                sink(CaptureEvent::Stopped(CaptureError::DisplayUnavailable));
                 return;
             }
-            crate::Gone::WentMissing(remaining) => {
-                sink(CaptureEvent::Interrupted(InterruptReason::DisplayRemoved {
-                    remaining,
-                }))
-            }
-            // No deadline any more; Resumed follows if the stream starts.
-            crate::Gone::Back => sink(CaptureEvent::Interrupted(
-                InterruptReason::DisplayUnavailable,
+            crate::Gone::WentMissing(remaining) => sink(CaptureEvent::Interrupted(
+                InterruptReason::DisplayUnavailable { remaining },
             )),
+            // No deadline any more; Resumed follows if the stream starts.
+            crate::Gone::Back => sink(CaptureEvent::Interrupted(InterruptReason::DisplayAsleep)),
             crate::Gone::Listed | crate::Gone::StillMissing => {}
         }
         let Some(display) = found else {
@@ -786,7 +782,7 @@ mod stop_tests {
     fn display_gone_is_an_interruption_and_permission_loss_is_fatal() {
         assert_eq!(
             classify_stop(-3815),
-            StopKind::Interrupted(InterruptReason::DisplayUnavailable)
+            StopKind::Interrupted(InterruptReason::DisplayAsleep)
         );
         assert_eq!(
             classify_stop(-3821),

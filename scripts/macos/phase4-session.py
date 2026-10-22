@@ -14,6 +14,7 @@ anything is written). The Mac is kept awake (caffeinate) while a step runs.
   scripts/macos/phase4-session.py m7         # M7: decoder memory limit on this real Mac
   scripts/macos/phase4-session.py t2         # T2: display sleep / wake, 5 cycles (display goes off)
   scripts/macos/phase4-session.py t3-lid     # T3: YOU close the lid, wait ~30 s, open it
+  scripts/macos/phase4-session.py t3-lid --mac-sleeps  # the same with the Mac really asleep (G-2)
   scripts/macos/phase4-session.py p1 --source synthetic --seconds 5 --runs 1   # tooling check
 
 The host runs through RemoraDev.app (scripts/macos/dev-app.sh), which holds
@@ -618,9 +619,28 @@ def display_on_times(since):
     return times
 
 
+def power_log_since(since, needle):
+    """Power-log lines after `since` (wall time) that contain `needle`."""
+    out = subprocess.run(["pmset", "-g", "log"], capture_output=True, text=True).stdout
+    found = []
+    for line in out.splitlines():
+        m = re.match(r"(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d) ([+-]\d{4})", line)
+        if m and needle in line:
+            t = datetime.datetime.strptime(f"{m.group(1)} {m.group(2)}",
+                                           "%Y-%m-%d %H:%M:%S %z").timestamp()
+            if t >= since:
+                found.append(line[:120])
+    return found
+
+
 def step_t3_lid(a, rep):
     build()
-    rep.say("T3 lid: close the lid when asked, wait about 30 s, open it")
+    if a.mac_sleeps:
+        rep.say("T3 lid, the Mac sleeps (gate G-2; expected result written first in"
+                " phase4-criteria §11c): close the lid when asked, wait about 30 s, open it")
+    else:
+        rep.say("T3 lid, the Mac kept awake (caffeinate -s): close the lid when asked,"
+                " wait about 30 s, open it")
     host, viewer, n = start_session("screen", window=False, timing=True)
     wait(5, "streaming")
     start = time.time()
@@ -628,25 +648,50 @@ def step_t3_lid(a, rep):
     print("\n   >>> CLOSE THE LID NOW. Wait about 30 s, then open it and log in if asked. <<<\n",
           flush=True)
     host.expect("capture paused", secs=300, after=mark)
-    host.expect("capture resumed", secs=600, after=mark)
+    # Wait for the stream to come back, or for the session to end (the
+    # sleep run's other possible outcome): up to 10 minutes.
+    deadline = time.time() + 600
+    while time.time() < deadline and viewer.p.poll() is None:
+        if any(l.startswith("capture resumed") for _, l in host.snapshot()[mark:]):
+            break
+        time.sleep(0.5)
     wait(5, "lid open again")
     lines = host.snapshot()
     t_resumed, key = resume_facts(lines, mark)
     alive = viewer.p.poll() is None
-    counters = end_session(host, viewer, n)
+    vlines = [l for _, l in viewer.snapshot()]
+    lost = any(l.startswith("failed: connection lost") for l in vlines)
+    shown = [l for l in vlines if l.startswith(("stream paused", "The host's display",
+                                                "stream resumed", "failed:", "session ended"))]
+    counters = end_session(host, viewer, n) if alive else next(
+        (l for l in vlines if l.startswith("video:")), "viewer gone")
+    if not alive:
+        host.quit()
     write_log("t3-lid-host.log", host.snapshot())
     write_log("t3-lid-viewer.log", viewer.snapshot())
-    on = [t for t in display_on_times(start) if t <= t_resumed + 1]
-    delay = t_resumed - on[-1] if on else None
+    on = [t for t in display_on_times(start) if t_resumed is None or t <= t_resumed + 1]
+    delay = t_resumed - on[-1] if on and t_resumed is not None else None
     rep.say(f"display on (power log, 1 s resolution): "
             f"{datetime.datetime.fromtimestamp(on[-1]).strftime('%H:%M:%S') if on else 'not found'}; "
-            f"capture resumed {datetime.datetime.fromtimestamp(t_resumed).strftime('%H:%M:%S.%f')[:-3]}")
+            "capture resumed " + (datetime.datetime.fromtimestamp(t_resumed).strftime('%H:%M:%S.%f')[:-3]
+                                  if t_resumed else "never"))
+    rep.say("viewer showed: " + (" | ".join(dict.fromkeys(shown)) or "nothing about the pause")
+            + ("; CONNECTION LOST" if lost else ""))
     rep.say(f"viewer {counters}")
+    valid = True
+    if a.mac_sleeps:
+        slept = power_log_since(start, "Entering Sleep state due to 'Clamshell Sleep'")
+        dark = power_log_since(start, "Entering DarkWake state due to 'Clamshell Sleep'")
+        rep.say("power log: " + (" / ".join(slept + dark) or "no clamshell entry"))
+        valid = bool(slept)
+        if not valid:
+            rep.say("   the Mac did not sleep (no 'Entering Sleep state ... Clamshell Sleep'):"
+                    " something kept it awake; this run does not count")
     ok = alive and key is True and delay is not None and delay <= T3_RESUME_S + 1
-    rep.verdict("T3 lid", ok,
+    rep.verdict("T3 lid, " + ("Mac sleeps" if a.mac_sleeps else "Mac awake"), ok,
                 f"resumed {('%.1f s' % delay) if delay is not None else '?'} after the display came on "
                 f"(limit {T3_RESUME_S} s, +1 s log resolution), keyframe first: {key}, "
-                f"same session: {'yes' if alive else 'NO'}")
+                f"same session: {'yes' if alive else 'NO'}", valid)
 
 
 STEPS = {"check": step_check, "p1": step_p1, "p5": step_p5, "p6": step_p6, "p8": step_p8,
@@ -661,13 +706,19 @@ def main():
     ap.add_argument("--warmup", type=int, default=10, help="p1: seconds before measuring")
     ap.add_argument("--runs", type=int, default=3, help="p1: number of runs")
     ap.add_argument("--minutes", type=int, default=10, help="p5: duration")
+    ap.add_argument("--mac-sleeps", action="store_true",
+                    help="t3-lid: do not prevent system sleep, so closing the lid sleeps the Mac")
     a = ap.parse_args()
     # Keep the Mac awake (display, idle and system sleep) for the whole step;
-    # T2's `pmset displaysleepnow` and closing the lid still work.
+    # T2's `pmset displaysleepnow` still works. With -s a closed lid does NOT
+    # sleep the Mac on AC (T3, 2026-10-23): `--mac-sleeps` leaves -s out, as
+    # Phase 2's lid test did (-di; the Mac slept ~29 s).
     if not os.environ.get("REMORA_CAFFEINATED"):
         os.environ["REMORA_CAFFEINATED"] = "1"
-        os.execvp("caffeinate", ["caffeinate", "-dims", sys.executable, *sys.argv])
-    rep = Report(a.step if a.source == "screen" else f"{a.step}-{a.source}")
+        flags = "-di" if a.mac_sleeps else "-dims"
+        os.execvp("caffeinate", ["caffeinate", flags, sys.executable, *sys.argv])
+    name = a.step if a.source == "screen" else f"{a.step}-{a.source}"
+    rep = Report(name + ("-mac-sleeps" if a.mac_sleeps else ""))
     rep.say(f"Phase 4 {a.step}, {datetime.datetime.now().isoformat(timespec='seconds')}, "
             f"commit {subprocess.run(['git', 'rev-parse', '--short', 'HEAD'], capture_output=True, text=True, cwd=ROOT).stdout.strip()}")
     try:

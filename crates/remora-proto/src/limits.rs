@@ -37,7 +37,7 @@ pub const MAX_OPEN_FRAMES: usize = 16;
 /// most of the viewer's 150 MB budget). Oldest frames are dropped first.
 pub const REASSEMBLY_BYTES_MAX: usize = 32 * 1024 * 1024;
 /// Largest `StreamState.remaining_ms` (1 hour): the host waits 2 minutes
-/// for a removed display (roadmap D-29), so anything near this is a bug
+/// for an unavailable display (roadmap D-29), so anything near this is a bug
 /// or a hostile host; refusing it keeps the viewer's countdown sane.
 pub const PAUSE_REMAINING_MAX_MS: u32 = 3_600_000;
 /// Plaintext header of a video-fragment body (protocol.md §6).

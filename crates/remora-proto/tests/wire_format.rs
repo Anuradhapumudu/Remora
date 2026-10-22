@@ -367,7 +367,7 @@ fn stream_state_shapes() {
 /// protocol.md §5 shows these bytes; fuzz/corpus/messages holds them as a
 /// seed (`d58bc2a5…`). Paused, reason 4 (display removed), 120 000 ms left.
 #[test]
-fn stream_state_display_removed_bytes() {
+fn stream_state_display_unavailable_bytes() {
     let bytes = ctl(control::Kind::StreamState(StreamState {
         paused: true,
         reason: 4,

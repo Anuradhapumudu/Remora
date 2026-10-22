@@ -59,7 +59,7 @@ struct App {
     /// last reason (R3: e.g. a hidden window gets none).
     no_drawable: (u64, &'static str),
     /// While the stream is paused: the title says why, counting down
-    /// every second if the host's display was removed (D-29). Plain text,
+    /// every second if the host's display is unavailable (D-29). Plain text,
     /// no styling: the proper overlay is Phase 4.5 (roadmap D-33).
     pause: Option<crate::Pause>,
 }
