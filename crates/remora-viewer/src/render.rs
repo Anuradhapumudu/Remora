@@ -160,6 +160,13 @@ impl Renderer {
                 texture.size(),
             );
         }
+        // Send the copies now. wgpu stages each `write_texture` until the
+        // next submit (wgpu-core 30.0.1 `src/device/queue.rs:1529`, an
+        // empty submit included) and frees finished staging memory there;
+        // a window that cannot draw never submits, so without this every
+        // picture's ~3 MB copy piled up (2.4 GB in 15 s, test
+        // `p5_pictures_that_are_never_drawn_do_not_pile_up`).
+        self.queue.submit([]);
     }
 
     fn make_planes(&self, w: u32, h: u32, chroma: (u32, u32)) -> Planes {
