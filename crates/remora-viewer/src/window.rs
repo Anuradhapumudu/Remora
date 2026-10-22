@@ -69,6 +69,8 @@ struct App {
 /// returned (shared clock, µs).
 struct Drawn {
     cpu: Duration,
+    /// When a surface texture to draw into was obtained.
+    acquired_us: u64,
     gpu_done_us: Option<u64>,
     presented_us: u64,
 }
@@ -181,6 +183,7 @@ impl App {
                 return None;
             }
         };
+        let acquired_us = crate::decode::now_us();
         let view = frame.texture.create_view(&Default::default());
         let drawn = gpu.renderer.draw(&view);
         let done = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
@@ -207,6 +210,7 @@ impl App {
             .filter(|&t| t > 0);
         drawn.then_some(Drawn {
             cpu,
+            acquired_us,
             gpu_done_us,
             presented_us,
         })
@@ -225,18 +229,26 @@ impl App {
             return;
         };
         let started = Instant::now();
+        // decoded -> drawn, split (phase4-criteria §3 stage budget): the
+        // hand-off to this thread, the upload, getting a surface, the GPU.
+        let window_us = crate::decode::now_us();
         let uploaded = picture.frame.with_nv12(|nv12| gpu.renderer.upload(nv12));
         if uploaded.is_err() {
             return;
         }
         let upload = started.elapsed();
+        let uploaded_us = crate::decode::now_us();
         if let Some(d) = self.present(self.timing) {
             self.stats.drawn(picture.decode, upload + d.cpu);
             if let Some(gpu_done_us) = d.gpu_done_us {
                 // Times only, never content (INV9).
                 eprintln!(
-                    "timing: capture_us={} received_us={} decoded_us={} drawn_us={gpu_done_us} presented_us={}",
-                    picture.capture_us, picture.received_us, picture.decoded_us, d.presented_us
+                    "timing: capture_us={} received_us={} decoded_us={} window_us={window_us} uploaded_us={uploaded_us} acquired_us={} drawn_us={gpu_done_us} presented_us={}",
+                    picture.capture_us,
+                    picture.received_us,
+                    picture.decoded_us,
+                    d.acquired_us,
+                    d.presented_us
                 );
             }
         }

@@ -380,7 +380,11 @@ def step_p1(a, rep):
                            ("  encoded->sent", "encoded_us", "sent_us"),
                            ("  sent->received", "sent_us", "received_us"),
                            ("  received->decoded", "received_us", "decoded_us"),
-                           ("  decoded->drawn", "decoded_us", "drawn_us")]:
+                           ("  decoded->drawn", "decoded_us", "drawn_us"),
+                           ("    hand-off to window", "decoded_us", "window_us"),
+                           ("    upload", "window_us", "uploaded_us"),
+                           ("    get a surface", "uploaded_us", "acquired_us"),
+                           ("    draw on the GPU", "acquired_us", "drawn_us")]:
             rep.say(row(name, col(x, y))[0])
         caps = sorted(captured_in)
         gaps = [(b - c) / 1000 for c, b in zip(caps, caps[1:])]
