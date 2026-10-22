@@ -197,6 +197,44 @@ Before Phase 4 finishes, D-17 must have been examined (done 2026-10-19:
 docs/d17-video-surface-options.md).
 The phase report lists the whole deferred list row by row (CLAUDE.md).
 
+* **Step 7d follow-up: the open questions from the session (2026-10-23).**
+  1. **P5's 147 MB, and a leak found on the way.** Viewer memory by
+     setup (synthetic source, `footprint`): no window **6.3 MB**; window
+     covered **2427 MB after 15 s** — every picture's upload waited for a
+     `queue.submit` that only a draw makes, and a covered window cannot
+     draw. Fixed test-first (`ff35fcb` RED +897 MB over 300 undrawn
+     pictures, `b996e04` GREEN +0 MB): the covered window now holds
+     **89 MB**; a visible one **144 MB**, of which **94 MB** is GPU memory
+     owned through Metal/wgpu. That 94 MB did not change between the
+     window sizes tried, but resizing by script was refused for two of the
+     three sizes (no Accessibility permission), so "independent of window
+     size" is **not shown**. What inside wgpu/Metal holds it was not
+     determined (needs Instruments); listed for the phase report. P5's
+     owner run (visible window, flat 147–148 MB) stands; it could not
+     have caught the covered-window case.
+  2. **decoded → drawn vs its 1.5 ms budget.** Split with new timing
+     stamps (synthetic, window in front, 30 s, p50): hand-off to the
+     window thread 0.02 ms, upload 0.73 ms, getting a surface 0.03 ms,
+     GPU draw 1.17 ms. **No wait for the display's refresh is inside
+     it**: the time is copying each 3 MB picture (CPU into wgpu's
+     staging, then GPU into the texture) and the GPU's draw. So the code,
+     not the budget, is where the time goes; importing the decoder's
+     IOSurface directly (roadmap D-17 options) would remove the copy.
+     The fix in (1) does not slow it: decoded → drawn 1.95 ms with the
+     extra submit vs 2.06 ms without (that comparison is only 24 frames:
+     the window lost the front).
+  3. **T2's resume, 0.70–0.72 s vs 0.33 s in step 2.** Step 2's
+     capture-only test rerun the same night with the same sleep/wake
+     timing: **0.75–0.79 s**. The streaming host adds nothing; the Mac
+     took longer to bring the display back than on 2026-10-20. The power
+     log's whole-second times cannot show why.
+  4. **01:40 vs 02:16 P1 runs (≈ 3 ms apart at p50).** Every stage after
+     the encoder was about 1.5× slower at 01:40, including sending over
+     loopback (0.65 vs 0.33 ms), which no window setting affects: a
+     machine-wide state (load or clock speed), not Remora's code (only
+     log lines changed between them). Not determined further; both
+     sessions pass P1/P2.
+
 ## 11c. T3 with the Mac asleep: expected result, written before the run (gate G-2)
 
 Written 2026-10-23, before the owner runs `scripts/macos/phase4-session.py
