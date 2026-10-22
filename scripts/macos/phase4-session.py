@@ -78,7 +78,8 @@ class Report:
         word = "PASS" if ok else "FAIL"
         if not valid:
             word = "INVALID (not counted)"
-        line = f"{what}: {detail} -> {word}"
+        tag = "" if "synthetic" not in self.step else "[synthetic picture, tooling check] "
+        line = f"{tag}{what}: {detail} -> {word}"
         self.say(f"==> {line}")
         stamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
         with open(os.path.join(RESULTS, "summary.md"), "a") as fh:
