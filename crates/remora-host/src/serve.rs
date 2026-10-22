@@ -64,6 +64,11 @@ pub(crate) struct ServeArgs {
     /// it, keeping its aspect ratio; never upscaled).
     #[arg(long, default_value_t = 1920)]
     width: u32,
+    /// Print one `timing:` line per sent frame on stderr: shared-clock
+    /// times of capture, encoder output and send (latency measurement,
+    /// phase4-criteria P1/P2). Times only.
+    #[arg(long)]
+    timing: bool,
 }
 
 /// `serve --source`.
@@ -147,7 +152,7 @@ async fn serve(args: ServeArgs) -> anyhow::Result<()> {
         book: SessionBook::new(),
         inputs: HashMap::new(),
         rotated: false,
-        video: Video::new(args.source, args.width, Arc::clone(&ui_server)),
+        video: Video::new(args.source, args.width, args.timing, Arc::clone(&ui_server)),
     };
     ui.print_code(false);
 
@@ -405,6 +410,8 @@ struct Video {
     width: u32,
     #[cfg(target_os = "macos")]
     server: Arc<HostServer>,
+    #[cfg(target_os = "macos")]
+    timing: bool,
     /// Sessions that are Active.
     active: std::collections::HashSet<SessionId>,
     #[cfg(target_os = "macos")]
@@ -412,10 +419,10 @@ struct Video {
 }
 
 impl Video {
-    fn new(source: Source, width: u32, server: Arc<HostServer>) -> Self {
+    fn new(source: Source, width: u32, timing: bool, server: Arc<HostServer>) -> Self {
         // Other systems stream nothing yet (`check_source` refused it).
         #[cfg(not(target_os = "macos"))]
-        let _ = (source, width, server);
+        let _ = (source, width, timing, server);
         Self {
             #[cfg(target_os = "macos")]
             source,
@@ -423,6 +430,8 @@ impl Video {
             width,
             #[cfg(target_os = "macos")]
             server,
+            #[cfg(target_os = "macos")]
+            timing,
             active: std::collections::HashSet::new(),
             #[cfg(target_os = "macos")]
             running: None,
@@ -453,7 +462,10 @@ impl Video {
                 60,
             ))),
         };
-        let out: Arc<dyn crate::stream::VideoOut> = Arc::new(Out(Arc::clone(&self.server)));
+        let out: Arc<dyn crate::stream::VideoOut> = Arc::new(Out {
+            server: Arc::clone(&self.server),
+            timing: self.timing,
+        });
         match capture.and_then(|c| crate::stream::Streamer::start(c, out)) {
             Ok(s) => {
                 println!("streaming: {:?}, H.264", self.source);
@@ -501,14 +513,26 @@ impl Video {
 
 /// Frames and capture state into the host server (macOS).
 #[cfg(target_os = "macos")]
-struct Out(Arc<HostServer>);
+struct Out {
+    server: Arc<HostServer>,
+    timing: bool,
+}
 
 #[cfg(target_os = "macos")]
 impl crate::stream::VideoOut for Out {
     fn video(&self, keyframe: bool, capture_ts_us: u64, data: &[u8]) {
-        if let Err(e) = self.0.send_video(keyframe, capture_ts_us, data) {
+        let now_us = || remora_app::clock::monotonic_ns().map_or(0, |n| n / 1000);
+        let encoded_us = now_us();
+        if let Err(e) = self.server.send_video(keyframe, capture_ts_us, data) {
             // Sizes and counts only (INV9).
             eprintln!("video frame of {} bytes not sent: {e}", data.len());
+        } else if self.timing {
+            // Times and sizes only (INV9).
+            eprintln!(
+                "timing: capture_us={capture_ts_us} encoded_us={encoded_us} sent_us={} bytes={} keyframe={keyframe}",
+                now_us(),
+                data.len()
+            );
         }
     }
 
@@ -519,7 +543,7 @@ impl crate::stream::VideoOut for Out {
             CaptureStatus::Interrupted(r) => println!("capture paused ({r:?}) - viewers are told"),
             CaptureStatus::Stopped => println!("capture stopped - active sessions end"),
         }
-        self.0.capture_changed(status);
+        self.server.capture_changed(status);
     }
 }
 

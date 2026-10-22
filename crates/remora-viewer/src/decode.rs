@@ -28,6 +28,16 @@ pub(crate) struct Picture {
     pub(crate) frame: remora_codec::DecodedFrame,
     /// How long the decoder took for it.
     pub(crate) decode: std::time::Duration,
+    /// Shared-clock times in µs (P1/P2, `connect --timing`): the frame's
+    /// display time at the host, its arrival here, decoding done.
+    pub(crate) capture_us: u64,
+    pub(crate) received_us: u64,
+    pub(crate) decoded_us: u64,
+}
+
+/// Now on the shared monotonic clock in µs (0 where there is none).
+pub(crate) fn now_us() -> u64 {
+    remora_app::clock::monotonic_ns().map_or(0, |n| n / 1000)
 }
 
 /// Receives decoded pictures (on the decode thread); `None` = no window
@@ -108,7 +118,7 @@ fn bump(a: &AtomicU64) {
 }
 
 pub(crate) struct Decoder {
-    tx: Option<SyncSender<VideoFrame>>,
+    tx: Option<SyncSender<(VideoFrame, u64)>>,
     worker: Option<JoinHandle<()>>,
     counters: Arc<Counters>,
 }
@@ -117,7 +127,7 @@ impl Decoder {
     /// Starts the decoder thread; it asks for keyframes through `client`
     /// and hands pictures to `show`.
     pub(crate) fn start(client: ViewerClient, show: Show) -> std::io::Result<Self> {
-        let (tx, rx) = sync_channel::<VideoFrame>(QUEUE);
+        let (tx, rx) = sync_channel::<(VideoFrame, u64)>(QUEUE);
         let counters = Arc::new(Counters::default());
         let shared = Arc::clone(&counters);
         let worker = std::thread::Builder::new()
@@ -141,7 +151,7 @@ impl Decoder {
             bump(&self.counters.dropped);
             return;
         };
-        match tx.try_send(frame) {
+        match tx.try_send((frame, now_us())) {
             Ok(()) => {}
             Err(TrySendError::Full(_)) => bump(&self.counters.dropped),
             Err(TrySendError::Disconnected(_)) => {
@@ -163,7 +173,7 @@ impl Decoder {
 
 #[cfg(target_os = "macos")]
 fn run(
-    rx: std::sync::mpsc::Receiver<VideoFrame>,
+    rx: std::sync::mpsc::Receiver<(VideoFrame, u64)>,
     client: ViewerClient,
     mut show: Show,
     counters: &Counters,
@@ -172,7 +182,7 @@ fn run(
     use remora_codec::h264::SizeLimit;
 
     let mut decoder = VtDecoder::new(SizeLimit::default());
-    for frame in rx {
+    for (frame, received_us) in rx {
         let started = std::time::Instant::now();
         match decoder.decode(frame.frame_id, &frame.data) {
             Ok(picture) => {
@@ -188,6 +198,9 @@ fn run(
                 show(Picture {
                     frame: picture,
                     decode: started.elapsed(),
+                    capture_us: frame.capture_ts_us,
+                    received_us,
+                    decoded_us: now_us(),
                 });
             }
             Err(e) => {
@@ -213,7 +226,7 @@ fn counter_for<'a>(c: &'a Counters, e: &remora_codec::DecodeError) -> &'a Atomic
 
 #[cfg(not(target_os = "macos"))]
 fn run(
-    rx: std::sync::mpsc::Receiver<VideoFrame>,
+    rx: std::sync::mpsc::Receiver<(VideoFrame, u64)>,
     client: ViewerClient,
     show: Show,
     counters: &Counters,

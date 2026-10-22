@@ -413,6 +413,22 @@ The phase report lists the whole deferred list row by row (CLAUDE.md).
   asleep, and the viewer gets only the pause reason. **Lid close** (T3's
   other half) needs the owner at the machine (step 7d).
 
+* **Step 7d tooling (2026-10-22).** `serve --timing` and `connect
+  --timing` print one `timing:` line per frame (shared-clock µs: capture,
+  encoder output, sent; received, decoded, **GPU draw done** via
+  `Queue::on_submitted_work_done` + `poll(Wait)`, present returned) — times
+  and sizes only (e2e check that every field is `key=number`; seen
+  failing against a planted `head=[0, 0, 0, 1]`). `scripts/macos/
+  p1-latency.py` runs host and viewer, accepts, streams, joins the logs by
+  capture time and prints P1, P2, every stage and P3. **Tooling check**
+  (synthetic source, 5 s, not a P1 run): P1 p50 10.7–11.1 ms, p95
+  13.7–16.4 ms; capture → encoded 6.2–6.5 ms p50 (a synthetic frame's
+  "display time" is when it was made). **Finding:** in all three checks
+  the window stopped drawing after 2–4 s — `get_current_texture` said
+  **occluded** (another window in front), so only 24–53 % of frames were
+  drawn. The R3 stats line now says `no drawable N (occluded)`. The real
+  P1 runs need the viewer window in front and visible (owner session).
+
 ## 12. Changes to criteria
 
 * **2026-10-19 — owner approval.** R1–R5 approved as proposed. R1 and R2 are

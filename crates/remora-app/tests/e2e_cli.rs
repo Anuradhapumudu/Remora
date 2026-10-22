@@ -674,7 +674,10 @@ fn f_ux6_an_unquoted_device_code_is_accepted_and_still_checked() {
 #[test]
 fn streaming_host_video_is_decoded_by_the_viewer() {
     let dir = tmp_dir();
-    let mut host = start_host(&dir, &["--source", "synthetic", "--width", "1280"]);
+    let mut host = start_host(
+        &dir,
+        &["--source", "synthetic", "--width", "1280", "--timing"],
+    );
     let mut viewer = connect_viewer(
         &dir,
         &host.code,
@@ -704,6 +707,25 @@ fn streaming_host_video_is_decoded_by_the_viewer() {
         host.app.seen.join("\n")
     );
     assert!(n("frames decoded") >= 30, "{line}");
+    // `--timing` lines (P1/P2 tooling): times and sizes only, as
+    // key=number fields, never content (INV9).
+    let timing: Vec<&String> = host
+        .app
+        .seen
+        .iter()
+        .filter(|l| l.starts_with("timing: "))
+        .collect();
+    assert!(timing.len() >= 30, "{} timing lines", timing.len());
+    for l in &timing {
+        for field in l["timing: ".len()..].split(' ') {
+            let (k, v) = field.split_once('=').unwrap();
+            assert!(
+                ["capture_us", "encoded_us", "sent_us", "bytes", "keyframe"].contains(&k)
+                    && (v.parse::<u64>().is_ok() || v == "true" || v == "false"),
+                "{l}"
+            );
+        }
+    }
     // Nothing malformed. ("waiting for a keyframe" is allowed: frames
     // encoded between approval and the keyframe forced for this viewer.)
     assert_eq!(n("refused"), 0, "{line}");

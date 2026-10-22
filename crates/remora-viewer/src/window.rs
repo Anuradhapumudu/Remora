@@ -51,12 +51,27 @@ struct App {
     counters: Option<Arc<Counters>>,
     exit_code: Option<u8>,
     stats: Stats,
+    /// `connect --timing`: one stderr line per drawn frame (P1/P2).
+    timing: bool,
+    /// Pictures not drawn because the window had no drawable, and the
+    /// last reason (R3: e.g. a hidden window gets none).
+    no_drawable: (u64, &'static str),
+}
+
+/// A presented frame: CPU time for acquire + draw + present, and with
+/// timing on, when the GPU had finished the draw and when `present`
+/// returned (shared clock, µs).
+struct Drawn {
+    cpu: Duration,
+    gpu_done_us: Option<u64>,
+    presented_us: u64,
 }
 
 /// Runs the window until the session ends; `session` runs on another
 /// thread with a proxy to send [`Event`]s and the receiver of a close
 /// request. Returns the session's exit code.
 pub(crate) fn run(
+    timing: bool,
     session: impl FnOnce(EventLoopProxy<Event>, tokio::sync::oneshot::Receiver<()>) + Send + 'static,
 ) -> anyhow::Result<u8> {
     let event_loop = EventLoop::<Event>::with_user_event().build()?;
@@ -72,6 +87,8 @@ pub(crate) fn run(
         counters: None,
         exit_code: None,
         stats: Stats::new(),
+        timing,
+        no_drawable: (0, ""),
     };
     event_loop.run_app(&mut app)?;
     let _ = thread.join();
@@ -131,24 +148,61 @@ impl App {
         Ok(())
     }
 
-    /// Draws the last uploaded picture and presents it. Returns the CPU
-    /// time it took, or `None` if nothing was drawn.
-    fn present(&mut self) -> Option<Duration> {
+    /// Draws the last uploaded picture and presents it; `None` if nothing
+    /// was drawn. With `timed`, also waits until the GPU has finished the
+    /// draw (phase4-criteria §3's end point: the `on_submitted_work_done`
+    /// callback); only `connect --timing` does, as the wait blocks this
+    /// thread for the GPU's work.
+    fn present(&mut self, timed: bool) -> Option<Drawn> {
         let gpu = self.gpu.as_mut()?;
         let started = Instant::now();
         let frame = match gpu.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(f)
             | wgpu::CurrentSurfaceTexture::Suboptimal(f) => f,
-            wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => {
-                gpu.surface.configure(gpu.renderer.device(), &gpu.config);
+            other => {
+                let why = match other {
+                    wgpu::CurrentSurfaceTexture::Outdated => "outdated",
+                    wgpu::CurrentSurfaceTexture::Lost => "lost",
+                    wgpu::CurrentSurfaceTexture::Occluded => "occluded",
+                    wgpu::CurrentSurfaceTexture::Timeout => "timeout",
+                    _ => "other",
+                };
+                if matches!(why, "outdated" | "lost") {
+                    gpu.surface.configure(gpu.renderer.device(), &gpu.config);
+                }
+                self.no_drawable = (self.no_drawable.0 + 1, why);
                 return None;
             }
-            _ => return None,
         };
         let view = frame.texture.create_view(&Default::default());
         let drawn = gpu.renderer.draw(&view);
+        let done = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
+        if timed && drawn {
+            let d = std::sync::Arc::clone(&done);
+            gpu.renderer.queue().on_submitted_work_done(move || {
+                d.store(
+                    crate::decode::now_us(),
+                    std::sync::atomic::Ordering::Relaxed,
+                );
+            });
+        }
         gpu.renderer.queue().present(frame);
-        drawn.then(|| started.elapsed())
+        let presented_us = crate::decode::now_us();
+        let cpu = started.elapsed();
+        let gpu_done_us = (timed && drawn)
+            .then(|| {
+                let _ = gpu
+                    .renderer
+                    .device()
+                    .poll(wgpu::PollType::wait_indefinitely());
+                done.load(std::sync::atomic::Ordering::Relaxed)
+            })
+            .filter(|&t| t > 0);
+        drawn.then_some(Drawn {
+            cpu,
+            gpu_done_us,
+            presented_us,
+        })
     }
 
     fn show(&mut self, el: &ActiveEventLoop, picture: Picture) {
@@ -169,17 +223,30 @@ impl App {
             return;
         }
         let upload = started.elapsed();
-        if let Some(draw) = self.present() {
-            self.stats.drawn(picture.decode, upload + draw);
+        if let Some(d) = self.present(self.timing) {
+            self.stats.drawn(picture.decode, upload + d.cpu);
+            if let Some(gpu_done_us) = d.gpu_done_us {
+                // Times only, never content (INV9).
+                eprintln!(
+                    "timing: capture_us={} received_us={} decoded_us={} drawn_us={gpu_done_us} presented_us={}",
+                    picture.capture_us, picture.received_us, picture.decoded_us, d.presented_us
+                );
+            }
         }
         self.report();
     }
 
     /// Once per second: title and one stderr line (R3).
     fn report(&mut self) {
-        let Some(line) = self.stats.line(self.counters.as_deref()) else {
+        let Some(mut line) = self.stats.line(self.counters.as_deref()) else {
             return;
         };
+        if self.no_drawable.0 > 0 {
+            line.push_str(&format!(
+                ", no drawable {} ({})",
+                self.no_drawable.0, self.no_drawable.1
+            ));
+        }
         eprintln!("stats: {line}");
         if let Some(w) = &self.window {
             w.set_title(&format!("Remora viewer — {line}"));
@@ -226,10 +293,10 @@ impl ApplicationHandler<Event> for App {
                     gpu.surface.configure(gpu.renderer.device(), &gpu.config);
                 }
                 // Redraws the current picture; not a new frame (P7).
-                let _ = self.present();
+                let _ = self.present(false);
             }
             WindowEvent::RedrawRequested => {
-                let _ = self.present();
+                let _ = self.present(false);
             }
             _ => {}
         }

@@ -79,6 +79,11 @@ struct ConnectArgs {
     /// decoder's counts are printed when the session ends.
     #[arg(long)]
     no_window: bool,
+    /// Print one `timing:` line per drawn frame on stderr: shared-clock
+    /// times of capture, arrival, decode, GPU draw done and present
+    /// (latency measurement, phase4-criteria P1/P2). Times only.
+    #[arg(long)]
+    timing: bool,
 }
 
 fn main() -> ExitCode {
@@ -132,7 +137,7 @@ fn connect_command(args: ConnectArgs) -> anyhow::Result<u8> {
         };
         return runtime().and_then(|rt| rt.block_on(run_connect(args, display)));
     }
-    window::run(move |proxy, close| {
+    window::run(args.timing, move |proxy, close| {
         let show_proxy = proxy.clone();
         let counters_proxy = proxy.clone();
         let display = Display {
@@ -152,7 +157,7 @@ fn connect_command(args: ConnectArgs) -> anyhow::Result<u8> {
 /// Other systems: no window or decoder yet (Phase 6.5).
 #[cfg(not(target_os = "macos"))]
 fn connect_command(args: ConnectArgs) -> anyhow::Result<u8> {
-    let _ = args.no_window; // there is no window here either way
+    let _ = (args.no_window, args.timing); // no window here either way
     let display = Display {
         show: decode::Show,
         on_counters: Box::new(|_| {}),
