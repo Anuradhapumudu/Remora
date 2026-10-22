@@ -1,0 +1,9 @@
+Phase 4 t2, 2026-10-23T02:40:35, commit 52873db
+T2: 5 display sleep / wake cycles in one session (the display goes off 5 times)
+cycle 1: paused 0.08 s after sleep, resumed 0.71 s after wake, first frame after resume a keyframe: True
+cycle 2: paused 0.09 s after sleep, resumed 0.70 s after wake, first frame after resume a keyframe: True
+cycle 3: paused 0.10 s after sleep, resumed 0.70 s after wake, first frame after resume a keyframe: True
+cycle 4: paused 0.08 s after sleep, resumed 0.72 s after wake, first frame after resume a keyframe: True
+cycle 5: paused 0.09 s after sleep, resumed 0.71 s after wake, first frame after resume a keyframe: True
+host memory 10.0 -> 10.0 MB; viewer video: 496 frames decoded, 0 refused, 1 waiting for a keyframe, 0 failed, 1 dropped
+==> T2: pause <= 1.0 s, resume <= 2.0 s, keyframe after every resume: yes; same session: yes; host memory +0.00 MB (limit <= 2.0) -> PASS

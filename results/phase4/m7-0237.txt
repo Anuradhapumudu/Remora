@@ -1,0 +1,11 @@
+Phase 4 m7, 2026-10-23T02:37:55, commit 52873db
+M7 memory after 500 frames: footprint 180.0 MB
+M7 memory after 1000 frames: footprint 180.0 MB
+M7 memory after 1500 frames: footprint 180.0 MB
+M7 memory after 2000 frames: footprint 180.0 MB
+M7 memory after 2500 frames: footprint 180.0 MB
+M7 memory after 3000 frames: footprint 180.0 MB
+M7 memory: footprint 180.0 -> 180.0 MB, IOSurfaces 0.0 -> 0.0 MB over 3000 hostile frames, DecodeStats { decoded: 275, refused: 1925, failed: 1100, sessions_created: 1100, sessions_alive: 0, pictures_alive: 0 }
+M7 memory: footprint just after vmmap 180.0 MB
+M7 memory limit: checked (+0.0 MB, limit +8 MB); live decoder sessions and pictures checked
+==> M7 memory limit: M7 memory limit: checked (+0.0 MB, limit +8 MB); live decoder sessions and pictures checked (test exit 0) -> PASS

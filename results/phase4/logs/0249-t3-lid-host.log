@@ -1,0 +1,468 @@
+WARNING: this device's identity keys are stored UNENCRYPTED in /Users/pumudu/Library/Application Support/Remora/host-identity.key - anyone who can read that file can impersonate this device. Development-stage storage, protected only by file permissions; Remora moves the keys to the OS keychain before v0.1.
+device: 8531 422 5411-5
+identity: 5fdd914063d13e8a1be65b852ab957a543eb7bcf7f86ab173d763e8a27506b85
+listening: 127.0.0.1:51593
+[redacted]
+[redacted]
+prompt 1: "Remora viewer" (device 0539 023 4826-0) safety code 399 767 - check it matches the viewer's screen, then type 'accept 1' or 'deny 1'
+note: the previous code and password were used up when that viewer proved the password - each works for ONE connection. Give the next viewer these new ones:
+[redacted]
+[redacted]
+streaming: Screen, H.264
+SESSION ACTIVE 1: a viewer is connected (type 'disconnect 1' to end it)
+captured: capture_us=131563599371
+timing: capture_us=131563599371 encoded_us=131563631821 sent_us=131563632000 bytes=85989 keyframe=true
+captured: capture_us=131563619427
+timing: capture_us=131563619427 encoded_us=131563637612 sent_us=131563637624 bytes=1163 keyframe=false
+captured: capture_us=131563652485
+timing: capture_us=131563652485 encoded_us=131563659340 sent_us=131563659351 bytes=1475 keyframe=false
+captured: capture_us=131563668990
+timing: capture_us=131563668990 encoded_us=131563675760 sent_us=131563675773 bytes=2353 keyframe=false
+captured: capture_us=131563685567
+timing: capture_us=131563685567 encoded_us=131563692293 sent_us=131563692329 bytes=9831 keyframe=false
+captured: capture_us=131563702239
+timing: capture_us=131563702239 encoded_us=131563708874 sent_us=131563708910 bytes=15921 keyframe=false
+captured: capture_us=131563718852
+timing: capture_us=131563718852 encoded_us=131563725528 sent_us=131563725543 bytes=2873 keyframe=false
+captured: capture_us=131563735425
+timing: capture_us=131563735425 encoded_us=131563742076 sent_us=131563742125 bytes=24626 keyframe=false
+captured: capture_us=131563752200
+timing: capture_us=131563752200 encoded_us=131563758812 sent_us=131563758819 bytes=1749 keyframe=false
+captured: capture_us=131563769080
+timing: capture_us=131563769080 encoded_us=131563775788 sent_us=131563775827 bytes=16585 keyframe=false
+captured: capture_us=131563786093
+timing: capture_us=131563786093 encoded_us=131563793618 sent_us=131563793645 bytes=3734 keyframe=false
+captured: capture_us=131563802759
+timing: capture_us=131563802759 encoded_us=131563810312 sent_us=131563810562 bytes=55902 keyframe=false
+captured: capture_us=131563819426
+timing: capture_us=131563819426 encoded_us=131563826952 sent_us=131563826965 bytes=971 keyframe=false
+captured: capture_us=131563836092
+timing: capture_us=131563836092 encoded_us=131563843536 sent_us=131563843555 bytes=1563 keyframe=false
+captured: capture_us=131563852759
+timing: capture_us=131563852759 encoded_us=131563860262 sent_us=131563860309 bytes=7582 keyframe=false
+captured: capture_us=131563869425
+timing: capture_us=131563869425 encoded_us=131563876934 sent_us=131563877031 bytes=18328 keyframe=false
+captured: capture_us=131563886092
+timing: capture_us=131563886092 encoded_us=131563893585 sent_us=131563893684 bytes=21267 keyframe=false
+captured: capture_us=131563902758
+timing: capture_us=131563902758 encoded_us=131563910286 sent_us=131563910306 bytes=1766 keyframe=false
+captured: capture_us=131563919425
+timing: capture_us=131563919425 encoded_us=131563926957 sent_us=131563927129 bytes=38706 keyframe=false
+captured: capture_us=131563936092
+timing: capture_us=131563936092 encoded_us=131563943579 sent_us=131563943597 bytes=1365 keyframe=false
+captured: capture_us=131563952758
+timing: capture_us=131563952758 encoded_us=131563960228 sent_us=131563960271 bytes=7623 keyframe=false
+captured: capture_us=131563969424
+timing: capture_us=131563969424 encoded_us=131563977007 sent_us=131563977133 bytes=28371 keyframe=false
+captured: capture_us=131563986092
+timing: capture_us=131563986092 encoded_us=131563993589 sent_us=131563993634 bytes=7311 keyframe=false
+captured: capture_us=131564002758
+timing: capture_us=131564002758 encoded_us=131564010305 sent_us=131564010424 bytes=26918 keyframe=false
+captured: capture_us=131564019424
+timing: capture_us=131564019424 encoded_us=131564026968 sent_us=131564026989 bytes=2413 keyframe=false
+captured: capture_us=131564036091
+timing: capture_us=131564036091 encoded_us=131564043597 sent_us=131564043644 bytes=8009 keyframe=false
+captured: capture_us=131564052757
+timing: capture_us=131564052757 encoded_us=131564060216 sent_us=131564060244 bytes=3411 keyframe=false
+captured: capture_us=131564069424
+timing: capture_us=131564069424 encoded_us=131564077085 sent_us=131564077110 bytes=2510 keyframe=false
+captured: capture_us=131564086091
+timing: capture_us=131564086091 encoded_us=131564093605 sent_us=131564093629 bytes=2380 keyframe=false
+captured: capture_us=131564102757
+timing: capture_us=131564102757 encoded_us=131564110255 sent_us=131564110278 bytes=3375 keyframe=false
+captured: capture_us=131564119423
+timing: capture_us=131564119423 encoded_us=131564126909 sent_us=131564126932 bytes=2553 keyframe=false
+captured: capture_us=131564136090
+timing: capture_us=131564136090 encoded_us=131564143603 sent_us=131564143624 bytes=2383 keyframe=false
+captured: capture_us=131564152757
+timing: capture_us=131564152757 encoded_us=131564160227 sent_us=131564160248 bytes=2395 keyframe=false
+captured: capture_us=131564169423
+timing: capture_us=131564169423 encoded_us=131564176917 sent_us=131564176939 bytes=2371 keyframe=false
+captured: capture_us=131564186090
+timing: capture_us=131564186090 encoded_us=131564193536 sent_us=131564193558 bytes=2379 keyframe=false
+captured: capture_us=131564202756
+timing: capture_us=131564202756 encoded_us=131564210262 sent_us=131564210284 bytes=2368 keyframe=false
+captured: capture_us=131564219423
+timing: capture_us=131564219423 encoded_us=131564226989 sent_us=131564227010 bytes=2337 keyframe=false
+captured: capture_us=131564236090
+timing: capture_us=131564236090 encoded_us=131564243623 sent_us=131564243644 bytes=2363 keyframe=false
+captured: capture_us=131564252756
+timing: capture_us=131564252756 encoded_us=131564260278 sent_us=131564260300 bytes=2366 keyframe=false
+captured: capture_us=131564269423
+timing: capture_us=131564269423 encoded_us=131564276956 sent_us=131564276977 bytes=2345 keyframe=false
+captured: capture_us=131564286089
+timing: capture_us=131564286089 encoded_us=131564293605 sent_us=131564293629 bytes=2340 keyframe=false
+captured: capture_us=131564302755
+timing: capture_us=131564302755 encoded_us=131564310275 sent_us=131564310298 bytes=2342 keyframe=false
+captured: capture_us=131564319422
+timing: capture_us=131564319422 encoded_us=131564326941 sent_us=131564326962 bytes=2328 keyframe=false
+captured: capture_us=131564336089
+timing: capture_us=131564336089 encoded_us=131564343722 sent_us=131564343749 bytes=2321 keyframe=false
+captured: capture_us=131564352756
+timing: capture_us=131564352756 encoded_us=131564360284 sent_us=131564360306 bytes=2320 keyframe=false
+captured: capture_us=131564369422
+timing: capture_us=131564369422 encoded_us=131564376964 sent_us=131564376985 bytes=2297 keyframe=false
+captured: capture_us=131564386088
+timing: capture_us=131564386088 encoded_us=131564393675 sent_us=131564393698 bytes=2301 keyframe=false
+captured: capture_us=131564402755
+timing: capture_us=131564402755 encoded_us=131564410300 sent_us=131564410322 bytes=2299 keyframe=false
+captured: capture_us=131564419421
+timing: capture_us=131564419421 encoded_us=131564426902 sent_us=131564426924 bytes=2249 keyframe=false
+captured: capture_us=131564442254
+timing: capture_us=131564442254 encoded_us=131564449117 sent_us=131564449141 bytes=2236 keyframe=false
+captured: capture_us=131564486088
+timing: capture_us=131564486088 encoded_us=131564493241 sent_us=131564493265 bytes=2240 keyframe=false
+captured: capture_us=131564535661
+timing: capture_us=131564535661 encoded_us=131564542643 sent_us=131564542667 bytes=2236 keyframe=false
+captured: capture_us=131564569420
+timing: capture_us=131564569420 encoded_us=131564576691 sent_us=131564576713 bytes=2238 keyframe=false
+captured: capture_us=131564619420
+timing: capture_us=131564619420 encoded_us=131564626988 sent_us=131564627008 bytes=2236 keyframe=false
+captured: capture_us=131564642009
+timing: capture_us=131564642009 encoded_us=131564648819 sent_us=131564648842 bytes=2236 keyframe=false
+captured: capture_us=131564702753
+timing: capture_us=131564702753 encoded_us=131564710158 sent_us=131564710183 bytes=2236 keyframe=false
+captured: capture_us=131564725413
+timing: capture_us=131564725413 encoded_us=131564732168 sent_us=131564732188 bytes=2235 keyframe=false
+captured: capture_us=131564786085
+timing: capture_us=131564786085 encoded_us=131564793560 sent_us=131564793582 bytes=2251 keyframe=false
+captured: capture_us=131564808740
+timing: capture_us=131564808740 encoded_us=131564815487 sent_us=131564815508 bytes=2254 keyframe=false
+captured: capture_us=131564860529
+timing: capture_us=131564860529 encoded_us=131564867439 sent_us=131564867463 bytes=2249 keyframe=false
+captured: capture_us=131564902751
+timing: capture_us=131564902751 encoded_us=131564909814 sent_us=131564909836 bytes=2331 keyframe=false
+captured: capture_us=131564919418
+timing: capture_us=131564919418 encoded_us=131564926857 sent_us=131564926880 bytes=2331 keyframe=false
+captured: capture_us=131564942533
+timing: capture_us=131564942533 encoded_us=131564949262 sent_us=131564949289 bytes=3037 keyframe=false
+captured: capture_us=131564959852
+timing: capture_us=131564959852 encoded_us=131564966837 sent_us=131564966858 bytes=2439 keyframe=false
+captured: capture_us=131564976533
+timing: capture_us=131564976533 encoded_us=131564983499 sent_us=131564983522 bytes=3113 keyframe=false
+capture paused (DisplayUnavailable) - viewers are told
+capture paused - Display removed. Waiting, 120 s left. (viewers are told)
+Display removed. Waiting, 113 s left.
+Display removed. Waiting, 103 s left.
+Display removed. Waiting, 93 s left.
+Display removed. Waiting, 83 s left.
+Display removed. Waiting, 73 s left.
+Display removed. Waiting, 63 s left.
+Display removed. Waiting, 53 s left.
+Display removed. Waiting, 43 s left.
+Display removed. Waiting, 33 s left.
+Display removed. Waiting, 23 s left.
+Display removed. Waiting, 13 s left.
+Display removed. Waiting, 3 s left.
+capture paused (DisplayUnavailable) - viewers are told
+capture resumed
+captured: capture_us=131684023221
+timing: capture_us=131684023221 encoded_us=131684031066 sent_us=131684031230 bytes=83714 keyframe=true
+captured: capture_us=131684037875
+timing: capture_us=131684037875 encoded_us=131684046698 sent_us=131684046714 bytes=890 keyframe=false
+captured: capture_us=131684054255
+timing: capture_us=131684054255 encoded_us=131684062932 sent_us=131684062961 bytes=3868 keyframe=false
+captured: capture_us=131684071427
+timing: capture_us=131684071427 encoded_us=131684080158 sent_us=131684080305 bytes=34755 keyframe=false
+captured: capture_us=131684088066
+timing: capture_us=131684088066 encoded_us=131684096672 sent_us=131684096726 bytes=9556 keyframe=false
+captured: capture_us=131684104815
+timing: capture_us=131684104815 encoded_us=131684113291 sent_us=131684113325 bytes=5453 keyframe=false
+captured: capture_us=131684121445
+timing: capture_us=131684121445 encoded_us=131684130047 sent_us=131684130091 bytes=7742 keyframe=false
+captured: capture_us=131684138820
+timing: capture_us=131684138820 encoded_us=131684147388 sent_us=131684147455 bytes=13818 keyframe=false
+captured: capture_us=131684155700
+timing: capture_us=131684155700 encoded_us=131684164276 sent_us=131684164294 bytes=1185 keyframe=false
+captured: capture_us=131684172625
+timing: capture_us=131684172625 encoded_us=131684181186 sent_us=131684181274 bytes=19688 keyframe=false
+captured: capture_us=131684189614
+timing: capture_us=131684189614 encoded_us=131684198155 sent_us=131684198174 bytes=1484 keyframe=false
+captured: capture_us=131684206845
+timing: capture_us=131684206845 encoded_us=131684215349 sent_us=131684215555 bytes=45379 keyframe=false
+captured: capture_us=131684224060
+timing: capture_us=131684224060 encoded_us=131684232526 sent_us=131684232544 bytes=1589 keyframe=false
+captured: capture_us=131684241417
+timing: capture_us=131684241417 encoded_us=131684250016 sent_us=131684250059 bytes=7595 keyframe=false
+captured: capture_us=131684257907
+timing: capture_us=131684257907 encoded_us=131684266539 sent_us=131684266670 bytes=30873 keyframe=false
+captured: capture_us=131684275297
+timing: capture_us=131684275297 encoded_us=131684283860 sent_us=131684283880 bytes=2115 keyframe=false
+captured: capture_us=131684292376
+timing: capture_us=131684292376 encoded_us=131684301019 sent_us=131684301140 bytes=28059 keyframe=false
+captured: capture_us=131684309503
+timing: capture_us=131684309503 encoded_us=131684318024 sent_us=131684318045 bytes=1837 keyframe=false
+captured: capture_us=131684326846
+timing: capture_us=131684326846 encoded_us=131684335517 sent_us=131684335618 bytes=21164 keyframe=false
+captured: capture_us=131684344290
+timing: capture_us=131684344290 encoded_us=131684352884 sent_us=131684352906 bytes=2615 keyframe=false
+captured: capture_us=131684360980
+timing: capture_us=131684360980 encoded_us=131684369595 sent_us=131684369723 bytes=28603 keyframe=false
+captured: capture_us=131684377858
+timing: capture_us=131684377858 encoded_us=131684386398 sent_us=131684386421 bytes=2186 keyframe=false
+captured: capture_us=131684394523
+timing: capture_us=131684394523 encoded_us=131684403154 sent_us=131684403286 bytes=27812 keyframe=false
+captured: capture_us=131684411340
+timing: capture_us=131684411340 encoded_us=131684419883 sent_us=131684419913 bytes=3490 keyframe=false
+captured: capture_us=131684427748
+timing: capture_us=131684427748 encoded_us=131684436325 sent_us=131684436370 bytes=6567 keyframe=false
+captured: capture_us=131684444575
+timing: capture_us=131684444575 encoded_us=131684453069 sent_us=131684453097 bytes=4078 keyframe=false
+captured: capture_us=131684461166
+timing: capture_us=131684461166 encoded_us=131684469729 sent_us=131684469749 bytes=2327 keyframe=false
+captured: capture_us=131684477972
+timing: capture_us=131684477972 encoded_us=131684486471 sent_us=131684486503 bytes=4234 keyframe=false
+captured: capture_us=131684494369
+timing: capture_us=131684494369 encoded_us=131684502992 sent_us=131684503014 bytes=1979 keyframe=false
+captured: capture_us=131684510833
+timing: capture_us=131684510833 encoded_us=131684519470 sent_us=131684519490 bytes=1796 keyframe=false
+captured: capture_us=131684528312
+timing: capture_us=131684528312 encoded_us=131684536985 sent_us=131684537009 bytes=2885 keyframe=false
+captured: capture_us=131684545479
+timing: capture_us=131684545479 encoded_us=131684554124 sent_us=131684554142 bytes=1848 keyframe=false
+captured: capture_us=131684562422
+timing: capture_us=131684562422 encoded_us=131684571035 sent_us=131684571057 bytes=2705 keyframe=false
+captured: capture_us=131684579669
+timing: capture_us=131684579669 encoded_us=131684588358 sent_us=131684588377 bytes=1903 keyframe=false
+captured: capture_us=131684596152
+timing: capture_us=131684596152 encoded_us=131684604837 sent_us=131684604856 bytes=1802 keyframe=false
+captured: capture_us=131684613210
+timing: capture_us=131684613210 encoded_us=131684621880 sent_us=131684621902 bytes=2611 keyframe=false
+captured: capture_us=131684629854
+timing: capture_us=131684629854 encoded_us=131684638488 sent_us=131684638507 bytes=1870 keyframe=false
+captured: capture_us=131684646690
+timing: capture_us=131684646690 encoded_us=131684655364 sent_us=131684655387 bytes=2348 keyframe=false
+captured: capture_us=131684663105
+timing: capture_us=131684663105 encoded_us=131684671789 sent_us=131684671808 bytes=1806 keyframe=false
+captured: capture_us=131684679673
+timing: capture_us=131684679673 encoded_us=131684688347 sent_us=131684688366 bytes=1760 keyframe=false
+captured: capture_us=131684696221
+timing: capture_us=131684696221 encoded_us=131684704881 sent_us=131684704900 bytes=2136 keyframe=false
+captured: capture_us=131684713137
+timing: capture_us=131684713137 encoded_us=131684722033 sent_us=131684722051 bytes=1791 keyframe=false
+captured: capture_us=131684730474
+timing: capture_us=131684730474 encoded_us=131684739326 sent_us=131684739348 bytes=2018 keyframe=false
+captured: capture_us=131684747141
+timing: capture_us=131684747141 encoded_us=131684756290 sent_us=131684756307 bytes=1780 keyframe=false
+captured: capture_us=131684763808
+timing: capture_us=131684763808 encoded_us=131684773091 sent_us=131684773109 bytes=1736 keyframe=false
+captured: capture_us=131684780474
+timing: capture_us=131684780474 encoded_us=131684789749 sent_us=131684789768 bytes=1816 keyframe=false
+captured: capture_us=131684797141
+timing: capture_us=131684797141 encoded_us=131684806389 sent_us=131684806406 bytes=1726 keyframe=false
+captured: capture_us=131684813807
+timing: capture_us=131684813807 encoded_us=131684823081 sent_us=131684823101 bytes=1784 keyframe=false
+captured: capture_us=131684830474
+timing: capture_us=131684830474 encoded_us=131684839758 sent_us=131684839777 bytes=1711 keyframe=false
+captured: capture_us=131684847141
+timing: capture_us=131684847141 encoded_us=131684856436 sent_us=131684856454 bytes=1639 keyframe=false
+captured: capture_us=131684863807
+timing: capture_us=131684863807 encoded_us=131684873009 sent_us=131684873035 bytes=2339 keyframe=false
+captured: capture_us=131684884208
+timing: capture_us=131684884208 encoded_us=131684892709 sent_us=131684892730 bytes=1716 keyframe=false
+captured: capture_us=131684946938
+timing: capture_us=131684946938 encoded_us=131684955647 sent_us=131684955666 bytes=1648 keyframe=false
+captured: capture_us=131684980044
+timing: capture_us=131684980044 encoded_us=131684988959 sent_us=131684988980 bytes=2361 keyframe=false
+captured: capture_us=131685017458
+timing: capture_us=131685017458 encoded_us=131685025914 sent_us=131685025935 bytes=2343 keyframe=false
+captured: capture_us=131685063476
+timing: capture_us=131685063476 encoded_us=131685072205 sent_us=131685072232 bytes=2761 keyframe=false
+captured: capture_us=131685113805
+timing: capture_us=131685113805 encoded_us=131685122581 sent_us=131685122614 bytes=4719 keyframe=false
+captured: capture_us=131685134099
+timing: capture_us=131685134099 encoded_us=131685142760 sent_us=131685142785 bytes=2764 keyframe=false
+captured: capture_us=131685197138
+timing: capture_us=131685197138 encoded_us=131685206211 sent_us=131685206233 bytes=2399 keyframe=false
+captured: capture_us=131685217435
+timing: capture_us=131685217435 encoded_us=131685225952 sent_us=131685225977 bytes=2239 keyframe=false
+captured: capture_us=131685280471
+timing: capture_us=131685280471 encoded_us=131685289400 sent_us=131685289420 bytes=2115 keyframe=false
+captured: capture_us=131685300804
+timing: capture_us=131685300804 encoded_us=131685309414 sent_us=131685309435 bytes=1909 keyframe=false
+captured: capture_us=131685363600
+timing: capture_us=131685363600 encoded_us=131685372299 sent_us=131685372319 bytes=2262 keyframe=false
+captured: capture_us=131685397073
+timing: capture_us=131685397073 encoded_us=131685405773 sent_us=131685405793 bytes=2041 keyframe=false
+captured: capture_us=131685447137
+timing: capture_us=131685447137 encoded_us=131685455908 sent_us=131685455933 bytes=2709 keyframe=false
+captured: capture_us=131685467152
+timing: capture_us=131685467152 encoded_us=131685475669 sent_us=131685475692 bytes=2683 keyframe=false
+captured: capture_us=131685530470
+timing: capture_us=131685530470 encoded_us=131685539662 sent_us=131685539690 bytes=3791 keyframe=false
+captured: capture_us=131685550583
+timing: capture_us=131685550583 encoded_us=131685559244 sent_us=131685559267 bytes=2651 keyframe=false
+captured: capture_us=131685613802
+timing: capture_us=131685613802 encoded_us=131685622903 sent_us=131685622925 bytes=2365 keyframe=false
+captured: capture_us=131685633839
+timing: capture_us=131685633839 encoded_us=131685642358 sent_us=131685642379 bytes=2318 keyframe=false
+captured: capture_us=131685696878
+timing: capture_us=131685696878 encoded_us=131685705558 sent_us=131685705583 bytes=2648 keyframe=false
+captured: capture_us=131685730130
+timing: capture_us=131685730130 encoded_us=131685738826 sent_us=131685738856 bytes=4050 keyframe=false
+captured: capture_us=131685780468
+timing: capture_us=131685780468 encoded_us=131685789209 sent_us=131685789233 bytes=3075 keyframe=false
+captured: capture_us=131685800555
+timing: capture_us=131685800555 encoded_us=131685809059 sent_us=131685809081 bytes=2271 keyframe=false
+captured: capture_us=131685863800
+timing: capture_us=131685863800 encoded_us=131685872629 sent_us=131685872657 bytes=3582 keyframe=false
+captured: capture_us=131685883881
+timing: capture_us=131685883881 encoded_us=131685892343 sent_us=131685892373 bytes=3630 keyframe=false
+captured: capture_us=131685933855
+timing: capture_us=131685933855 encoded_us=131685942311 sent_us=131685942335 bytes=2593 keyframe=false
+captured: capture_us=131685980466
+timing: capture_us=131685980466 encoded_us=131685989303 sent_us=131685989334 bytes=2817 keyframe=false
+captured: capture_us=131686030466
+timing: capture_us=131686030466 encoded_us=131686039793 sent_us=131686039819 bytes=1775 keyframe=false
+captured: capture_us=131686051003
+timing: capture_us=131686051003 encoded_us=131686059641 sent_us=131686059672 bytes=4260 keyframe=false
+captured: capture_us=131686097132
+timing: capture_us=131686097132 encoded_us=131686106535 sent_us=131686106556 bytes=2230 keyframe=false
+captured: capture_us=131686113799
+timing: capture_us=131686113799 encoded_us=131686122985 sent_us=131686123006 bytes=2344 keyframe=false
+captured: capture_us=131686133841
+timing: capture_us=131686133841 encoded_us=131686142391 sent_us=131686142425 bytes=4469 keyframe=false
+captured: capture_us=131686197098
+timing: capture_us=131686197098 encoded_us=131686205831 sent_us=131686205853 bytes=1895 keyframe=false
+captured: capture_us=131686217167
+timing: capture_us=131686217167 encoded_us=131686225591 sent_us=131686225622 bytes=4165 keyframe=false
+captured: capture_us=131686279979
+timing: capture_us=131686279979 encoded_us=131686288780 sent_us=131686288800 bytes=1900 keyframe=false
+captured: capture_us=131686313798
+timing: capture_us=131686313798 encoded_us=131686322543 sent_us=131686322573 bytes=4254 keyframe=false
+captured: capture_us=131686363748
+timing: capture_us=131686363748 encoded_us=131686372430 sent_us=131686372449 bytes=1867 keyframe=false
+captured: capture_us=131686383852
+timing: capture_us=131686383852 encoded_us=131686392345 sent_us=131686392378 bytes=4473 keyframe=false
+captured: capture_us=131686447130
+timing: capture_us=131686447130 encoded_us=131686456279 sent_us=131686456298 bytes=1894 keyframe=false
+captured: capture_us=131686467148
+timing: capture_us=131686467148 encoded_us=131686475573 sent_us=131686475605 bytes=4496 keyframe=false
+captured: capture_us=131686530463
+timing: capture_us=131686530463 encoded_us=131686539240 sent_us=131686539262 bytes=1943 keyframe=false
+captured: capture_us=131686550769
+timing: capture_us=131686550769 encoded_us=131686559235 sent_us=131686559267 bytes=4313 keyframe=false
+captured: capture_us=131686600581
+timing: capture_us=131686600581 encoded_us=131686609088 sent_us=131686609107 bytes=1945 keyframe=false
+captured: capture_us=131686647129
+timing: capture_us=131686647129 encoded_us=131686656208 sent_us=131686656238 bytes=4255 keyframe=false
+captured: capture_us=131686697089
+timing: capture_us=131686697089 encoded_us=131686705775 sent_us=131686705803 bytes=3376 keyframe=false
+captured: capture_us=131686717135
+timing: capture_us=131686717135 encoded_us=131686725595 sent_us=131686725620 bytes=3120 keyframe=false
+captured: capture_us=131686780461
+timing: capture_us=131686780461 encoded_us=131686789327 sent_us=131686789354 bytes=2813 keyframe=false
+captured: capture_us=131686800448
+timing: capture_us=131686800448 encoded_us=131686808927 sent_us=131686808951 bytes=2710 keyframe=false
+captured: capture_us=131686863794
+timing: capture_us=131686863794 encoded_us=131686872714 sent_us=131686872741 bytes=2834 keyframe=false
+captured: capture_us=131686883748
+timing: capture_us=131686883748 encoded_us=131686892259 sent_us=131686892290 bytes=2856 keyframe=false
+captured: capture_us=131686947077
+timing: capture_us=131686947077 encoded_us=131686955811 sent_us=131686955836 bytes=2770 keyframe=false
+captured: capture_us=131686967093
+timing: capture_us=131686967093 encoded_us=131686975535 sent_us=131686975560 bytes=2783 keyframe=false
+captured: capture_us=131687029979
+timing: capture_us=131687029979 encoded_us=131687038726 sent_us=131687038750 bytes=2515 keyframe=false
+captured: capture_us=131687063793
+timing: capture_us=131687063793 encoded_us=131687074127 sent_us=131687074153 bytes=2695 keyframe=false
+captured: capture_us=131687113792
+timing: capture_us=131687113792 encoded_us=131687122740 sent_us=131687122764 bytes=2576 keyframe=false
+captured: capture_us=131687133877
+timing: capture_us=131687133877 encoded_us=131687142366 sent_us=131687142389 bytes=2317 keyframe=false
+captured: capture_us=131687184366
+timing: capture_us=131687184366 encoded_us=131687192994 sent_us=131687193018 bytes=2712 keyframe=false
+captured: capture_us=131687230458
+timing: capture_us=131687230458 encoded_us=131687239488 sent_us=131687239512 bytes=2575 keyframe=false
+captured: capture_us=131687280430
+timing: capture_us=131687280430 encoded_us=131687289195 sent_us=131687289219 bytes=2617 keyframe=false
+captured: capture_us=131687300538
+timing: capture_us=131687300538 encoded_us=131687309158 sent_us=131687309181 bytes=2291 keyframe=false
+captured: capture_us=131687363790
+timing: capture_us=131687363790 encoded_us=131687372697 sent_us=131687372719 bytes=2479 keyframe=false
+captured: capture_us=131687383751
+timing: capture_us=131687383751 encoded_us=131687392206 sent_us=131687392227 bytes=2354 keyframe=false
+captured: capture_us=131687447123
+timing: capture_us=131687447123 encoded_us=131687455882 sent_us=131687455906 bytes=2548 keyframe=false
+captured: capture_us=131687467063
+timing: capture_us=131687467063 encoded_us=131687475476 sent_us=131687475499 bytes=2560 keyframe=false
+captured: capture_us=131687530425
+timing: capture_us=131687530425 encoded_us=131687539079 sent_us=131687539106 bytes=2892 keyframe=false
+captured: capture_us=131687550541
+timing: capture_us=131687550541 encoded_us=131687559144 sent_us=131687559168 bytes=2946 keyframe=false
+captured: capture_us=131687600459
+timing: capture_us=131687600459 encoded_us=131687608886 sent_us=131687608910 bytes=2510 keyframe=false
+captured: capture_us=131687647034
+timing: capture_us=131687647034 encoded_us=131687655779 sent_us=131687655800 bytes=1817 keyframe=false
+captured: capture_us=131687697122
+timing: capture_us=131687697122 encoded_us=131687706241 sent_us=131687706270 bytes=3364 keyframe=false
+captured: capture_us=131687717188
+timing: capture_us=131687717188 encoded_us=131687725829 sent_us=131687725849 bytes=1868 keyframe=false
+captured: capture_us=131687736486
+timing: capture_us=131687736486 encoded_us=131687744920 sent_us=131687744940 bytes=1838 keyframe=false
+captured: capture_us=131687780455
+timing: capture_us=131687780455 encoded_us=131687789480 sent_us=131687789506 bytes=2620 keyframe=false
+captured: capture_us=131687800916
+timing: capture_us=131687800916 encoded_us=131687809569 sent_us=131687809588 bytes=1812 keyframe=false
+captured: capture_us=131687850838
+timing: capture_us=131687850838 encoded_us=131687859424 sent_us=131687859449 bytes=2738 keyframe=false
+captured: capture_us=131687897111
+timing: capture_us=131687897111 encoded_us=131687905773 sent_us=131687905793 bytes=2003 keyframe=false
+captured: capture_us=131687947120
+timing: capture_us=131687947120 encoded_us=131687956077 sent_us=131687956104 bytes=3033 keyframe=false
+captured: capture_us=131687967217
+timing: capture_us=131687967217 encoded_us=131687975707 sent_us=131687975734 bytes=2136 keyframe=false
+captured: capture_us=131688030453
+timing: capture_us=131688030453 encoded_us=131688039579 sent_us=131688039608 bytes=3354 keyframe=false
+captured: capture_us=131688050463
+timing: capture_us=131688050463 encoded_us=131688058894 sent_us=131688058921 bytes=2887 keyframe=false
+captured: capture_us=131688097119
+timing: capture_us=131688097119 encoded_us=131688106374 sent_us=131688106397 bytes=2196 keyframe=false
+captured: capture_us=131688113786
+timing: capture_us=131688113786 encoded_us=131688122919 sent_us=131688122942 bytes=3223 keyframe=false
+captured: capture_us=131688133928
+timing: capture_us=131688133928 encoded_us=131688142356 sent_us=131688142381 bytes=2866 keyframe=false
+captured: capture_us=131688197118
+timing: capture_us=131688197118 encoded_us=131688206267 sent_us=131688206295 bytes=3734 keyframe=false
+captured: capture_us=131688217174
+timing: capture_us=131688217174 encoded_us=131688225645 sent_us=131688225670 bytes=3316 keyframe=false
+captured: capture_us=131688280451
+timing: capture_us=131688280451 encoded_us=131688289233 sent_us=131688289262 bytes=4292 keyframe=false
+captured: capture_us=131688300541
+timing: capture_us=131688300541 encoded_us=131688309034 sent_us=131688309064 bytes=3943 keyframe=false
+captured: capture_us=131688363784
+timing: capture_us=131688363784 encoded_us=131688372589 sent_us=131688372619 bytes=4047 keyframe=false
+captured: capture_us=131688383846
+timing: capture_us=131688383846 encoded_us=131688392330 sent_us=131688392356 bytes=3387 keyframe=false
+captured: capture_us=131688446950
+timing: capture_us=131688446950 encoded_us=131688455629 sent_us=131688455658 bytes=3061 keyframe=false
+captured: capture_us=131688480450
+timing: capture_us=131688480450 encoded_us=131688489182 sent_us=131688489207 bytes=2555 keyframe=false
+captured: capture_us=131688530449
+timing: capture_us=131688530449 encoded_us=131688539464 sent_us=131688539490 bytes=2646 keyframe=false
+captured: capture_us=131688550667
+timing: capture_us=131688550667 encoded_us=131688559289 sent_us=131688559311 bytes=2356 keyframe=false
+captured: capture_us=131688613341
+timing: capture_us=131688613341 encoded_us=131688622002 sent_us=131688622024 bytes=2144 keyframe=false
+captured: capture_us=131688647115
+timing: capture_us=131688647115 encoded_us=131688655830 sent_us=131688655852 bytes=2007 keyframe=false
+captured: capture_us=131688696906
+timing: capture_us=131688696906 encoded_us=131688705779 sent_us=131688705803 bytes=2040 keyframe=false
+captured: capture_us=131688730448
+timing: capture_us=131688730448 encoded_us=131688739667 sent_us=131688739690 bytes=1938 keyframe=false
+captured: capture_us=131688780448
+timing: capture_us=131688780448 encoded_us=131688789604 sent_us=131688789623 bytes=1935 keyframe=false
+captured: capture_us=131688800568
+timing: capture_us=131688800568 encoded_us=131688809048 sent_us=131688809068 bytes=1750 keyframe=false
+captured: capture_us=131688851001
+timing: capture_us=131688851001 encoded_us=131688859787 sent_us=131688859809 bytes=1736 keyframe=false
+captured: capture_us=131688897104
+timing: capture_us=131688897104 encoded_us=131688905795 sent_us=131688905817 bytes=1735 keyframe=false
+captured: capture_us=131688947113
+timing: capture_us=131688947113 encoded_us=131688956109 sent_us=131688956134 bytes=1728 keyframe=false
+captured: capture_us=131688967687
+timing: capture_us=131688967687 encoded_us=131688976454 sent_us=131688976479 bytes=1729 keyframe=false
+captured: capture_us=131689017642
+timing: capture_us=131689017642 encoded_us=131689026402 sent_us=131689026426 bytes=1729 keyframe=false
+streaming stopped
+session ended 1 (Normal)

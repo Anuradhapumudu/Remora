@@ -159,6 +159,7 @@ job checks the table's shape and that no gate disappears.
 | # | Gate (owner's words) | Set | Blocks | Status |
 |---|---|---|---|---|
 | G-1 | "I'll run the two-terminal walkthrough myself (including the wrong-password, deny, trusted-mode and wrong-device steps in §10.7) and confirm before you begin Phase 4 work" (2026-10-19); "Stop and hold at the end of step 3 … will send results before step 4 starts" (2026-10-20) | 2026-10-19 | Phase 4 step 4 onward | MET 2026-10-21 — owner ran every step in their own two terminals and sent screenshots: accept, wrong password, deny (2026-10-20); trusted mode across a restart and wrong device (2026-10-21), the latter `identity mismatch`, exit 3, no host prompt. Results row by row in phase3-criteria §10.8. Findings fixed on the way: F-L1 (30 s idle disconnect), F-UX5, F-UX6 |
+| G-2 | "Yes to the T3 sleep run, but not tonight. I'll do it at the start of my next session at the Mac. It must be done before the phase report is final. Before I run it, write down the expected result: what the viewer shows after 30–35 s (D37), and what should happen when I open the lid: reconnect, or a clear 'session ended' message. Then we compare the run against that." | 2026-10-23 | The Phase 4 report being final | OPEN |
 
 ## Process slips (recorded so the list above stays trustworthy)
 

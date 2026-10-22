@@ -1,0 +1,14 @@
+Phase 4 p8, 2026-10-23T02:05:54, commit b41a386
+
+--- P8 run 1/3: bench-capture, 60 s ---
+capture 60.0 fps; C12 p50 7.51 ms (Phase 2: 7.05 and 9.0 ms), p95 7.64 ms
+==> P8 run 1: C12 p95 7.64 ms, p50 7.51 ms (limit p95 <= 11.0) -> PASS
+
+--- P8 run 2/3: bench-capture, 60 s ---
+capture 60.0 fps; C12 p50 7.50 ms (Phase 2: 7.05 and 9.0 ms), p95 7.61 ms
+==> P8 run 2: C12 p95 7.61 ms, p50 7.50 ms (limit p95 <= 11.0) -> PASS
+
+--- P8 run 3/3: bench-capture, 60 s ---
+capture 60.0 fps; C12 p50 7.49 ms (Phase 2: 7.05 and 9.0 ms), p95 7.61 ms
+==> P8 run 3: C12 p95 7.61 ms, p50 7.49 ms (limit p95 <= 11.0) -> PASS
+==> P8 worst run: C12 p95 7.64 ms -> PASS

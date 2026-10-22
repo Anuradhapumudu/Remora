@@ -1,0 +1,7 @@
+WARNING: this device's identity keys are stored UNENCRYPTED in /Users/pumudu/Library/Application Support/Remora/viewer-identity.key - anyone who can read that file can impersonate this device. Development-stage storage, protected only by file permissions; Remora moves the keys to the OS keychain before v0.1.
+connecting to 127.0.0.1:58359 (host device 8531 422 5411-5)
+safety code: 289 042 - compare it with the host's screen (host "Remora host", device 8531 422 5411-5)
+waiting for the person at the host to accept or deny (nothing to type here)
+SESSION ACTIVE
+session ended
+video: 176 frames decoded, 0 refused, 1 waiting for a keyframe, 0 failed, 3 dropped
