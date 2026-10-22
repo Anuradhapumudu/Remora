@@ -9,6 +9,7 @@ anything is written). The Mac is kept awake (caffeinate) while a step runs.
   scripts/macos/phase4-session.py check      # preflight: power, build, permission
   scripts/macos/phase4-session.py p1         # P1-P4: 3 x (10 s warm-up + 60 s), motion page
   scripts/macos/phase4-session.py p5         # P5: viewer memory, 10 min, motion page
+  scripts/macos/phase4-session.py p5 --covered  # P5 with the window covered (leak guard)
   scripts/macos/phase4-session.py p6         # P6: host CPU, still screen, 60 s
   scripts/macos/phase4-session.py p8         # P8: Phase 2 bench-capture, 3 x 60 s, motion page
   scripts/macos/phase4-session.py m7         # M7: decoder memory limit on this real Mac
@@ -463,9 +464,21 @@ def step_p1(a, rep):
 
 def step_p5(a, rep):
     build()
-    rep.say(f"P5: viewer memory over {a.minutes} min, sampled every 10 s")
-    print("   CLICK the viewer window when it opens, then leave the Mac alone", flush=True)
-    host, viewer, n = start_session("screen", window=True)
+    if a.covered:
+        # The regression guard for the covered-window leak (b996e04): the
+        # window gets every picture but can never draw. Synthetic source:
+        # with the window covered nothing on screen moves, so the real
+        # screen would send almost no frames and nothing could pile up.
+        rep.say(f"P5 covered: viewer memory over {a.minutes} min with the window covered"
+                " (synthetic picture, 60 fps), sampled every 10 s")
+        print("   when the viewer window opens: click Terminal, then Option-click Terminal's"
+              " green button so it fills the screen and covers the viewer window."
+              " Leave the Mac alone", flush=True)
+        host, viewer, n = start_session("synthetic", window=True)
+    else:
+        rep.say(f"P5: viewer memory over {a.minutes} min, sampled every 10 s")
+        print("   CLICK the viewer window when it opens, then leave the Mac alone", flush=True)
+        host, viewer, n = start_session("screen", window=True)
     start, samples = time.time(), []
     while time.time() - start < a.minutes * 60:
         time.sleep(10)
@@ -486,9 +499,22 @@ def step_p5(a, rep):
     first = next((mb for m, mb in samples if m >= 1), float("nan"))
     last = after1[-1][1] if after1 else float("nan")
     s = slope(after1)
-    rep.verdict("P5", peak < P5_MAX_MB and last - first <= P5_GROWTH_MB and s <= P5_SLOPE_MB_MIN,
+    valid = True
+    if a.covered:
+        # Counts only if the window really could not draw: stats lines
+        # after the first minute that still drew frames mean it was not
+        # covered (the stats line prints every second either way).
+        stats = [(t, l) for t, l in viewer.snapshot() if l.startswith("stats: ")]
+        late = [l for t, l in stats if t >= start + 60]
+        drawing = [l for l in late if not l.startswith("stats: 0 fps")]
+        rep.say(f"covered check: {len(drawing)} of {len(late)} stats lines after minute 1 drew frames")
+        valid = bool(late) and len(drawing) <= 0.05 * len(late)
+        if not valid:
+            rep.say("   the viewer window was drawing, so it was not covered: this run does not count")
+    rep.verdict("P5 covered" if a.covered else "P5",
+                peak < P5_MAX_MB and last - first <= P5_GROWTH_MB and s <= P5_SLOPE_MB_MIN,
                 f"peak {peak:.1f} MB (limit < {P5_MAX_MB}), growth min 1 -> end {last - first:+.2f} MB "
-                f"(limit <= {P5_GROWTH_MB}), slope {s:+.3f} MB/min (limit <= {P5_SLOPE_MB_MIN})")
+                f"(limit <= {P5_GROWTH_MB}), slope {s:+.3f} MB/min (limit <= {P5_SLOPE_MB_MIN})", valid)
 
 
 def step_p6(a, rep):
@@ -710,6 +736,8 @@ def main():
     ap.add_argument("--warmup", type=int, default=10, help="p1: seconds before measuring")
     ap.add_argument("--runs", type=int, default=3, help="p1: number of runs")
     ap.add_argument("--minutes", type=int, default=10, help="p5: duration")
+    ap.add_argument("--covered", action="store_true",
+                    help="p5: the viewer window stays covered (regression guard, synthetic picture)")
     ap.add_argument("--mac-sleeps", action="store_true",
                     help="t3-lid: do not prevent system sleep, so closing the lid sleeps the Mac")
     a = ap.parse_args()
@@ -722,7 +750,7 @@ def main():
         flags = "-di" if a.mac_sleeps else "-dims"
         os.execvp("caffeinate", ["caffeinate", flags, sys.executable, *sys.argv])
     name = a.step if a.source == "screen" else f"{a.step}-{a.source}"
-    rep = Report(name + ("-mac-sleeps" if a.mac_sleeps else ""))
+    rep = Report(name + ("-mac-sleeps" if a.mac_sleeps else "") + ("-covered" if a.covered else ""))
     rep.say(f"Phase 4 {a.step}, {datetime.datetime.now().isoformat(timespec='seconds')}, "
             f"commit {subprocess.run(['git', 'rev-parse', '--short', 'HEAD'], capture_output=True, text=True, cwd=ROOT).stdout.strip()}")
     try:
