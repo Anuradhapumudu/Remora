@@ -69,18 +69,18 @@ pub struct GoneTimer {
 impl GoneTimer {
     /// A timer that expires after the display was missing for `limit`.
     pub fn new(limit: Duration) -> Self {
-        let _ = limit;
-        Self {
-            limit: Duration::ZERO,
-            since: None,
-        }
+        Self { limit, since: None }
     }
 
     /// One retry's observation at `now`: is the display listed? Returns
     /// `true` once it has been missing for the limit: capture must stop.
     pub fn expired(&mut self, listed: bool, now: Instant) -> bool {
-        let _ = (listed, now, self.limit, self.since);
-        false
+        if listed {
+            self.since = None;
+            return false;
+        }
+        let since = *self.since.get_or_insert(now);
+        now.saturating_duration_since(since) >= self.limit
     }
 }
 

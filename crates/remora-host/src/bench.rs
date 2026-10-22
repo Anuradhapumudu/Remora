@@ -696,7 +696,11 @@ fn report(
 /// display and prints one line per second (frames) and one per capture event
 /// (`Interrupted` / `Resumed` / `Stopped`), each with the Unix time in
 /// milliseconds, so display sleep / wake can be timed against it.
-pub(crate) fn watch_capture(seconds: u64) -> Result<()> {
+pub(crate) fn watch_capture(
+    seconds: u64,
+    display_id: Option<u32>,
+    gone_limit: Option<u64>,
+) -> Result<()> {
     let unix_ms = || {
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -710,7 +714,11 @@ pub(crate) fn watch_capture(seconds: u64) -> Result<()> {
             |b| format!("mem {:.1} MB", b as f64 / 1e6),
         )
     };
-    let mut capture = MacScreenCapture::main_display(CaptureConfig::default())?;
+    let mut cfg = CaptureConfig::default();
+    if let Some(s) = gone_limit {
+        cfg.display_gone_limit = Duration::from_secs(s);
+    }
+    let mut capture = MacScreenCapture::display(cfg, display_id)?;
     let (tx, rx) = mpsc::channel::<String>();
     let frames = Arc::new(std::sync::atomic::AtomicU64::new(0));
     let counted = Arc::clone(&frames);

@@ -383,6 +383,36 @@ The phase report lists the whole deferred list row by row (CLAUDE.md).
   frame delivered twice (M4), the viewer writing each frame to
   `frame.bin` in its working directory (N2).
 
+* **Step 7c, D-29 and T3 "captured display removed" (2026-10-22).**
+  `GoneTimer` in remora-capture (OS-neutral): only time the display is
+  **missing from the display list** counts (removed); a listed display
+  that is asleep never expires (its wait ends by liveness, D37). Tests:
+  `d29_…` (2), both seen failing against plants (the wait not reset when
+  the display returns; a listed display counted as missing); mutation 3/3
+  caught. The macOS restart loop asks the timer on every retry and stops
+  with `CaptureError::DisplayRemoved` ("the captured display was removed
+  and did not come back") after `display_gone_limit` (120 s; settable for
+  the test run); it still only ever restarts the same display ID. **T3 on
+  the M4** (`scripts/macos/t3-display-removed.sh`, a private
+  `CGVirtualDisplay` captured through RemoraDev.app, then destroyed):
+  `Interrupted` within 1 s of removal (logged ~1 s before the script's own
+  mark); with a 15 s limit `STOPPED … removed and did not come back` 16.9 s
+  after `Interrupted`; memory 6.0–6.4 MB throughout. **No CPU spin while
+  absent:** the first version asked for the display list every 0.5 s and
+  used **2.7 % of a core** (270 ms in 10 s); while the display is missing
+  it now asks every 2 s: **0.7 %** (70 ms in 10 s). A sleeping (listed)
+  display keeps the 0.5 s retry, so T2's resume time is unchanged.
+  **"Returns within 2 minutes" could not be produced with this tooling:**
+  a re-created virtual display gets a **new display ID** (4 → 5), so
+  capture did not resume — correctly, as it never captures another
+  display (D38). The same-ID return is the restart path T2 measured on
+  real hardware (display sleep → wake, `Resumed` ≤ 2 s); whether a real
+  monitor keeps its ID when replugged is untested (roadmap D-16).
+  **Not done (owner to decide):** D-29's "both sides show the wait and
+  the time left" — at the pause the host cannot yet tell removed from
+  asleep, and the viewer gets only the pause reason. **Lid close** (T3's
+  other half) needs the owner at the machine (step 7d).
+
 ## 12. Changes to criteria
 
 * **2026-10-19 — owner approval.** R1–R5 approved as proposed. R1 and R2 are

@@ -458,6 +458,11 @@ fn display_pixel_size(display: &SCDisplay) -> (u32, u32) {
 /// <= 2 s after the display wakes).
 const RESTART_POLL: Duration = Duration::from_millis(500);
 
+/// How often while the display is missing from the display list (removed,
+/// D-29). Asking ScreenCaptureKit for the list every 0.5 s cost 2.7 % of a
+/// core on the M4 (T3, 2026-10-22); a returning monitor has no 2 s target.
+const MISSING_POLL: Duration = Duration::from_secs(2);
+
 /// Capture state shared by the owner and an interrupted stream's restart
 /// thread.
 struct Core {
@@ -601,10 +606,14 @@ fn spawn_restart(ctx: RestartCtx, sink: EventSink) {
 
 /// Retries every [`RESTART_POLL`] until the display is back and a new
 /// stream starts (it then announces `Resumed`), or the owner stopped,
-/// restarted or dropped the capture.
+/// restarted or dropped the capture, or the display has been missing from
+/// the display list for `display_gone_limit` (then `Stopped(DisplayRemoved)`;
+/// roadmap D-29). It only ever restarts the same display.
 fn restart_loop(ctx: RestartCtx, mut sink: EventSink) {
+    let mut gone: Option<crate::GoneTimer> = None;
+    let mut poll = RESTART_POLL;
     loop {
-        std::thread::sleep(RESTART_POLL);
+        std::thread::sleep(poll);
         let Some(core) = ctx.core.upgrade() else {
             return;
         };
@@ -614,17 +623,26 @@ fn restart_loop(ctx: RestartCtx, mut sink: EventSink) {
         }
         // The old stream is dead; release it before starting a new one.
         c.running = None;
+        let timer = gone.get_or_insert_with(|| crate::GoneTimer::new(c.cfg.display_gone_limit));
         // The display object may be stale after sleep: look it up again.
+        // A list that cannot be read says nothing either way.
         let Ok(displays) = shareable_displays() else {
             continue;
         };
         // SAFETY: property getter on a valid SCDisplay.
-        let Some(display) = displays
+        let found = displays
             .iter()
-            .find(|d| unsafe { d.displayID() } == c.display_id)
-        else {
+            .find(|d| unsafe { d.displayID() } == c.display_id);
+        if timer.expired(found.is_some(), Instant::now()) {
+            drop(c);
+            sink(CaptureEvent::Stopped(CaptureError::DisplayRemoved));
+            return;
+        }
+        let Some(display) = found else {
+            poll = MISSING_POLL;
             continue;
         };
+        poll = RESTART_POLL;
         c.display = display;
         match start_stream(&c, sink, ctx.clone(), true) {
             Ok(running) => {
