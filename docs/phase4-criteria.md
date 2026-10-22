@@ -447,8 +447,9 @@ The phase report lists the whole deferred list row by row (CLAUDE.md).
   `Queue::on_submitted_work_done` + `poll(Wait)`, present returned) — times
   and sizes only (e2e check that every field is `key=number`; seen
   failing against a planted `head=[0, 0, 0, 1]`). `scripts/macos/
-  p1-latency.py` runs host and viewer, accepts, streams, joins the logs by
-  capture time and prints P1, P2, every stage and P3. **Tooling check**
+  p1-latency.py` (since replaced by `phase4-session.py p1`, below) runs
+  host and viewer, accepts, streams, joins the logs by capture time and
+  prints P1, P2, every stage and P3. **Tooling check**
   (synthetic source, 5 s, not a P1 run): P1 p50 10.7–11.1 ms, p95
   13.7–16.4 ms; capture → encoded 6.2–6.5 ms p50 (a synthetic frame's
   "display time" is when it was made). **Finding:** in all three checks
@@ -456,6 +457,22 @@ The phase report lists the whole deferred list row by row (CLAUDE.md).
   **occluded** (another window in front), so only 24–53 % of frames were
   drawn. The R3 stats line now says `no drawable N (occluded)`. The real
   P1 runs need the viewer window in front and visible (owner session).
+
+* **Step 7d session runner (2026-10-22).** `scripts/macos/phase4-session.py
+  check|p1|p5|p6|p8|m7|t2|t3-lid`: one command per step; the host runs
+  through RemoraDev.app (Screen Recording) with input through a named
+  pipe; each step writes `results/phase4/<step>.txt`, one line per
+  verdict to `results/phase4/summary.md` and raw logs to `logs/` with
+  one-time codes and passwords replaced by `[redacted]`; the Mac is kept
+  awake with `caffeinate -dims`. A run is reported **INVALID (not
+  counted)**, never PASS or FAIL, when the motion page was not on screen
+  (< 55 fps captured) or the viewer window was covered (occluded).
+  P1 measures 60 s after a 10 s warm-up (time to click the window to the
+  front). Thresholds are copied from §4 and §7 into the script's
+  constants. **Finding from the tooling check:** "present returned" comes
+  *before* "GPU draw done" (−0.5 to −1.1 ms): `present()` only queues the
+  frame. P4's "drawn → present returned" is therefore reported as
+  measured (negative), information only.
 
 ## 12. Changes to criteria
 
