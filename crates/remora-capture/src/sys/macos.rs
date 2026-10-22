@@ -633,10 +633,24 @@ fn restart_loop(ctx: RestartCtx, mut sink: EventSink) {
         let found = displays
             .iter()
             .find(|d| unsafe { d.displayID() } == c.display_id);
-        if timer.expired(found.is_some(), Instant::now()) {
-            drop(c);
-            sink(CaptureEvent::Stopped(CaptureError::DisplayRemoved));
-            return;
+        // The sink only forwards to the stream's owner (it never touches
+        // this capture), so reporting with the lock held cannot deadlock.
+        match timer.observe(found.is_some(), Instant::now()) {
+            crate::Gone::Expired => {
+                drop(c);
+                sink(CaptureEvent::Stopped(CaptureError::DisplayRemoved));
+                return;
+            }
+            crate::Gone::WentMissing(remaining) => {
+                sink(CaptureEvent::Interrupted(InterruptReason::DisplayRemoved {
+                    remaining,
+                }))
+            }
+            // No deadline any more; Resumed follows if the stream starts.
+            crate::Gone::Back => sink(CaptureEvent::Interrupted(
+                InterruptReason::DisplayUnavailable,
+            )),
+            crate::Gone::Listed | crate::Gone::StillMissing => {}
         }
         let Some(display) = found else {
             poll = MISSING_POLL;

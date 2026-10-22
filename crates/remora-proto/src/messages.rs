@@ -102,10 +102,20 @@ pub struct StreamState {
     /// `true`: paused; `false`: resumed.
     #[prost(bool, tag = "1")]
     pub paused: bool,
-    /// When paused: 1 display unavailable, 2 access lost, 3 other (a
-    /// receiver treats unknown values as "other"). Must be 0 when resumed.
+    /// When paused: 1 display unavailable, 2 access lost, 3 other,
+    /// 4 display removed (a receiver treats unknown values as "other").
+    /// Must be 0 when resumed.
     #[prost(uint32, tag = "2")]
     pub reason: u32,
+    /// With reason 4 (display removed): milliseconds until the host gives
+    /// up waiting and ends the session, counted from when this message is
+    /// sent; the viewer counts down locally from when it received it. Sent
+    /// again only if the deadline changes. 0 with every other reason and
+    /// when resumed; at most [`crate::limits::PAUSE_REMAINING_MAX_MS`].
+    /// Added 2026-10-22 as a minor addition (protocol.md §8): a viewer
+    /// without this field ignores it.
+    #[prost(uint32, tag = "3")]
+    pub remaining_ms: u32,
 }
 
 /// Viewer → host: the viewer's decoder cannot continue (a frame was lost,
@@ -318,10 +328,20 @@ pub fn decode_envelope(bytes: &[u8]) -> Result<Envelope, MessageError> {
             Some(
                 control::Kind::Pending(_) | control::Kind::Bye(_) | control::Kind::Recovery(_),
             ) => {}
-            Some(control::Kind::StreamState(st)) => require(
-                st.paused == (st.reason != 0),
-                "stream state: paused needs a reason, resumed has none",
-            )?,
+            Some(control::Kind::StreamState(st)) => {
+                require(
+                    st.paused == (st.reason != 0),
+                    "stream state: paused needs a reason, resumed has none",
+                )?;
+                require(
+                    st.paused || st.remaining_ms == 0,
+                    "stream state: resumed has no time left",
+                )?;
+                require(
+                    st.remaining_ms <= crate::limits::PAUSE_REMAINING_MAX_MS,
+                    "stream state: time left",
+                )?;
+            }
         },
         Some(envelope::Msg::Input(i)) => match &i.kind {
             None => return Err(MessageError::Invalid("empty or unknown input message")),

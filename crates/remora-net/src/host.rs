@@ -172,7 +172,8 @@ impl HostServer {
 
     /// Accept on the prompt for `id` showing `sas`.
     pub fn approve(&self, id: SessionId, sas: Sas) -> Result<(), ApproveError> {
-        let actions = lock(&self.shared.host).approve(id, sas)?;
+        let now = self.shared.now();
+        let actions = lock(&self.shared.host).approve(id, sas, now)?;
         self.shared.apply(actions, None);
         Ok(())
     }
@@ -186,8 +187,18 @@ impl HostServer {
     /// Screen capture changed state (phase4-criteria §7); see
     /// [`remora_session::Host::capture_changed`].
     pub fn capture_changed(&self, status: remora_session::CaptureStatus) {
-        let actions = lock(&self.shared.host).capture_changed(status);
+        let now = self.shared.now();
+        let actions = lock(&self.shared.host).capture_changed(status, now);
         self.shared.apply(actions, None);
+    }
+
+    /// While the captured display is removed: how long until the host
+    /// gives up waiting (roadmap D-29); `None` otherwise.
+    pub fn pause_remaining(&self) -> Option<Duration> {
+        let now = self.shared.now();
+        lock(&self.shared.host)
+            .pause_remaining(now)
+            .map(|ms| Duration::from_millis(u64::from(ms)))
     }
 
     /// Sends one encoded video frame to every active session; see

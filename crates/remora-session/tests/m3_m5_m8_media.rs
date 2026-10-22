@@ -156,7 +156,7 @@ fn m3_viewer_drops_media_that_overtakes_the_accept() {
     let mut c = to_prompt(&mut host, &v, ip(1));
     let (id, sas) = c.log.prompt().unwrap();
     // The host accepts and streams at once; the datagrams arrive first.
-    let accept = host.approve(id, sas).unwrap();
+    let accept = host.approve(id, sas, T0).unwrap();
     let early = host
         .send_video(
             true,
@@ -202,7 +202,7 @@ fn approving_asks_for_a_keyframe_and_announces_two_keys() {
     let mut host = host_with(&h, vec![]);
     let c = to_prompt(&mut host, &v, ip(1));
     let (id, sas) = c.log.prompt().unwrap();
-    let acts = host.approve(id, sas).unwrap();
+    let acts = host.approve(id, sas, T0).unwrap();
     assert!(acts.contains(&HostAction::ForceKeyframe));
     let sends = acts
         .iter()

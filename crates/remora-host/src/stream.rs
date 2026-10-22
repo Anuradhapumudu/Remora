@@ -180,6 +180,9 @@ fn pause_reason(r: InterruptReason) -> PauseReason {
         InterruptReason::DisplayUnavailable => PauseReason::DisplayUnavailable,
         InterruptReason::AccessLost => PauseReason::AccessLost,
         InterruptReason::Other => PauseReason::Other,
+        InterruptReason::DisplayRemoved { remaining } => PauseReason::DisplayRemoved {
+            remaining_ms: u32::try_from(remaining.as_millis()).unwrap_or(u32::MAX),
+        },
     }
 }
 
@@ -535,5 +538,25 @@ mod tests {
         let stopped = rec.videos();
         std::thread::sleep(Duration::from_millis(100));
         assert_eq!(rec.videos(), stopped, "frames after stop()");
+    }
+
+    /// D-29: the time left survives the trip from the capture to the
+    /// session in milliseconds; an absurd one saturates (the session then
+    /// clamps it to the protocol's bound).
+    #[test]
+    fn d29_display_removed_keeps_its_time_left() {
+        let r = |remaining| pause_reason(InterruptReason::DisplayRemoved { remaining });
+        assert_eq!(
+            r(Duration::from_secs(120)),
+            PauseReason::DisplayRemoved {
+                remaining_ms: 120_000
+            }
+        );
+        assert_eq!(
+            r(Duration::from_secs(u64::MAX)),
+            PauseReason::DisplayRemoved {
+                remaining_ms: u32::MAX
+            }
+        );
     }
 }

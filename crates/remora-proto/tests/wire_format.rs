@@ -317,27 +317,94 @@ fn an_envelope_of_exactly_the_limit_is_not_too_large() {
 }
 
 /// Phase 4 §7: `StreamState` (host → viewer pause / resume). Paused needs a
-/// reason; resumed must carry none. Unknown reason values are accepted (a
-/// newer host may add reasons; the viewer shows "other"), so only the two
-/// contradictory shapes are refused.
+/// reason; resumed must carry none and no time left. Unknown reason values
+/// are accepted (a newer host may add reasons; the viewer shows "other").
+/// D-29: the time left is bounded (1 h), so a hostile host cannot make the
+/// viewer show a nonsense countdown.
 #[test]
 fn stream_state_shapes() {
-    let ss = |paused, reason| ctl(control::Kind::StreamState(StreamState { paused, reason }));
-    for (paused, reason) in [(true, 1), (true, 2), (true, 3), (true, 99), (false, 0)] {
+    use remora_proto::limits::PAUSE_REMAINING_MAX_MS as MAX;
+    let ss = |paused, reason, remaining_ms| {
+        ctl(control::Kind::StreamState(StreamState {
+            paused,
+            reason,
+            remaining_ms,
+        }))
+    };
+    for (paused, reason, left) in [
+        (true, 1, 0),
+        (true, 2, 0),
+        (true, 3, 0),
+        (true, 99, 0),
+        (false, 0, 0),
+        (true, 4, 0),
+        (true, 4, 120_000),
+        (true, 4, MAX),
+    ] {
         assert!(
-            decode_envelope(&ss(paused, reason)).is_ok(),
-            "{paused} {reason}"
+            decode_envelope(&ss(paused, reason, left)).is_ok(),
+            "{paused} {reason} {left}"
         );
     }
-    for (paused, reason) in [(true, 0), (false, 1), (false, 99)] {
+    for (paused, reason, left) in [
+        (true, 0, 0),
+        (false, 1, 0),
+        (false, 99, 0),
+        (false, 0, 1),
+        (true, 4, MAX + 1),
+        (true, 4, u32::MAX),
+    ] {
         assert!(
             matches!(
-                decode_envelope(&ss(paused, reason)),
+                decode_envelope(&ss(paused, reason, left)),
                 Err(MessageError::Invalid(_))
             ),
-            "{paused} {reason}"
+            "{paused} {reason} {left}"
         );
     }
+}
+
+/// protocol.md §5 shows these bytes; fuzz/corpus/messages holds them as a
+/// seed (`d58bc2a5…`). Paused, reason 4 (display removed), 120 000 ms left.
+#[test]
+fn stream_state_display_removed_bytes() {
+    let bytes = ctl(control::Kind::StreamState(StreamState {
+        paused: true,
+        reason: 4,
+        remaining_ms: 120_000,
+    }));
+    let hex: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
+    assert_eq!(hex, "0a0b8201080801100418c0a907");
+    assert!(decode_envelope(&bytes).is_ok());
+}
+
+/// D-29 is a minor addition (protocol.md §8): a viewer built before
+/// `remaining_ms` existed decodes the new message, keeps the fields it
+/// knows and ignores the time left (and shows reason 4 as "other").
+#[test]
+fn a_viewer_without_remaining_ms_still_reads_the_pause() {
+    /// `StreamState` exactly as it was before 2026-10-22.
+    #[derive(Clone, PartialEq, prost::Message)]
+    struct StreamStateBefore {
+        #[prost(bool, tag = "1")]
+        paused: bool,
+        #[prost(uint32, tag = "2")]
+        reason: u32,
+    }
+    let new = StreamState {
+        paused: true,
+        reason: 4,
+        remaining_ms: 120_000,
+    }
+    .encode_to_vec();
+    let old = StreamStateBefore::decode(new.as_slice()).unwrap();
+    assert_eq!(
+        old,
+        StreamStateBefore {
+            paused: true,
+            reason: 4
+        }
+    );
 }
 
 #[test]

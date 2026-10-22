@@ -20,7 +20,7 @@ use std::time::{Duration, Instant};
 use remora_viewer::render::Renderer;
 use winit::application::ApplicationHandler;
 use winit::event::WindowEvent;
-use winit::event_loop::{ActiveEventLoop, EventLoop, EventLoopProxy};
+use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy};
 use winit::window::{Window, WindowId};
 
 use crate::decode::{Counters, Picture};
@@ -31,6 +31,8 @@ pub(crate) enum Event {
     Picture(Picture),
     /// The decoder's counters (sent once, when decoding starts).
     Counters(Arc<Counters>),
+    /// The stream paused (`Some`) or resumed (`None`).
+    Pause(Option<crate::Pause>),
     /// The session ended with this exit code.
     Ended(u8),
 }
@@ -56,6 +58,10 @@ struct App {
     /// Pictures not drawn because the window had no drawable, and the
     /// last reason (R3: e.g. a hidden window gets none).
     no_drawable: (u64, &'static str),
+    /// While the stream is paused: the title says why, counting down
+    /// every second if the host's display was removed (D-29). Plain text,
+    /// no styling: the proper overlay is Phase 4.5 (roadmap D-33).
+    pause: Option<crate::Pause>,
 }
 
 /// A presented frame: CPU time for acquire + draw + present, and with
@@ -89,6 +95,7 @@ pub(crate) fn run(
         stats: Stats::new(),
         timing,
         no_drawable: (0, ""),
+        pause: None,
     };
     event_loop.run_app(&mut app)?;
     let _ = thread.join();
@@ -236,6 +243,13 @@ impl App {
         self.report();
     }
 
+    /// The title while paused (the stats line takes it back on resume).
+    fn show_pause(&self) {
+        if let (Some(w), Some(p)) = (&self.window, &self.pause) {
+            w.set_title(&format!("Remora viewer — {}", p.text()));
+        }
+    }
+
     /// Once per second: title and one stderr line (R3).
     fn report(&mut self) {
         let Some(mut line) = self.stats.line(self.counters.as_deref()) else {
@@ -257,6 +271,21 @@ impl App {
 impl ApplicationHandler<Event> for App {
     fn resumed(&mut self, _el: &ActiveEventLoop) {}
 
+    /// While paused, wake once a second to update the title's countdown.
+    fn about_to_wait(&mut self, el: &ActiveEventLoop) {
+        match &self.pause {
+            Some(p) => {
+                self.show_pause();
+                if p.deadline.is_some() {
+                    el.set_control_flow(ControlFlow::WaitUntil(
+                        Instant::now() + Duration::from_secs(1),
+                    ));
+                }
+            }
+            None => el.set_control_flow(ControlFlow::Wait),
+        }
+    }
+
     fn user_event(&mut self, el: &ActiveEventLoop, event: Event) {
         match event {
             Event::Picture(p) => {
@@ -266,6 +295,17 @@ impl ApplicationHandler<Event> for App {
                 }
             }
             Event::Counters(c) => self.counters = Some(c),
+            Event::Pause(p) => {
+                self.pause = p;
+                match p {
+                    Some(_) => self.show_pause(),
+                    None => {
+                        if let Some(w) = &self.window {
+                            w.set_title("Remora viewer");
+                        }
+                    }
+                }
+            }
             Event::Ended(code) => {
                 self.exit_code = Some(code);
                 el.exit();

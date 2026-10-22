@@ -66,21 +66,51 @@ pub struct GoneTimer {
     since: Option<Instant>,
 }
 
+/// What one [`GoneTimer::observe`] means for the people watching (D-29).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Gone {
+    /// The display is listed, as it was: nothing to report.
+    Listed,
+    /// The display just went missing: report "removed" with this much time
+    /// left (a new deadline).
+    WentMissing(Duration),
+    /// Still missing, time not up: nothing new to report.
+    StillMissing,
+    /// Listed again after being missing: the deadline is gone (report the
+    /// display as unavailable until frames flow again).
+    Back,
+    /// Missing for the limit: capture must stop.
+    Expired,
+}
+
 impl GoneTimer {
     /// A timer that expires after the display was missing for `limit`.
     pub fn new(limit: Duration) -> Self {
         Self { limit, since: None }
     }
 
-    /// One retry's observation at `now`: is the display listed? Returns
-    /// `true` once it has been missing for the limit: capture must stop.
-    pub fn expired(&mut self, listed: bool, now: Instant) -> bool {
+    /// One retry's observation at `now`: is the display listed?
+    pub fn observe(&mut self, listed: bool, now: Instant) -> Gone {
         if listed {
-            self.since = None;
-            return false;
+            return match self.since.take() {
+                Some(_) => Gone::Back,
+                None => Gone::Listed,
+            };
         }
-        let since = *self.since.get_or_insert(now);
-        now.saturating_duration_since(since) >= self.limit
+        let Some(since) = self.since else {
+            self.since = Some(now);
+            return Gone::WentMissing(self.limit);
+        };
+        if now.saturating_duration_since(since) >= self.limit {
+            Gone::Expired
+        } else {
+            Gone::StillMissing
+        }
+    }
+
+    /// [`observe`](Self::observe), reduced to "must capture stop?".
+    pub fn expired(&mut self, listed: bool, now: Instant) -> bool {
+        self.observe(listed, now) == Gone::Expired
     }
 }
 
@@ -188,6 +218,14 @@ pub enum InterruptReason {
     AccessLost,
     /// Another interruption the backend expects to recover from.
     Other,
+    /// The captured display is no longer connected (not in the OS's list
+    /// of displays). Capture stops with [`CaptureError::DisplayRemoved`]
+    /// after `remaining` unless it comes back (roadmap D-29). Reported each
+    /// time the display goes missing: every report is a new deadline.
+    DisplayRemoved {
+        /// Time left, from this report, until capture gives up.
+        remaining: Duration,
+    },
 }
 
 /// Something the capture backend reports.
@@ -276,6 +314,26 @@ mod tests {
         assert!(!t.expired(false, s(200)), "missing again from 200 s");
         assert!(!t.expired(false, s(319)));
         assert!(t.expired(false, s(320)));
+    }
+
+    /// What the people watching are told: once when the display goes
+    /// missing (with the full wait), once when it is back, nothing while
+    /// it stays the same; a second absence is a new full wait.
+    #[test]
+    fn d29_missing_and_back_are_reported_once_each() {
+        let t0 = Instant::now();
+        let s = |secs: u64| t0 + Duration::from_secs(secs);
+        let limit = Duration::from_secs(120);
+        let mut t = GoneTimer::new(limit);
+        assert_eq!(t.observe(true, s(0)), Gone::Listed);
+        assert_eq!(t.observe(false, s(1)), Gone::WentMissing(limit));
+        assert_eq!(t.observe(false, s(3)), Gone::StillMissing);
+        assert_eq!(t.observe(false, s(120)), Gone::StillMissing);
+        assert_eq!(t.observe(true, s(121)), Gone::Back);
+        assert_eq!(t.observe(true, s(122)), Gone::Listed);
+        assert_eq!(t.observe(false, s(200)), Gone::WentMissing(limit));
+        assert_eq!(t.observe(false, s(319)), Gone::StillMissing);
+        assert_eq!(t.observe(false, s(320)), Gone::Expired);
     }
 
     #[test]

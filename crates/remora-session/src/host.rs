@@ -256,6 +256,9 @@ pub struct Host {
     pub(crate) nonces: VecDeque<IssuedNonce>,
     /// What screen capture is doing (phase4-criteria §7).
     pub(crate) capture: crate::CaptureStatus,
+    /// While the captured display is removed: when the host gives up
+    /// (D-29), so a viewer approved later is told the time actually left.
+    pub(crate) pause_deadline: Option<Millis>,
     /// `frame_id` of the next video frame (one stream for all sessions).
     pub(crate) next_frame_id: u32,
     /// Packets per media key before rotation (protocol.md §6: 2³²).
@@ -294,6 +297,7 @@ impl Host {
             sessions: HashMap::new(),
             nonces: VecDeque::new(),
             capture: crate::CaptureStatus::Running,
+            pause_deadline: None,
             next_frame_id: 0,
             rotate_after: MAX_PACKETS_PER_KEY,
             keyframe_requested: None,
@@ -569,7 +573,12 @@ impl Host {
     /// The host user pressed "accept" on the prompt for `id` showing `sas`.
     /// Applies only if that session is pending approval **and** its safety
     /// code is `sas` (A22, A23).
-    pub fn approve(&mut self, id: SessionId, sas: Sas) -> Result<Vec<HostAction>, ApproveError> {
+    pub fn approve(
+        &mut self,
+        id: SessionId,
+        sas: Sas,
+        now: Millis,
+    ) -> Result<Vec<HostAction>, ApproveError> {
         let sess = self
             .sessions
             .get_mut(&id)
@@ -633,7 +642,8 @@ impl Host {
                 out.push(HostAction::ForceKeyframe);
                 // Approved while capture is paused: say so at once.
                 if let crate::CaptureStatus::Interrupted(reason) = self.capture {
-                    self.send_stream_state(id, true, reason.wire(), &mut out);
+                    let left = self.pause_remaining(now).unwrap_or(0);
+                    self.send_stream_state(id, true, reason.wire(), left, &mut out);
                 }
             }
             Err(_) => self.fail(
@@ -739,20 +749,41 @@ impl Host {
     ///   [`CloseCode::CaptureStopped`](crate::CloseCode::CaptureStopped).
     ///
     /// A session approved while capture is interrupted is told it is paused
-    /// right after `SessionAccept`; one approved while it is stopped closes
-    /// with `CaptureStopped`.
-    pub fn capture_changed(&mut self, status: crate::CaptureStatus) -> Vec<HostAction> {
-        use crate::CaptureStatus;
+    /// right after `SessionAccept` (with the time actually left if the
+    /// display was removed); one approved while it is stopped closes with
+    /// `CaptureStopped`.
+    ///
+    /// `Interrupted(DisplayRemoved { remaining_ms })` sets a deadline
+    /// `now + remaining_ms` (D-29). The capture reports it only when the
+    /// deadline is new (the display went missing, again), so it is always
+    /// sent, even if the status looks the same as before.
+    pub fn capture_changed(
+        &mut self,
+        status: crate::CaptureStatus,
+        now: Millis,
+    ) -> Vec<HostAction> {
+        use crate::{CaptureStatus, PauseReason};
         let mut out = Vec::new();
-        if status == self.capture {
+        let removed = matches!(
+            status,
+            CaptureStatus::Interrupted(PauseReason::DisplayRemoved { .. })
+        );
+        if status == self.capture && !removed {
             return out;
         }
         let was = std::mem::replace(&mut self.capture, status);
+        self.pause_deadline = match status {
+            CaptureStatus::Interrupted(PauseReason::DisplayRemoved { remaining_ms }) => {
+                Some(now.plus(u64::from(remaining_ms)))
+            }
+            _ => None,
+        };
         let active = self.active_sessions();
         match status {
             CaptureStatus::Interrupted(reason) => {
                 for id in active {
-                    self.send_stream_state(id, true, reason.wire(), &mut out);
+                    let left = reason.remaining_ms();
+                    self.send_stream_state(id, true, reason.wire(), left, &mut out);
                 }
             }
             CaptureStatus::Running => {
@@ -760,7 +791,7 @@ impl Host {
                 // Running after Stopped has no Active sessions left to tell.
                 if matches!(was, CaptureStatus::Interrupted(_)) {
                     for id in active {
-                        self.send_stream_state(id, false, 0, &mut out);
+                        self.send_stream_state(id, false, 0, 0, &mut out);
                     }
                     // One shared encoder: one keyframe, however many viewers.
                     out.push(HostAction::ForceKeyframe);
@@ -781,6 +812,7 @@ impl Host {
         id: SessionId,
         paused: bool,
         reason: u32,
+        remaining_ms: u32,
         out: &mut Vec<HostAction>,
     ) {
         let Some(HostSession {
@@ -790,7 +822,14 @@ impl Host {
         else {
             return;
         };
-        let env = control_env(control::Kind::StreamState(StreamState { paused, reason }));
+        // The validator's bound (1 h) is far above the 2-minute wait; the
+        // clamp only keeps a misconfigured limit from breaking the message.
+        let remaining_ms = remaining_ms.min(remora_proto::limits::PAUSE_REMAINING_MAX_MS);
+        let env = control_env(control::Kind::StreamState(StreamState {
+            paused,
+            reason,
+            remaining_ms,
+        }));
         match est.encrypt(&env) {
             Ok(frame) => out.push(HostAction::Send { id, frame }),
             Err(_) => self.fail(
@@ -809,6 +848,13 @@ impl Host {
     /// What screen capture is doing, as last reported.
     pub fn capture_status(&self) -> crate::CaptureStatus {
         self.capture
+    }
+
+    /// While the captured display is removed: milliseconds at `now` until
+    /// the host gives up waiting (D-29). `None` otherwise.
+    pub fn pause_remaining(&self, now: Millis) -> Option<u32> {
+        self.pause_deadline
+            .map(|d| u32::try_from(d.0.saturating_sub(now.0)).unwrap_or(u32::MAX))
     }
 
     /// Forgets a closed session entirely (call once its connection is gone,

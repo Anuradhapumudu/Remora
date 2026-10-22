@@ -161,7 +161,7 @@ fn a20_host_pending_approval_rejects_every_encrypted_app_message() {
         let frame = e.est.encrypt(&env).unwrap();
         assert!(host.on_frame(e.id, &frame, T0, &mut OsRng).is_empty());
         assert!(
-            host.approve(e.id, e.est.sas()).is_err(),
+            host.approve(e.id, e.est.sas(), T0).is_err(),
             "cannot approve a closed session"
         );
     }
@@ -258,7 +258,7 @@ fn a21_viewer_sending_host_only_messages_in_active_is_wrong_role() {
                 _ => None,
             })
             .unwrap();
-        host.approve(pid, sas).unwrap();
+        host.approve(pid, sas, T0).unwrap();
         assert_eq!(host.state(e.id), Some(State::Active));
         let frame = e.est.encrypt(&control_envelope(k.clone())).unwrap();
         let acts = host.on_frame(e.id, &frame, T0, &mut OsRng);

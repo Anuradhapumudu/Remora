@@ -51,8 +51,8 @@ fn a22_approval_with_the_other_sessions_sas_is_refused_and_changes_nothing() {
     if sa == sb {
         return; // 10⁻⁶: the codes collide, the binding cannot be observed
     }
-    assert_eq!(host.approve(a.id, sb), Err(ApproveError::SasMismatch));
-    assert_eq!(host.approve(b.id, sa), Err(ApproveError::SasMismatch));
+    assert_eq!(host.approve(a.id, sb, T0), Err(ApproveError::SasMismatch));
+    assert_eq!(host.approve(b.id, sa, T0), Err(ApproveError::SasMismatch));
     assert_eq!(host.state(a.id), Some(State::PendingApproval));
     assert_eq!(host.state(b.id), Some(State::PendingApproval));
     assert!(host.active_sessions().is_empty());
@@ -66,15 +66,18 @@ fn a22_approval_with_any_wrong_code_is_refused() {
     let right = some_sas(&c);
     let wrong = remora_crypto::sas::sas(&[1; 32], &[2; 32], &[3; 32]);
     if wrong != right {
-        assert_eq!(host.approve(c.id, wrong), Err(ApproveError::SasMismatch));
+        assert_eq!(
+            host.approve(c.id, wrong, T0),
+            Err(ApproveError::SasMismatch)
+        );
     }
     assert_eq!(
-        host.approve(SessionId(c.id.0 ^ 1), right),
+        host.approve(SessionId(c.id.0 ^ 1), right, T0),
         Err(ApproveError::UnknownSession)
     );
-    assert!(host.approve(c.id, right).is_ok());
+    assert!(host.approve(c.id, right, T0).is_ok());
     assert_eq!(
-        host.approve(c.id, right),
+        host.approve(c.id, right, T0),
         Err(ApproveError::NotPending),
         "approve twice"
     );
@@ -102,7 +105,7 @@ fn a23_approve_in_every_earlier_state_is_refused() {
         let st = host.state(c.id);
         assert_ne!(st, Some(State::PendingApproval));
         assert_eq!(
-            host.approve(c.id, sas),
+            host.approve(c.id, sas, T0),
             Err(ApproveError::NotPending),
             "state {st:?}"
         );
@@ -202,7 +205,7 @@ fn a24_unanswered_prompt_is_rejected_after_60_s() {
     assert_eq!(c.log.viewer_failure(), Some(FailReason::Rejected));
     assert_eq!(host.limiter().pending(), 0);
     assert_eq!(
-        host.approve(c.id, some_sas(&c)),
+        host.approve(c.id, some_sas(&c), T0),
         Err(ApproveError::NotPending),
         "too late"
     );

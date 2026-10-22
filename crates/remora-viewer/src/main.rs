@@ -133,6 +133,7 @@ fn connect_command(args: ConnectArgs) -> anyhow::Result<u8> {
         let display = Display {
             show: None,
             on_counters: Box::new(|_| {}),
+            on_pause: Box::new(|_| {}),
             close: None,
         };
         return runtime().and_then(|rt| rt.block_on(run_connect(args, display)));
@@ -140,12 +141,16 @@ fn connect_command(args: ConnectArgs) -> anyhow::Result<u8> {
     window::run(args.timing, move |proxy, close| {
         let show_proxy = proxy.clone();
         let counters_proxy = proxy.clone();
+        let pause_proxy = proxy.clone();
         let display = Display {
             show: Some(Box::new(move |p| {
                 let _ = show_proxy.send_event(Event::Picture(p));
             })),
             on_counters: Box::new(move |c| {
                 let _ = counters_proxy.send_event(Event::Counters(c));
+            }),
+            on_pause: Box::new(move |p| {
+                let _ = pause_proxy.send_event(Event::Pause(p));
             }),
             close: Some(close),
         };
@@ -161,6 +166,7 @@ fn connect_command(args: ConnectArgs) -> anyhow::Result<u8> {
     let display = Display {
         show: decode::Show,
         on_counters: Box::new(|_| {}),
+        on_pause: Box::new(|_| {}),
         close: None,
     };
     runtime().and_then(|rt| rt.block_on(run_connect(args, display)))
@@ -170,7 +176,45 @@ fn connect_command(args: ConnectArgs) -> anyhow::Result<u8> {
 struct Display {
     show: decode::Show,
     on_counters: Box<dyn FnOnce(Arc<decode::Counters>) + Send>,
+    /// The stream paused (`Some`) or resumed (`None`), for the window.
+    on_pause: Box<dyn Fn(Option<Pause>) + Send>,
     close: Option<tokio::sync::oneshot::Receiver<()>>,
+}
+
+/// A paused stream as the viewer shows it.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Pause {
+    /// Why, for a person.
+    pub(crate) why: &'static str,
+    /// Display removed (D-29): when the host gives up, on this viewer's
+    /// clock (counted from when the message arrived).
+    pub(crate) deadline: Option<std::time::Instant>,
+}
+
+impl Pause {
+    fn of(reason: remora_session::PauseReason) -> Self {
+        let deadline = match reason {
+            remora_session::PauseReason::DisplayRemoved { remaining_ms } => Some(
+                std::time::Instant::now()
+                    + std::time::Duration::from_millis(u64::from(remaining_ms)),
+            ),
+            _ => None,
+        };
+        Self {
+            why: pause_text(reason),
+            deadline,
+        }
+    }
+
+    /// What to show now: the countdown if the display was removed.
+    pub(crate) fn text(&self) -> String {
+        match self.deadline {
+            Some(d) => remora_app::cli::display_removed_text(
+                d.saturating_duration_since(std::time::Instant::now()),
+            ),
+            None => format!("Stream paused: {}.", self.why),
+        }
+    }
 }
 
 fn identity(file: Option<PathBuf>) -> anyhow::Result<()> {
@@ -278,7 +322,14 @@ async fn run_connect(args: ConnectArgs, display: Display) -> anyhow::Result<u8> 
     let mut decoder =
         decode::Decoder::start(client.clone(), display.show).context("decoder thread")?;
     (display.on_counters)(decoder.counters());
-    let code = session_loop(&client, &mut events, &mut decoder, display.close).await;
+    let code = session_loop(
+        &client,
+        &mut events,
+        &mut decoder,
+        display.close,
+        &*display.on_pause,
+    )
+    .await;
     let t = decoder.finish();
     println!(
         "video: {} frames decoded, {} refused, {} waiting for a keyframe, {} failed, {} dropped",
@@ -294,10 +345,21 @@ async fn session_loop(
     events: &mut tokio::sync::mpsc::UnboundedReceiver<ViewerEvent>,
     decoder: &mut decode::Decoder,
     mut close: Option<tokio::sync::oneshot::Receiver<()>>,
+    on_pause: &(dyn Fn(Option<Pause>) + Send),
 ) -> u8 {
     let mut outcome: Option<u8> = None;
+    let mut pause: Option<Pause> = None;
+    // D-29: while the host waits for its removed display, say how long is left.
+    let mut wait_line = tokio::time::interval(remora_app::cli::WAIT_LINE_EVERY);
+    wait_line.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     loop {
         let ev = tokio::select! {
+            _ = wait_line.tick() => {
+                if let Some(p) = pause.filter(|p| p.deadline.is_some()) {
+                    println!("{}", p.text());
+                }
+                continue;
+            }
             ev = events.recv() => match ev {
                 Some(ev) => ev,
                 None => break,
@@ -325,12 +387,20 @@ async fn session_loop(
             }
             ViewerEvent::Active => println!("SESSION ACTIVE"),
             ViewerEvent::StreamPaused(reason) => {
-                println!(
-                    "stream paused ({}) - the session stays open",
-                    pause_text(reason)
-                )
+                let p = Pause::of(reason);
+                match p.deadline {
+                    Some(_) => println!("stream paused - {} The session stays open", p.text()),
+                    None => println!("stream paused ({}) - the session stays open", p.why),
+                }
+                pause = Some(p);
+                on_pause(pause);
+                wait_line.reset();
             }
-            ViewerEvent::StreamResumed => println!("stream resumed"),
+            ViewerEvent::StreamResumed => {
+                println!("stream resumed");
+                pause = None;
+                on_pause(None);
+            }
             ViewerEvent::Video(frame) => decoder.offer(frame),
             ViewerEvent::Failed { reason, .. } => outcome = Some(report_failure(&reason)),
             ViewerEvent::Closed { local, remote } => {
@@ -383,6 +453,7 @@ fn pause_text(reason: remora_session::PauseReason) -> &'static str {
         }
         remora_session::PauseReason::AccessLost => "the host's system took the screen away",
         remora_session::PauseReason::Other => "the host's screen capture was interrupted",
+        remora_session::PauseReason::DisplayRemoved { .. } => "the host's display was removed",
     }
 }
 

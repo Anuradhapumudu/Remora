@@ -249,7 +249,7 @@ impl Conn {
 
     pub fn approve(&mut self, host: &mut Host) {
         let (id, sas) = self.log.prompt().expect("prompt shown");
-        let acts = host.approve(id, sas).expect("approve");
+        let acts = host.approve(id, sas, T0).expect("approve");
         self.host_actions(host, acts);
     }
 }
@@ -322,6 +322,7 @@ pub fn app_envelopes() -> Vec<(&'static str, Vec<u8>)> {
             control(control::Kind::StreamState(StreamState {
                 paused: true,
                 reason: 1,
+                remaining_ms: 0,
             })),
         ),
         // Phase 4 step 5: viewer → host keyframe request, Active only.

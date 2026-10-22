@@ -262,7 +262,8 @@ message Control {
     IceUpdate         ice        = 13;  // new candidates / ICE restart after network change
     Goodbye           bye        = 14;
     RoleChange        role       = 15;  // reserved for multi-viewer; MVP: owner + controller
-    // 16–63 reserved: clipboard, file transfer, audio, monitors, chat.
+    StreamState       stream_state = 16; // host → viewer: capture paused / resumed (Phase 4)
+    // 17–63 reserved: clipboard, file transfer, audio, monitors, chat.
   }
 }
 
@@ -274,6 +275,7 @@ enum Codec { CODEC_UNSPECIFIED = 0; H264 = 1; H265 = 2; AV1 = 3; }
 enum Role  { ROLE_UNSPECIFIED = 0; OWNER = 1; CONTROLLER = 2; VIEWER = 3; }
 
 message MediaKeyAnnounce { uint32 key_id = 1; bytes key = 2; /* 32 B */ }
+message StreamState      { bool paused = 1; uint32 reason = 2; uint32 remaining_ms = 3; }
 
 message Input {
   oneof kind {
@@ -300,6 +302,26 @@ Notes:
   sends at most one per 500 ms; the host forces at most one keyframe per
   500 ms for all viewers together (`KEYFRAME_REQUEST_INTERVAL_MS`). A host
   sending one is a protocol violation.
+* **`StreamState` (tag 16), Phase 4:** host → viewer, Active only (a
+  viewer sending one is role confusion, A21). Sent to every Active session
+  when screen capture pauses or resumes, and right after `SessionAccept`
+  to a viewer approved while capture is paused. The session stays Active
+  while paused; a resume is followed by a keyframe.
+  * `paused = true` needs `reason ≠ 0`: 1 display unavailable (asleep,
+    lid closed), 2 access lost, 3 other, **4 display removed** (added
+    2026-10-22). A viewer shows an unknown reason as "other".
+    `paused = false` needs `reason = 0` and `remaining_ms = 0`.
+  * **`remaining_ms` (added 2026-10-22, roadmap D-29):** with reason 4, the
+    milliseconds until the host stops waiting for its removed display and
+    ends the session with `CaptureStopped`. The host sends it **once** when
+    the display goes missing, and again only when the deadline changes
+    (the display came back and went missing again). A viewer approved
+    during the wait gets the time actually left, not the full wait. The
+    viewer counts down locally from when the message arrived (no periodic
+    messages; network delay makes its countdown end slightly late, never
+    early). 0 with every other reason; at most 3 600 000 (1 h, §7).
+  * Example, paused / display removed / 120 s left, as a whole `Envelope`:
+    `0a 0b 82 01 08 08 01 10 04 18 c0 a9 07` (a test and a fuzz seed).
 * **Video bitstream (Phase 4: H.264 only).** Each reassembled frame is an
   Annex B access unit. The viewer accepts only what Remora's encoder sends
   and refuses the rest **before the decoder sees it** (§7 limits;
@@ -404,6 +426,7 @@ Enforced before allocation; violations are `ProtocolViolation` unless noted.
 | Media keys a viewer holds at once | 4 (oldest superseded key forgotten first) |
 | Video resolution | ≤ negotiated `max_width × max_height`, ≤ 7680×4320 (Phase 4: the viewer's own limit, not negotiated, roadmap D-31; coded size ≤ the limit rounded up to 16 × 32) — refused before the decoder is configured |
 | NAL units per video frame | 256 |
+| `StreamState.remaining_ms` | 3 600 000 ms (1 h); the host waits 2 min (roadmap D-29), so more is a bug or a hostile host |
 | H.264 SPS / PPS NAL unit | 256 B |
 | Pending handshakes on host | 4 |
 | Handshake attempts per source IP | 10 per minute |
@@ -420,3 +443,16 @@ Enforced before allocation; violations are `ProtocolViolation` unless noted.
 * **Minor** additions (new optional protobuf fields, new `Control` variants)
   don't change the major version. Unknown `oneof` variants are ignored if they
   are in the reserved "optional" range (≥ 32) and rejected otherwise.
+
+### Minor additions to v1
+
+The wire carries only the major version. Nothing has shipped yet (v0.1),
+but each addition is listed so a later reader knows which builds lack it.
+
+| Date | Addition | A peer without it |
+|---|---|---|
+| 2026-10-22 | `StreamState.remaining_ms` (field 3) and `reason = 4` (display removed), roadmap D-29 | Ignores the field (protobuf skips unknown fields) and shows reason 4 as "other"; the session works, without the countdown. Tested by `a_viewer_without_remaining_ms_still_reads_the_pause` |
+
+Why not a version bump (owner, 2026-10-22): the major version is part of
+every key-derivation label (`remora/1/…`), so bumping it for an optional
+field would change every key, safety code and certificate context.

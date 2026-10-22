@@ -149,7 +149,7 @@ pub enum InterruptReason { DisplayUnavailable, AccessLost, Other }
 |---|---|---|
 | T1 | Sans-IO, fake capture: every event in every session state | actions exactly as above; no media action while interrupted; mutation gate covers it |
 | T2 | macOS, real: `pmset displaysleepnow`, then wake (`caffeinate -u -t 2`); 5 cycles in one session | `Interrupted` ≤ 1 s after sleep; `Resumed` ≤ 2 s after wake; first frame after resume is a keyframe; same session throughout; no memory growth across cycles (≤ 2 MB) |
-| T3 | Lid close, captured display removed | Both **testable** (corrections 2026-10-20, §12), run in step 7. **Lid close / open** (owner closes the lid): `Interrupted` on close, `Resumed` ≤ 2 s after the display is back on open, same session. **Captured display removed** (a `CGVirtualDisplay` is captured, then destroyed — Phase 2's tooling; real hardware may differ): `Interrupted` ≤ 1 s, no crash, no CPU spin while absent; if it returns within 2 minutes the stream resumes in the same session with a keyframe, if not the session ends with `CaptureStopped` (never `Normal`, never another display; decision D-29, architecture D38). Only **physical** monitor unplug stays untested (roadmap D-16) |
+| T3 | Lid close, captured display removed | Both **testable** (corrections 2026-10-20, §12), run in step 7. **Lid close / open** (owner closes the lid): `Interrupted` on close, `Resumed` ≤ 2 s after the display is back on open, same session. **Captured display removed** (a `CGVirtualDisplay` is captured, then destroyed — Phase 2's tooling; real hardware may differ): `Interrupted` ≤ 1 s, no crash, no CPU spin while absent; if it returns within 2 minutes the stream resumes in the same session with a keyframe, if not the session ends with `CaptureStopped` (never `Normal`, never another display; decision D-29, architecture D38). While it waits, both sides show "Display removed. Waiting, N s left." (`StreamState` reason 4 + `remaining_ms`, done 2026-10-22, architecture D43; the overlay is roadmap D-33). Only **physical** monitor unplug stays untested (roadmap D-16) |
 | T4 | Policy rule: no `-3815`, `SCStream` or other OS names in remora-session / remora-net | scanner passes; plant fails |
 
 ## 8. Functional
@@ -408,10 +408,38 @@ The phase report lists the whole deferred list row by row (CLAUDE.md).
   display (D38). The same-ID return is the restart path T2 measured on
   real hardware (display sleep → wake, `Resumed` ≤ 2 s); whether a real
   monitor keeps its ID when replugged is untested (roadmap D-16).
-  **Not done (owner to decide):** D-29's "both sides show the wait and
-  the time left" — at the pause the host cannot yet tell removed from
-  asleep, and the viewer gets only the pause reason. **Lid close** (T3's
+  **Not done then (owner to decide):** D-29's "both sides show the wait
+  and the time left" — done the same day, next note. **Lid close** (T3's
   other half) needs the owner at the machine (step 7d).
+
+* **Step 7c-2, D-29 shown on both sides (2026-10-22, owner: "split it";
+  architecture D43). DONE: the protocol part.** `StreamState` gained
+  `reason = 4` (display removed) and `remaining_ms` (field 3), a **minor
+  addition** (protocol.md §5, §8 change log; owner chose it over a major
+  bump, which would change every `remora/1/…` key label). The validator
+  refuses a resumed message with time left and more than 1 h (§7). The
+  capture reports `DisplayRemoved { remaining }` once per absence
+  (`GoneTimer::observe`); the host session keeps a deadline, sends the
+  time left once, again only for a new deadline, and tells a viewer
+  approved during the wait the time actually left. **Minimal display:**
+  host terminal `Display removed. Waiting, N s left.` at the pause and
+  every 10 s; the viewer prints the same and its window title counts down
+  every second (the overlay is Phase 4.5, roadmap D-33). Tests: wire
+  shapes and exact bytes (also a fuzz seed), a viewer without the field
+  still reads the pause, 4 session tests, `GoneTimer` transitions,
+  rounding, QUIC loopback. **10 plants, each caught** (bound removed;
+  resumed-with-time allowed; full wait sent to a late joiner; a repeated
+  report deduplicated; deadline not cleared; `Back` not reported; time
+  dropped on decode; seconds rounded down; ms→s in the mapping and in the
+  net wrapper). Fuzz `messages`: 9.0 M runs / 121 s with 7 new seeds, 0
+  crashes. Mutation of the changed functions: remora-proto `decode_envelope` 10/10 caught; remora-session 32 (27 caught, 5 unviable, 0 missed); remora-net wrapper 4/4 caught. **On the M4** (T3 script, 15 s
+  limit): `INTERRUPTED DisplayUnavailable` then `DisplayRemoved {
+  remaining: 15s }` 0.55 s later, `STOPPED` 16.3 s after that (the
+  missing display is polled every 2 s, so the countdown reaches 0 up to
+  2 s before the session ends, never after); CPU while absent 0.7 %.
+  **Not checked automatically:** the host and viewer text on a real
+  removal (`serve` always captures the main display, so the virtual
+  display cannot be used with it); the shared text function is tested.
 
 * **Step 7d tooling (2026-10-22).** `serve --timing` and `connect
   --timing` print one `timing:` line per frame (shared-clock µs: capture,
@@ -591,3 +619,13 @@ The phase report lists the whole deferred list row by row (CLAUDE.md).
   flow needs its own attack test** — phase3-criteria §10.8, the F-UX1
   prompt-number confused-deputy case. Applies to the Phase 4 viewer window
   and stats output wherever they touch codes, approval or identity.
+* **2026-10-22 — D-29 split (owner).** "Both sides show the wait and the
+  time left" is split: the **protocol** (`StreamState` reason 4 +
+  `remaining_ms`, sent once, counted down locally) and a **plain-text
+  display** (host terminal line; viewer terminal line and window title)
+  are Phase 4 and done (§11b step 7c-2); the **proper visual** (overlay,
+  countdown) is the Phase 4.5 GUI, roadmap D-33. The owner asked for a
+  protocol version bump; on the trade-off (the major version is part of
+  every key-derivation label, and §8 already treats a new optional field
+  as minor) the owner chose a **minor addition** recorded in protocol.md
+  §8. Adds a test item; no threshold changes.

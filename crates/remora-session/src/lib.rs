@@ -92,6 +92,14 @@ pub enum PauseReason {
     AccessLost,
     /// Anything else the backend expects to recover from.
     Other,
+    /// The captured display is no longer connected; the host waits for it
+    /// and ends the session when the time runs out (roadmap D-29).
+    DisplayRemoved {
+        /// Milliseconds left until the host gives up: as the capture
+        /// reported it (host), or as the host sent it (viewer, counted
+        /// from when the message arrived).
+        remaining_ms: u32,
+    },
 }
 
 impl PauseReason {
@@ -101,16 +109,29 @@ impl PauseReason {
             PauseReason::DisplayUnavailable => 1,
             PauseReason::AccessLost => 2,
             PauseReason::Other => 3,
+            PauseReason::DisplayRemoved { .. } => 4,
         }
     }
 
-    /// From a paused `StreamState.reason` (non-zero; checked by the
-    /// envelope validator). Unknown values are a newer host's reason: other.
-    pub fn from_wire(v: u32) -> Self {
-        match v {
+    /// From a paused `StreamState` (reason non-zero, time left bounded:
+    /// both checked by the envelope validator). Unknown values are a newer
+    /// host's reason: other. The time left only means something with
+    /// "display removed".
+    pub fn from_wire(reason: u32, remaining_ms: u32) -> Self {
+        match reason {
             1 => PauseReason::DisplayUnavailable,
             2 => PauseReason::AccessLost,
+            4 => PauseReason::DisplayRemoved { remaining_ms },
             _ => PauseReason::Other,
+        }
+    }
+
+    /// `StreamState.remaining_ms` for this reason: 0 unless the display
+    /// was removed.
+    pub fn remaining_ms(self) -> u32 {
+        match self {
+            PauseReason::DisplayRemoved { remaining_ms } => remaining_ms,
+            _ => 0,
         }
     }
 }

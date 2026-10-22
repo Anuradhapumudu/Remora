@@ -157,8 +157,16 @@ async fn serve(args: ServeArgs) -> anyhow::Result<()> {
     ui.print_code(false);
 
     let mut stdin = stdin_lines();
+    // D-29: while the captured display is removed, say how long is left.
+    let mut wait_line = tokio::time::interval(remora_app::cli::WAIT_LINE_EVERY);
+    wait_line.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     loop {
         tokio::select! {
+            _ = wait_line.tick() => {
+                if let Some(left) = ui.server.pause_remaining() {
+                    println!("{}", remora_app::cli::display_removed_text(left));
+                }
+            }
             ev = events.recv() => {
                 let Some(ev) = ev else { break };
                 ui.handle_event(ev);
@@ -537,9 +545,16 @@ impl crate::stream::VideoOut for Out {
     }
 
     fn capture(&self, status: remora_session::CaptureStatus) {
-        use remora_session::CaptureStatus;
+        use remora_session::{CaptureStatus, PauseReason};
         match status {
             CaptureStatus::Running => println!("capture resumed"),
+            CaptureStatus::Interrupted(PauseReason::DisplayRemoved { remaining_ms }) => {
+                let left = std::time::Duration::from_millis(u64::from(remaining_ms));
+                println!(
+                    "capture paused - {} (viewers are told)",
+                    remora_app::cli::display_removed_text(left)
+                );
+            }
             CaptureStatus::Interrupted(r) => println!("capture paused ({r:?}) - viewers are told"),
             CaptureStatus::Stopped => println!("capture stopped - active sessions end"),
         }

@@ -503,10 +503,14 @@ fn on_active(
         Some(envelope::Msg::Control(Control {
             kind: Some(control::Kind::StreamState(st)),
         })) => {
-            // Shape (paused <=> reason != 0) is checked by the envelope
-            // validator; an unknown reason is a newer host's: "other".
+            // Shape (paused <=> reason != 0, time left bounded) is checked
+            // by the envelope validator; an unknown reason is a newer
+            // host's: "other".
             out.push(if st.paused {
-                ViewerAction::StreamPaused(crate::PauseReason::from_wire(st.reason))
+                ViewerAction::StreamPaused(crate::PauseReason::from_wire(
+                    st.reason,
+                    st.remaining_ms,
+                ))
             } else {
                 ViewerAction::StreamResumed
             });
