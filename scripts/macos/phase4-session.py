@@ -42,15 +42,21 @@ HOST_PROC = "RemoraDev.app/Contents/MacOS/remora-host"
 # Thresholds: docs/phase4-criteria.md §4 and §7 (change them only there, by a §12 entry).
 P1_P95_MS = 20.0
 P2_P95_MS = 11.9
-P3_MIN_DRAWN = 3528  # of 3600 in 60 s (98 %)
+P3_MIN_SHARE = 0.98  # of the frames the screen produced (captured) in the run, drawn
+MOTION_MIN_FPS = 55  # P3 validity floor (criteria §4, owner 2026-10-23): 3300 in 60 s
 P5_MAX_MB, P5_GROWTH_MB, P5_SLOPE_MB_MIN = 150.0, 2.0, 0.1
 P6_MAX_PCT = 2.0
 P8_C12_P95_MS = 11.0
 T2_PAUSE_S, T2_RESUME_S, T2_GROWTH_MB = 1.0, 2.0, 2.0
 T3_RESUME_S = 2.0
-MOTION_MIN_FPS = 55  # a motion run below this did not have the motion page on screen
 
 SECRET = re.compile(r"^(code|password): ")
+# Start time of this step: in every file name, so no run overwrites another.
+STAMP = datetime.datetime.now().strftime("%H%M")
+
+
+def log_path(name):
+    return os.path.join(LOGS, f"{STAMP}-{name}")
 
 
 # ------------------------------------------------------------------ output --
@@ -59,7 +65,9 @@ class Report:
     """Collects one step's text; writes results/phase4/<step>.txt and summary.md."""
 
     def __init__(self, step):
-        self.step, self.lines = step, []
+        # Each run of a step keeps its own files: "<step>-<HHMM>".
+        self.step = f"{step}-{STAMP}"
+        self.lines = []
         os.makedirs(LOGS, exist_ok=True)
 
     def say(self, text=""):
@@ -80,12 +88,12 @@ class Report:
     def save(self):
         with open(os.path.join(RESULTS, f"{self.step}.txt"), "w") as fh:
             fh.write("\n".join(self.lines) + "\n")
-        print(f"(written: results/phase4/{self.step}.txt, summary.md, logs/)")
+        print(f"(written: results/phase4/{self.step}.txt, summary.md, logs/{STAMP}-*)")
 
 
 def write_log(name, lines):
     """A process's output for the record, without one-time codes or passwords."""
-    with open(os.path.join(LOGS, name), "w") as fh:
+    with open(log_path(name), "w") as fh:
         for _, line in lines:
             fh.write("[redacted]\n" if SECRET.match(line) else line + "\n")
 
@@ -334,17 +342,22 @@ def step_p1(a, rep):
         write_log(f"p1-run{run}-host.log", hl)
         write_log(f"p1-run{run}-viewer.log", vl)
 
-        sent = {}
+        sent, captured, not_encoded = {}, set(), 0
         for _, line in hl:
             if line.startswith("timing: "):
                 f = fields(line)
                 sent[f["capture_us"]] = f
-        if not sent:
-            rep.verdict(f"P1 run {run}", False, "the host sent no frames", valid=False)
+            elif line.startswith("captured: "):
+                captured.add(fields(line)["capture_us"])
+        if not sent or not captured:
+            rep.verdict(f"P1 run {run}", False, "the host captured or sent no frames", valid=False)
             continue
-        t0 = min(sent) + a.warmup * 1_000_000
+        t0 = min(captured) + a.warmup * 1_000_000
         t1 = t0 + a.seconds * 1_000_000
         sent_in = {k: v for k, v in sent.items() if t0 <= k < t1}
+        captured_in = {k for k in captured if t0 <= k < t1}
+        not_encoded = sum(1 for _, l in hl if l.startswith("not encoded: ")
+                          and t0 <= fields(l).get("capture_us", 0) < t1)
         drawn = []
         for _, line in vl:
             if line.startswith("timing: "):
@@ -367,13 +380,15 @@ def step_p1(a, rep):
                            ("  received->decoded", "received_us", "decoded_us"),
                            ("  decoded->drawn", "decoded_us", "drawn_us")]:
             rep.say(row(name, col(x, y))[0])
-        caps = sorted(sent_in)
+        caps = sorted(captured_in)
         gaps = [(b - c) / 1000 for c, b in zip(caps, caps[1:])]
         rep.say(row("P4 frame interval", gaps)[0])
         rep.say(row("P4 drawn->presented", col("drawn_us", "presented_us"))[0])
-        fps = len(sent_in) / a.seconds
-        rep.say(f"P3 frames sent {len(sent_in)} ({fps:.1f} fps), drawn {len(drawn)}; "
-                f"viewer {counters}; stats lines saying occluded: {occluded}")
+        fps = len(captured_in) / a.seconds
+        share = len(drawn) / max(1, len(captured_in))
+        rep.say(f"P3 source: {len(captured_in)} frames captured ({fps:.1f} fps), {not_encoded} not"
+                f" encoded, {len(sent_in)} sent, {len(drawn)} drawn ({100 * share:.2f} %);"
+                f" stats lines saying occluded: {occluded}")
         # P3 judges the measured window only: the viewer's running totals
         # from its once-a-second stats line at the start and at the end of
         # it (±1 s). Drops before the window is clicked to the front (the
@@ -383,34 +398,52 @@ def step_p1(a, rep):
             for when, line in vl:
                 if line.startswith("stats: ") and when <= t:
                     last = line
-            return {k: int(v) for k, v in re.findall(r"(refused|failed|dropped) (\d+)", last or "")}
+            return {k.replace(" ", "_"): int(v) for k, v in
+                    re.findall(r"(refused|failed|dropped|no drawable) (\d+)", last or "")}
+        def media_at(t):
+            last = None
+            for when, line in vl:
+                if line.startswith("media: ") and when <= t:
+                    last = line
+            return fields(last or "")
         begin = viewer.active_t + a.warmup
         s0, s1 = stats_at(begin), stats_at(begin + a.seconds)
-        c = {k: s1.get(k, 0) - s0.get(k, 0) for k in ("refused", "failed", "dropped")}
+        m0, m1 = media_at(begin), media_at(begin + a.seconds)
+        media = {k: m1.get(k, 0) - m0.get(k, 0) for k in
+                 ("auth_failed", "frames_dropped", "bad_fragments", "replayed", "too_old")}
+        rep.say("   media in the measured window: " + ", ".join(f"{k} {v}" for k, v in media.items())
+                + ("" if m1 else " (no media lines: viewer built before 2026-10-23)"))
+        c = {k: s1.get(k, 0) - s0.get(k, 0)
+             for k in ("refused", "failed", "dropped", "no_drawable")}
         rep.say(f"   in the measured {a.seconds} s: refused {c['refused']}, failed {c['failed']},"
                 f" dropped {c['dropped']} (whole session: {counters})")
 
         valid = a.source != "screen" or fps >= MOTION_MIN_FPS
         if not valid:
-            rep.say(f"   only {fps:.1f} fps captured: the motion page was not on screen")
+            rep.say(f"   only {fps:.1f} fps captured (floor {MOTION_MIN_FPS}): the motion page was"
+                    " not on screen, or the screen did not keep up")
         # "no drawable N (occluded)" is a running total, so the word stays in
         # every later stats line once the window was covered for a moment
         # (e.g. before it was clicked). Covered DURING the measurement shows
-        # as frames received but not drawn.
-        not_drawn = len(sent_in) - len(drawn)
-        if occluded and not_drawn > 0.02 * max(1, len(sent_in)):
+        # as that total growing inside the measured window: a setup fault,
+        # not a viewer fault, so the run does not count.
+        if c["no_drawable"] > 0:
             valid = False
-            rep.say(f"   {not_drawn} frames not drawn while the viewer window was covered:"
-                    " click it to the front and keep your hands off")
+            rep.say(f"   the viewer window was covered during the measurement ({c['no_drawable']}"
+                    " pictures had nowhere to be drawn): click it to the front, hands off")
         p95_1, p95_2 = pct(p1, 95), pct(p2, 95)
-        min_drawn = int(P3_MIN_DRAWN * a.seconds / 60)
         rep.verdict(f"P1 run {run}", p95_1 < P1_P95_MS, f"p95 {p95_1:.2f} ms (limit < {P1_P95_MS})", valid)
         rep.verdict(f"P2 run {run}", p95_2 <= P2_P95_MS, f"p95 {p95_2:.2f} ms (limit <= {P2_P95_MS})", valid)
-        p3_ok = (len(drawn) >= min_drawn and c.get("failed", 0) == 0 and c.get("refused", 0) == 0
-                 and c.get("dropped", 0) == 0)
+        # Criteria §4 P3 (owner, 2026-10-23): of the frames the screen
+        # produced (captured) in the run, >= 98 % drawn; 0 decode errors.
+        p3_ok = (share >= P3_MIN_SHARE and c.get("failed", 0) == 0 and c.get("refused", 0) == 0
+                 and bool(m1) and media["auth_failed"] == 0 and media["frames_dropped"] == 0)
         rep.verdict(f"P3 run {run}", p3_ok,
-                    f"drawn {len(drawn)} (limit >= {min_drawn}), failed {c.get('failed', 0)}, "
-                    f"refused {c.get('refused', 0)}, dropped {c.get('dropped', 0)}", valid)
+                    f"drawn {len(drawn)} of {len(captured_in)} captured = {100 * share:.2f} %"
+                    f" (limit >= {100 * P3_MIN_SHARE:.0f} %), source {fps:.1f} fps (floor"
+                    f" {MOTION_MIN_FPS}), decode failed {c.get('failed', 0)}, refused"
+                    f" {c.get('refused', 0)}, AEAD failures {media['auth_failed']}, reassembly"
+                    f" drops {media['frames_dropped']}", valid)
         if valid:
             worst["P1"] = max(worst.get("P1", 0), p95_1)
             worst["P2"] = max(worst.get("P2", 0), p95_2)
@@ -480,7 +513,7 @@ def step_p8(a, rep):
         r = subprocess.run([DEV_APP, "run", "bench-capture", "--seconds", "60"],
                            capture_output=True, text=True, cwd=ROOT)
         out = r.stdout + r.stderr
-        with open(os.path.join(LOGS, f"p8-run{run}.log"), "w") as fh:
+        with open(log_path(f"p8-run{run}.log"), "w") as fh:
             fh.write(out)
         fps = re.search(r"complete frames: \d+ \(([\d.]+) fps\)", out)
         c12 = re.search(r"C12 screen → encoded\s+([\d.]+)\s+([\d.]+)", out)
@@ -506,7 +539,7 @@ def step_m7(a, rep):
                         "m7_decode_memory", "--", "--nocapture"],
                        capture_output=True, text=True, cwd=ROOT)
     out = r.stdout + r.stderr
-    with open(os.path.join(LOGS, "m7.log"), "w") as fh:
+    with open(log_path("m7.log"), "w") as fh:
         fh.write(out)
     line = next((l for l in out.splitlines() if l.startswith("M7 memory limit: ")), "")
     for l in out.splitlines():

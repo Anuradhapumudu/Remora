@@ -81,7 +81,9 @@ struct ConnectArgs {
     no_window: bool,
     /// Print one `timing:` line per drawn frame on stderr: shared-clock
     /// times of capture, arrival, decode, GPU draw done and present
-    /// (latency measurement, phase4-criteria P1/P2). Times only.
+    /// (latency measurement, phase4-criteria P1/P2), and once a second a
+    /// `media:` line with the media datagram counts (P3). Times and counts
+    /// only.
     #[arg(long)]
     timing: bool,
 }
@@ -232,6 +234,7 @@ fn identity(file: Option<PathBuf>) -> anyhow::Result<()> {
 }
 
 async fn run_connect(args: ConnectArgs, display: Display) -> anyhow::Result<u8> {
+    let timing = args.timing;
     // The code is checked before any network traffic (A07: expiry).
     let code = ConnectionCode::parse(args.code.trim(), unix_now()).map_err(|e| {
         anyhow!(
@@ -328,6 +331,7 @@ async fn run_connect(args: ConnectArgs, display: Display) -> anyhow::Result<u8> 
         &mut decoder,
         display.close,
         &*display.on_pause,
+        timing,
     )
     .await;
     let t = decoder.finish();
@@ -346,9 +350,14 @@ async fn session_loop(
     decoder: &mut decode::Decoder,
     mut close: Option<tokio::sync::oneshot::Receiver<()>>,
     on_pause: &(dyn Fn(Option<Pause>) + Send),
+    timing: bool,
 ) -> u8 {
     let mut outcome: Option<u8> = None;
     let mut pause: Option<Pause> = None;
+    // `--timing`: the media counts once a second, so a measurement can
+    // check its own window (P3: 0 authentication failures, 0 frames
+    // given up). Counts only, never content (INV9).
+    let mut media_line = tokio::time::interval(std::time::Duration::from_secs(1));
     // D-29: while the host waits for its removed display, say how long is left.
     let mut wait_line = tokio::time::interval(remora_app::cli::WAIT_LINE_EVERY);
     wait_line.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -357,6 +366,16 @@ async fn session_loop(
             _ = wait_line.tick() => {
                 if let Some(p) = pause.filter(|p| p.deadline.is_some()) {
                     println!("{}", p.text());
+                }
+                continue;
+            }
+            _ = media_line.tick(), if timing => {
+                if let Some(m) = client.media_stats().await {
+                    eprintln!(
+                        "media: opened={} auth_failed={} replayed={} too_old={} unknown_key={} bad_header={} bad_fragments={} late_fragments={} frames={} frames_dropped={}",
+                        m.opened, m.auth_failed, m.replayed, m.too_old, m.unknown_key,
+                        m.bad_header, m.bad_fragments, m.late_fragments, m.frames, m.frames_dropped
+                    );
                 }
                 continue;
             }

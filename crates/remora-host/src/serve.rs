@@ -544,6 +544,19 @@ impl crate::stream::VideoOut for Out {
         }
     }
 
+    fn captured(&self, capture_ts_us: u64) {
+        if self.timing {
+            // Times only (INV9): P3's denominator.
+            eprintln!("captured: capture_us={capture_ts_us}");
+        }
+    }
+
+    fn not_encoded(&self, capture_ts_us: u64, why: crate::stream::NotEncoded) {
+        if self.timing {
+            eprintln!("not encoded: capture_us={capture_ts_us} ({why:?})");
+        }
+    }
+
     fn capture(&self, status: remora_session::CaptureStatus) {
         use remora_session::{CaptureStatus, PauseReason};
         match status {

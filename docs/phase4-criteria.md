@@ -80,7 +80,7 @@ of p95s is not the p95 of the sum).
 | **P0** | Same clock in both processes | \|offset\| ≤ 50 µs, round trip ≤ 200 µs | Ping-pong of `mach_absolute_time()` over a pipe, 1000 rounds, NTP formula. **Plant:** add 1 ms to one side → must fail |
 | **P1** | **End-to-end** (§3 start → end) | p95 **< 20 ms**; p50, p99, max reported | 60 s motion test (phase2 §3 motion page, full screen), every drawn frame, matched by frame ID; 3 runs, worst run counts |
 | **P2** | **Encoded frame ready → drawn** (the remaining-budget segment) | p95 **≤ 11.9 ms** | Same runs; per-stage stamps `encode_done`, `sent`, `received_last_fragment`, `decode_done`, `drawn` reported p50/p95 |
-| P3 | Viewer keeps up | drawn ≥ **3528** in 60 s (98 %), **0** decode errors, **0** AEAD failures, **0** reassembly drops on clean loopback | Counters on both sides |
+| P3 | Viewer keeps up | Of the frames the screen produced during the 60 s run, at least **98 %** are drawn by the viewer; **0** decode errors, **0** AEAD failures, **0** reassembly drops on clean loopback. A run counts only if the screen produced **≥ 55 fps** (3300 frames in 60 s). *(Was "drawn ≥ 3528 in 60 s", which assumed a 60 fps source; changed 2026-10-23, §12)* | Counters on both sides, inside the measured 60 s. "Produced" is counted where Remora first sees a frame: each frame ScreenCaptureKit delivers with new content (`serve --timing`: one `captured:` line; frames the encoder drops or fails: `not encoded:`). A frame the screen made but the capture never delivered cannot be counted; it shows only as a gap in P4's frame interval. Viewer: `connect --timing` prints the decoder counts and a `media:` line (AEAD failures, frames given up by reassembly) once a second |
 | P4 | Display wait (information) | reported, not gated | Interval `drawn` → `present()` returned, and frame interval, for `Immediate` and `Fifo`. Glass-to-glass only if a camera is available (roadmap D-19) |
 | P5 | Viewer memory | `phys_footprint` **< 150 MB**, and growth min 1 → min 10 **≤ 2 MB**, slope **≤ 0.1 MB/min** | 10-minute motion session, sampled every 10 s (as C4) |
 | P6 | Host CPU while streaming a **static** screen | **< 2 %** of one core over 60 s, including helper processes (as C3) | As C3, now with the net stack running |
@@ -646,3 +646,28 @@ The phase report lists the whole deferred list row by row (CLAUDE.md).
   every key-derivation label, and §8 already treats a new optional field
   as minor) the owner chose a **minor addition** recorded in protocol.md
   §8. Adds a test item; no threshold changes.
+* **2026-10-23 — P3 reworded after a FAIL (owner).** In the owner's P1
+  session, run 1 failed P3 as it was written ("drawn ≥ 3528 in 60 s"):
+  3376 drawn. That run's viewer drew **100 %** of the 3376 frames the
+  host sent; the screen itself changed only **56.3 times a second**
+  (runs 2 and 3: 59.2 and 59.5 fps, 100 % drawn, PASS). The old wording
+  assumed the source produced 60 fps (3528 = 98 % of 3600). Owner's
+  decision: *"Of the frames the screen produced during the 60 s run, at
+  least 98 % are drawn by the viewer"* (same tolerance), and a validity
+  floor in the criteria rather than only in the runner: **a run counts
+  only if the screen produced at least 55 fps (3300 frames in 60 s)**.
+  "Produced" is measured as frames ScreenCaptureKit delivered with new
+  content — the earliest point Remora can count a frame; the owner asked
+  for losses anywhere in the chain including capture, and losses inside
+  the capture itself are visible only as gaps in P4's frame interval
+  (said so to the owner the same day). That count did not exist when runs
+  1–3 were made: the host logged a frame only once encoded and sent, and
+  an encoder drop left no trace. The host now logs `captured:` and `not
+  encoded:` (`p3_every_captured_frame_is_accounted_for`, 3 plants caught),
+  and the viewer logs its media counts so the AEAD and reassembly parts
+  of P3 are checked inside the window (before, the runner did not read
+  them). **Runs 1–3 stay in the results unchanged** (`results/phase4/
+  p1-0140.txt`; run 1 recorded as FAIL under the old wording). Under the
+  new wording run 1 passes on the frames it sent (100 %); whether it
+  captured frames it never sent was not logged, so P1 is run again with
+  the capture count. Not a threshold change for P1 or P2.

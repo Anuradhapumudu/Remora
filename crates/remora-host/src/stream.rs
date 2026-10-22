@@ -37,6 +37,21 @@ pub(crate) trait VideoOut: Send + Sync + 'static {
     fn video(&self, keyframe: bool, capture_ts_us: u64, data: &[u8]);
     /// Capture paused, resumed or stopped.
     fn capture(&self, status: CaptureStatus);
+    /// A captured frame with new content goes to the encoder (P3 counts
+    /// these: the first point where Remora sees a frame the screen made).
+    fn captured(&self, capture_ts_us: u64);
+    /// A captured frame never became an encoded frame. Every captured
+    /// frame ends as exactly one [`video`](Self::video) or one of these.
+    fn not_encoded(&self, capture_ts_us: u64, why: NotEncoded);
+}
+
+/// Why a captured frame was not encoded.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum NotEncoded {
+    /// The encoder skipped it (e.g. it missed its real-time deadline).
+    Dropped,
+    /// The encoder refused or failed it.
+    Failed,
 }
 
 /// Display times of the frames inside the encoder, by encoder sequence
@@ -93,10 +108,19 @@ impl Streamer {
                 }
                 // A frame the encoder skipped is never referenced by later
                 // ones, so the stream stays decodable.
-                EncoderEvent::Dropped { .. } => {}
+                EncoderEvent::Dropped { seq } => {
+                    let slot = &s.display_us[seq as usize % IN_FLIGHT];
+                    s.out
+                        .not_encoded(slot.load(Ordering::Relaxed), NotEncoded::Dropped);
+                }
                 // A failed frame may leave the encoder's references in an
                 // unknown state: start again from a keyframe.
-                EncoderEvent::Error { .. } => s.force.store(true, Ordering::Relaxed),
+                EncoderEvent::Error { seq, .. } => {
+                    s.force.store(true, Ordering::Relaxed);
+                    let slot = &s.display_us[seq as usize % IN_FLIGHT];
+                    s.out
+                        .not_encoded(slot.load(Ordering::Relaxed), NotEncoded::Failed);
+                }
             }),
         )
         .context("hardware encoder")?;
@@ -114,14 +138,16 @@ impl Streamer {
                         return; // nothing changed on screen: nothing to send
                     };
                     let shown = f.display_time();
-                    s.display_us[calls as usize % IN_FLIGHT]
-                        .store(display_us(shown), Ordering::Relaxed);
+                    let shown_us = display_us(shown);
+                    s.display_us[calls as usize % IN_FLIGHT].store(shown_us, Ordering::Relaxed);
                     calls += 1;
+                    s.out.captured(shown_us);
                     let keyframe = s.force.swap(false, Ordering::Relaxed);
                     let pts = shown.saturating_duration_since(started);
                     let sent = enc.lock().map(|mut e| e.encode(image, pts, keyframe));
                     if !matches!(sent, Ok(Ok(_))) {
                         s.force.store(true, Ordering::Relaxed);
+                        s.out.not_encoded(shown_us, NotEncoded::Failed);
                     }
                 }
                 CaptureEvent::Interrupted(reason) => s
@@ -294,7 +320,7 @@ mod tests {
     }
 
     #[derive(Default)]
-    struct Recorder(Mutex<Vec<Rec>>);
+    struct Recorder(Mutex<Vec<Rec>>, Mutex<Vec<u64>>, Mutex<Vec<u64>>);
 
     impl VideoOut for Recorder {
         fn video(&self, keyframe: bool, capture_ts_us: u64, data: &[u8]) {
@@ -307,6 +333,12 @@ mod tests {
         }
         fn capture(&self, status: CaptureStatus) {
             self.0.lock().unwrap().push(Rec::Capture(status));
+        }
+        fn captured(&self, capture_ts_us: u64) {
+            self.1.lock().unwrap().push(capture_ts_us);
+        }
+        fn not_encoded(&self, capture_ts_us: u64, _why: NotEncoded) {
+            self.2.lock().unwrap().push(capture_ts_us);
         }
     }
 
@@ -558,5 +590,30 @@ mod tests {
                 remaining_ms: u32::MAX
             }
         );
+    }
+
+    /// P3's count: every captured frame is reported once, and ends as
+    /// exactly one sent frame or one "not encoded" (so frames lost between
+    /// capture and network show up in the timing log).
+    #[test]
+    fn p3_every_captured_frame_is_accounted_for() {
+        let (rec, s) = run(vec![Step::Frames(40)]);
+        rec.wait_videos(40);
+        s.stop();
+        let captured = rec.1.lock().unwrap().clone();
+        let mut ends: Vec<u64> = rec
+            .all()
+            .iter()
+            .filter_map(|r| match r {
+                Rec::Video { ts_us, .. } => Some(*ts_us),
+                Rec::Capture(_) => None,
+            })
+            .chain(rec.2.lock().unwrap().iter().copied())
+            .collect();
+        let mut want = captured.clone();
+        assert_eq!(captured.len(), 40);
+        want.sort_unstable();
+        ends.sort_unstable();
+        assert_eq!(ends, want);
     }
 }
