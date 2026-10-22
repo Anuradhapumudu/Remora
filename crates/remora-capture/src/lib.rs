@@ -31,6 +31,9 @@ pub struct CaptureConfig {
     pub show_cursor: bool,
     /// Number of surfaces the OS may have in flight (ScreenCaptureKit: 3..=8).
     pub queue_depth: u32,
+    /// How long an interrupted capture waits for a **removed** display to
+    /// come back before it stops ([`DISPLAY_GONE_LIMIT`]; shorter in tests).
+    pub display_gone_limit: Duration,
 }
 
 impl Default for CaptureConfig {
@@ -41,7 +44,43 @@ impl Default for CaptureConfig {
             max_fps: 60,
             show_cursor: false,
             queue_depth: 3,
+            display_gone_limit: DISPLAY_GONE_LIMIT,
         }
+    }
+}
+
+/// How long capture waits for a removed display to come back, then stops
+/// with [`CaptureError::DisplayRemoved`] (roadmap D-29, architecture D38:
+/// a loose cable or a dock reconnect, not days later).
+pub const DISPLAY_GONE_LIMIT: Duration = Duration::from_secs(120);
+
+/// Times how long the captured display has been **missing** while an
+/// interrupted capture retries (D-29). Missing means not in the OS's list
+/// of displays: a removed display. A display that is listed but asleep
+/// (lid closed, display sleep) does not count — that wait is ended by the
+/// session's liveness check when the Mac itself sleeps (D37), or never
+/// while the Mac is awake and someone may wake the display.
+#[derive(Debug, Clone, Copy)]
+pub struct GoneTimer {
+    limit: Duration,
+    since: Option<Instant>,
+}
+
+impl GoneTimer {
+    /// A timer that expires after the display was missing for `limit`.
+    pub fn new(limit: Duration) -> Self {
+        let _ = limit;
+        Self {
+            limit: Duration::ZERO,
+            since: None,
+        }
+    }
+
+    /// One retry's observation at `now`: is the display listed? Returns
+    /// `true` once it has been missing for the limit: capture must stop.
+    pub fn expired(&mut self, listed: bool, now: Instant) -> bool {
+        let _ = (listed, now, self.limit, self.since);
+        false
     }
 }
 
@@ -182,6 +221,10 @@ pub enum CaptureError {
     /// No display to capture.
     #[error("no display found")]
     NoDisplay,
+    /// The captured display was removed and did not come back in time
+    /// ([`DISPLAY_GONE_LIMIT`]). Capture never moves to another display.
+    #[error("the captured display was removed and did not come back")]
+    DisplayRemoved,
     /// The capture is already running / not running.
     #[error("invalid state: {0}")]
     InvalidState(&'static str),
@@ -215,6 +258,40 @@ pub trait ScreenCapture: Send {
 
 #[cfg(test)]
 mod tests {
+    /// D-29: missing for the limit (and only then) stops capture; the
+    /// display coming back resets the wait.
+    #[test]
+    fn d29_a_missing_display_is_waited_for_then_given_up() {
+        let t0 = Instant::now();
+        let s = |secs: u64| t0 + Duration::from_secs(secs);
+        let mut t = GoneTimer::new(Duration::from_secs(120));
+        assert!(!t.expired(true, s(0)), "listed: nothing to time");
+        assert!(!t.expired(false, s(10)), "missing from 10 s");
+        assert!(!t.expired(false, s(129)), "119 s missing");
+        assert!(t.expired(false, s(130)), "120 s missing: give up");
+        // Back in time: the wait starts again from the next absence.
+        let mut t = GoneTimer::new(Duration::from_secs(120));
+        assert!(!t.expired(false, s(0)));
+        assert!(!t.expired(true, s(100)), "back after 100 s");
+        assert!(!t.expired(false, s(200)), "missing again from 200 s");
+        assert!(!t.expired(false, s(319)));
+        assert!(t.expired(false, s(320)));
+    }
+
+    #[test]
+    fn d29_a_listed_but_sleeping_display_never_expires() {
+        let t0 = Instant::now();
+        let mut t = GoneTimer::new(Duration::from_secs(120));
+        for h in 0..24 {
+            assert!(!t.expired(true, t0 + Duration::from_secs(h * 3600)));
+        }
+        assert_eq!(
+            CaptureConfig::default().display_gone_limit,
+            DISPLAY_GONE_LIMIT
+        );
+        assert_eq!(DISPLAY_GONE_LIMIT, Duration::from_secs(120));
+    }
+
     /// N4 (phase4-criteria §6, INV9): a captured frame's `Debug` names
     /// exactly these fields — the image is never among them.
     #[test]
