@@ -1,0 +1,66 @@
+Phase 4 p5, 2026-10-23T18:53:00, commit 6f1d984
+P5 covered: viewer memory over 10 min with the window covered (synthetic picture, 60 fps), sampled every 10 s
+   0.17 min   144.00 MB
+   0.34 min   143.00 MB
+   0.50 min   141.00 MB
+   0.67 min   142.00 MB
+   0.84 min   141.00 MB
+   1.00 min   141.00 MB
+   1.17 min   141.00 MB
+   1.34 min   141.00 MB
+   1.51 min   141.00 MB
+   1.67 min   141.00 MB
+   1.84 min   141.00 MB
+   2.01 min   141.00 MB
+   2.18 min   142.00 MB
+   2.34 min   142.00 MB
+   2.51 min   142.00 MB
+   2.68 min   141.00 MB
+   2.85 min   141.00 MB
+   3.01 min   142.00 MB
+   3.18 min   142.00 MB
+   3.35 min   142.00 MB
+   3.52 min   142.00 MB
+   3.68 min   141.00 MB
+   3.85 min   141.00 MB
+   4.02 min   141.00 MB
+   4.19 min   141.00 MB
+   4.35 min   141.00 MB
+   4.52 min   141.00 MB
+   4.69 min   141.00 MB
+   4.86 min   141.00 MB
+   5.02 min   141.00 MB
+   5.19 min   142.00 MB
+   5.36 min   142.00 MB
+   5.53 min   141.00 MB
+   5.69 min   143.00 MB
+   5.86 min   142.00 MB
+   6.03 min   142.00 MB
+   6.20 min   142.00 MB
+   6.36 min   141.00 MB
+   6.53 min   141.00 MB
+   6.70 min   142.00 MB
+   6.87 min   142.00 MB
+   7.04 min   141.00 MB
+   7.20 min   141.00 MB
+   7.37 min   141.00 MB
+   7.54 min   141.00 MB
+   7.71 min   141.00 MB
+   7.87 min   141.00 MB
+   8.04 min   141.00 MB
+   8.21 min   141.00 MB
+   8.38 min   141.00 MB
+   8.54 min   141.00 MB
+   8.71 min   141.00 MB
+   8.88 min   141.00 MB
+   9.05 min   142.00 MB
+   9.21 min   141.00 MB
+   9.38 min   141.00 MB
+   9.55 min   142.00 MB
+   9.72 min   141.00 MB
+   9.88 min   141.00 MB
+  10.05 min   142.00 MB
+video: 36181 frames decoded, 0 refused, 0 waiting for a keyframe, 0 failed, 5 dropped
+covered check: 538 of 538 stats lines after minute 1 drew frames
+   the viewer window was drawing, so it was not covered: this run does not count
+==> P5 covered: peak 144.0 MB (limit < 150.0), growth min 1 -> end +1.00 MB (limit <= 2.0), slope -0.007 MB/min (limit <= 0.1) -> INVALID (not counted)

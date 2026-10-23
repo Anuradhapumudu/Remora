@@ -1,0 +1,6 @@
+Phase 4 check, 2026-10-23T18:08:32, commit 6f1d984
+power: AC
+Low Power Mode: off
+video: 178 frames decoded, 0 refused, 1 waiting for a keyframe, 0 failed, 1 dropped
+Screen Recording: checked by the first P1 run (capture of the real screen)
+==> check: AC True, Low Power Mode off, session decoded 178 frames -> PASS

@@ -50,3 +50,20 @@
 - 2026-10-23 02:38 M7 memory limit: M7 memory limit: checked (+0.0 MB, limit +8 MB); live decoder sessions and pictures checked (test exit 0) -> PASS
 - 2026-10-23 02:42 T2: pause <= 1.0 s, resume <= 2.0 s, keyframe after every resume: yes; same session: yes; host memory +0.00 MB (limit <= 2.0) -> PASS
 - 2026-10-23 02:52 T3 lid: resumed 1.7 s after the display came on (limit 2.0 s, +1 s log resolution), keyframe first: True, same session: yes -> PASS
+- 2026-10-23 18:08 check: AC True, Low Power Mode off, session decoded 178 frames -> PASS
+- 2026-10-23 18:10 T3 lid, Mac sleeps: resumed 1.1 s after the display came on (limit 2.0 s, +1 s log resolution), keyframe first: True, same session: yes -> PASS
+- 2026-10-23 18:13 P1 run 1: p95 14.53 ms (limit < 20.0) -> PASS
+- 2026-10-23 18:13 P2 run 1: p95 4.54 ms (limit <= 11.9) -> PASS
+- 2026-10-23 18:13 P3 run 1: drawn 3600 of 3600 captured = 100.00 % (limit >= 98 %), source 60.0 fps (floor 55), decode failed 0, refused 0, AEAD failures 0, reassembly drops 0 -> PASS
+- 2026-10-23 18:14 P1 run 2: p95 13.42 ms (limit < 20.0) -> PASS
+- 2026-10-23 18:14 P2 run 2: p95 4.01 ms (limit <= 11.9) -> PASS
+- 2026-10-23 18:14 P3 run 2: drawn 3600 of 3600 captured = 100.00 % (limit >= 98 %), source 60.0 fps (floor 55), decode failed 0, refused 0, AEAD failures 0, reassembly drops 0 -> PASS
+- 2026-10-23 18:16 P1 run 3: p95 13.30 ms (limit < 20.0) -> PASS
+- 2026-10-23 18:16 P2 run 3: p95 3.95 ms (limit <= 11.9) -> PASS
+- 2026-10-23 18:16 P3 run 3: drawn 3593 of 3593 captured = 100.00 % (limit >= 98 %), source 59.9 fps (floor 55), decode failed 0, refused 0, AEAD failures 0, reassembly drops 0 -> PASS
+- 2026-10-23 18:16 P1 worst run: p95 14.53 ms -> PASS
+- 2026-10-23 18:16 P2 worst run: p95 4.54 ms -> PASS
+- 2026-10-23 18:27 P5: peak 149.0 MB (limit < 150.0), growth min 1 -> end +0.00 MB (limit <= 2.0), slope -0.022 MB/min (limit <= 0.1) -> PASS
+- 2026-10-23 18:39 P5 covered: peak 143.0 MB (limit < 150.0), growth min 1 -> end +2.00 MB (limit <= 2.0), slope +0.153 MB/min (limit <= 0.1) -> INVALID (not counted)
+- 2026-10-23 18:51 P5 covered: peak 144.0 MB (limit < 150.0), growth min 1 -> end +1.00 MB (limit <= 2.0), slope +0.150 MB/min (limit <= 0.1) -> INVALID (not counted)
+- 2026-10-23 19:03 P5 covered: peak 144.0 MB (limit < 150.0), growth min 1 -> end +1.00 MB (limit <= 2.0), slope -0.007 MB/min (limit <= 0.1) -> INVALID (not counted)

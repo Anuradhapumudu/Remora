@@ -1,0 +1,7 @@
+Phase 4 t3-lid, 2026-10-23T18:09:58, commit 6f1d984
+T3 lid, the Mac sleeps (gate G-2; expected result written first in phase4-criteria §11c): close the lid when asked, wait about 30 s, open it
+display on (power log, 1 s resolution): 18:10:44; capture resumed 18:10:45.085
+viewer showed: stream paused (the host's display is asleep) - the session stays open | stream paused - The host's display is unavailable (lid closed or disconnected). Waiting, 120 s left. The session stays open | stream resumed
+viewer video: 159 frames decoded, 0 refused, 1 waiting for a keyframe, 0 failed, 1 dropped
+power log: 2026-10-23 18:10:19 +0530 Sleep               	Entering Sleep state due to 'Clamshell Sleep':TCPKeepAlive=active Using A
+==> T3 lid, Mac sleeps: resumed 1.1 s after the display came on (limit 2.0 s, +1 s log resolution), keyframe first: True, same session: yes -> PASS

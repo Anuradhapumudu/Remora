@@ -197,105 +197,6 @@ Before Phase 4 finishes, D-17 must have been examined (done 2026-10-19:
 docs/d17-video-surface-options.md).
 The phase report lists the whole deferred list row by row (CLAUDE.md).
 
-* **Step 7d follow-up: the open questions from the session (2026-10-23).**
-  1. **P5's 147 MB, and a leak found on the way.** Viewer memory by
-     setup (synthetic source, `footprint`): no window **6.3 MB**; window
-     covered **2427 MB after 15 s** — every picture's upload waited for a
-     `queue.submit` that only a draw makes, and a covered window cannot
-     draw. Fixed test-first (`ff35fcb` RED +897 MB over 300 undrawn
-     pictures, `b996e04` GREEN +0 MB): the covered window now holds
-     **89 MB**; a visible one **144 MB**, of which **94 MB** is GPU memory
-     owned through Metal/wgpu. That 94 MB did not change between the
-     window sizes tried, but resizing by script was refused for two of the
-     three sizes (no Accessibility permission), so "independent of window
-     size" is **not shown**. What inside wgpu/Metal holds it was not
-     determined (needs Instruments); listed for the phase report. P5's
-     owner run (visible window, flat 147–148 MB) stands; it could not
-     have caught the covered-window case.
-  2. **decoded → drawn vs its 1.5 ms budget.** Split with new timing
-     stamps (synthetic, window in front, 30 s, p50): hand-off to the
-     window thread 0.02 ms, upload 0.73 ms, getting a surface 0.03 ms,
-     GPU draw 1.17 ms. **No wait for the display's refresh is inside
-     it**: the time is copying each 3 MB picture (CPU into wgpu's
-     staging, then GPU into the texture) and the GPU's draw. So the code,
-     not the budget, is where the time goes; importing the decoder's
-     IOSurface directly (roadmap D-17 options) would remove the copy.
-     The fix in (1) does not slow it: decoded → drawn 1.95 ms with the
-     extra submit vs 2.06 ms without (that comparison is only 24 frames:
-     the window lost the front).
-  3. **T2's resume, 0.70–0.72 s vs 0.33 s in step 2.** Step 2's
-     capture-only test rerun the same night with the same sleep/wake
-     timing: **0.75–0.79 s**. The streaming host adds nothing; the Mac
-     took longer to bring the display back than on 2026-10-20. The power
-     log's whole-second times cannot show why.
-  4. **01:40 vs 02:16 P1 runs (≈ 3 ms apart at p50).** Every stage after
-     the encoder was about 1.5× slower at 01:40, including sending over
-     loopback (0.65 vs 0.33 ms), which no window setting affects: a
-     machine-wide state (load or clock speed), not Remora's code (only
-     log lines changed between them). Not determined further; both
-     sessions pass P1/P2.
-
-## 11c. T3 with the Mac asleep: expected result, written before the run (gate G-2)
-
-Written 2026-10-23, before the owner runs `scripts/macos/phase4-session.py
-t3-lid --mac-sleeps` (roadmap G-2). The run is compared against this; any
-difference is a finding, not something to explain away afterwards.
-
-**Setup.** Host and viewer run on the **same Mac** over loopback. The
-runner prevents only display and idle sleep (`caffeinate -di`, as Phase
-2's lid test, where the Mac slept ≈ 29 s), so closing the lid sleeps the
-Mac. The run counts only if the power log shows `Entering Sleep state due
-to 'Clamshell Sleep'` (the awake run of 2026-10-23 showed `Entering
-DarkWake state …` instead).
-
-**What the clocks do while the Mac sleeps (read, not assumed).** Rust's
-`Instant` on Apple systems is `CLOCK_UPTIME_RAW`, which "does not
-increment while the system is asleep" (std 1.99.1,
-`library/std/src/sys/time/unix.rs:55-67`). tokio's clock is
-`std::time::Instant::now()` (tokio 1.53.2 `src/time/clock.rs:15-16`) and
-quinn's runtime clock is tokio's (quinn 0.11.12 `src/runtime/tokio.rs:37-38`).
-So the QUIC idle timeout (30 s), the keep-alive and the 2-minute display
-wait all **stand still while the Mac sleeps**; only short maintenance
-wakes advance them.
-
-**Expected, step by step:**
-
-1. **Lid closed:** within about 1 s the host prints `capture paused
-   (DisplayAsleep)` and the viewer `stream paused (the host's display is
-   asleep)`. If the built-in display leaves the display list before the
-   Mac is fully asleep, an `unavailable … 120 s left` line may follow;
-   whether it does is recorded, not predicted. Then the Mac sleeps.
-2. **After 30–35 s:** **nothing.** The viewer is on the same sleeping Mac,
-   so it is asleep too, and its idle clock is not running: no `failed:
-   connection lost` line. D37's "the viewer reports connection lost after
-   30–35 s" needs the viewer on **another machine**, which this run
-   cannot show; that case is described below for Phase 5.
-3. **Lid opened:** no reconnect happens and none is needed. The same QUIC
-   connection simply continues, because no timeout ran during sleep.
-   Remora has no automatic reconnect at all. Capture's restart loop finds
-   the display listed: the host prints `capture resumed` **≤ 2 s after the
-   power log's `Display is turned on`**, the first frame after it is a
-   **keyframe**, and the viewer prints `stream resumed` in the **same
-   session**. If a countdown had started in step 1, it continues from
-   about where it stood, not 30 s lower.
-
-**PASS if:** the Mac really slept (power log), the session is the same one
-afterwards, `capture resumed` ≤ 2 s after the display came on (+1 s for
-the power log's whole-second times), keyframe first, and no `connection
-lost`. A session that ends on wake is a FAIL against this expectation and
-is reported with its logs.
-
-**For information: the two-machine case (Phase 5, not run here).** The
-host Mac sleeps; the viewer on another machine hears nothing for 30 s and
-prints `failed: connection lost - no reply from the host for 30 s
-(network down, or the host stopped)` (D37; `remora-viewer` main.rs). When
-the lid opens, the host's own connection has not timed out yet (its clock
-stood still); its packets reach a viewer that has already closed the
-connection, and the host's session ends — at once if the viewer's QUIC
-stack answers with a stateless reset, otherwise by the host's own idle
-timeout about 30 s later (**unverified** which; to be checked in Phase 5). The person at the viewer must connect again with a new code: there
-is no automatic reconnect.
-
 ## 11b. Progress notes
 
 * **Step 1 (2026-10-20).** P0 passes on the M4: offset between two
@@ -591,6 +492,131 @@ is no automatic reconnect.
   gate **G-2** (before the phase report is final); its expected result
   is written in §11c before it is run.
 
+* **Step 7d follow-up: the open questions from the session (2026-10-23).**
+  1. **P5's 147 MB, and a leak found on the way.** Viewer memory by
+     setup (synthetic source, `footprint`): no window **6.3 MB**; window
+     covered **2427 MB after 15 s** — every picture's upload waited for a
+     `queue.submit` that only a draw makes, and a covered window cannot
+     draw. Fixed test-first (`ff35fcb` RED +897 MB over 300 undrawn
+     pictures, `b996e04` GREEN +0 MB): the covered window now holds
+     **89 MB**; a visible one **144 MB**, of which **94 MB** is GPU memory
+     owned through Metal/wgpu. That 94 MB did not change between the
+     window sizes tried, but resizing by script was refused for two of the
+     three sizes (no Accessibility permission), so "independent of window
+     size" is **not shown**. What inside wgpu/Metal holds it was not
+     determined (needs Instruments); listed for the phase report. P5's
+     owner run (visible window, flat 147–148 MB) stands; it could not
+     have caught the covered-window case.
+  2. **decoded → drawn vs its 1.5 ms budget.** Split with new timing
+     stamps (synthetic, window in front, 30 s, p50): hand-off to the
+     window thread 0.02 ms, upload 0.73 ms, getting a surface 0.03 ms,
+     GPU draw 1.17 ms. **No wait for the display's refresh is inside
+     it**: the time is copying each 3 MB picture (CPU into wgpu's
+     staging, then GPU into the texture) and the GPU's draw. So the code,
+     not the budget, is where the time goes; importing the decoder's
+     IOSurface directly (roadmap D-17 options) would remove the copy.
+     The fix in (1) does not slow it: decoded → drawn 1.95 ms with the
+     extra submit vs 2.06 ms without (that comparison is only 24 frames:
+     the window lost the front).
+  3. **T2's resume, 0.70–0.72 s vs 0.33 s in step 2.** Step 2's
+     capture-only test rerun the same night with the same sleep/wake
+     timing: **0.75–0.79 s**. The streaming host adds nothing; the Mac
+     took longer to bring the display back than on 2026-10-20. The power
+     log's whole-second times cannot show why.
+  4. **01:40 vs 02:16 P1 runs (≈ 3 ms apart at p50).** Every stage after
+     the encoder was about 1.5× slower at 01:40, including sending over
+     loopback (0.65 vs 0.33 ms), which no window setting affects: a
+     machine-wide state (load or clock speed), not Remora's code (only
+     log lines changed between them). Not determined further; both
+     sessions pass P1/P2.
+
+* **Step 7d, second session (2026-10-23 evening, `results/phase4/*-18*`).**
+  Gate G-2 met (roadmap; matched §11c). P1/P2/P3 re-measured with the
+  covered-window fix: PASS, no regression. P5 with the window in front:
+  PASS at **149 MB of 150** (roadmap D-34). **P5 with the window covered:
+  closed as not achievable by hand (3 × INVALID); the guard is the
+  automated test `p5_pictures_that_are_never_drawn_do_not_pile_up`.** No
+  more attempts (owner). What is and is not covered:
+  * **Covered:** the automated test proves that uploads which are never
+    drawn do not pile up: it fails with the fix planted out (+896 MB on
+    the M4 and +896 MB on CI's VM, on its memory assertion) and passes with
+    it (+0 MB; 6 passes on CI's VM after its GPU wait was added, `6f1d984`).
+  * **Not covered:** no manual run reproduced a real window that cannot
+    draw. Covering the viewer with a full-screen terminal (18:29),
+    minimising it (18:41) and covering it with full-screen Safari (18:53)
+    each left it **drawing 60 fps** for 10 minutes (the runner's covered
+    check: 538 of 538 stats lines drew frames), so those runs were
+    INVALID. That exact path — a real window that gets no surface — is
+    guarded **only by the synthetic test, not by an end-to-end P5.** The
+    one real window seen without a surface was in a diagnostic probe
+    (window never brought to the front): 2427 MB after 15 s before the
+    fix, 89 MB after it — a single 15-second observation, not a P5 run.
+    When macOS withholds the surface is not known (step 6 saw it for a
+    hidden window).
+  * Finding from those runs: the viewer keeps drawing at 60 fps while
+    covered or minimised (roadmap D-35).
+
+## 11c. T3 with the Mac asleep: expected result, written before the run (gate G-2)
+
+Written 2026-10-23, before the owner runs `scripts/macos/phase4-session.py
+t3-lid --mac-sleeps` (roadmap G-2). The run is compared against this; any
+difference is a finding, not something to explain away afterwards.
+
+**Setup.** Host and viewer run on the **same Mac** over loopback. The
+runner prevents only display and idle sleep (`caffeinate -di`, as Phase
+2's lid test, where the Mac slept ≈ 29 s), so closing the lid sleeps the
+Mac. The run counts only if the power log shows `Entering Sleep state due
+to 'Clamshell Sleep'` (the awake run of 2026-10-23 showed `Entering
+DarkWake state …` instead).
+
+**What the clocks do while the Mac sleeps (read, not assumed).** Rust's
+`Instant` on Apple systems is `CLOCK_UPTIME_RAW`, which "does not
+increment while the system is asleep" (std 1.99.1,
+`library/std/src/sys/time/unix.rs:55-67`). tokio's clock is
+`std::time::Instant::now()` (tokio 1.53.2 `src/time/clock.rs:15-16`) and
+quinn's runtime clock is tokio's (quinn 0.11.12 `src/runtime/tokio.rs:37-38`).
+So the QUIC idle timeout (30 s), the keep-alive and the 2-minute display
+wait all **stand still while the Mac sleeps**; only short maintenance
+wakes advance them.
+
+**Expected, step by step:**
+
+1. **Lid closed:** within about 1 s the host prints `capture paused
+   (DisplayAsleep)` and the viewer `stream paused (the host's display is
+   asleep)`. If the built-in display leaves the display list before the
+   Mac is fully asleep, an `unavailable … 120 s left` line may follow;
+   whether it does is recorded, not predicted. Then the Mac sleeps.
+2. **After 30–35 s:** **nothing.** The viewer is on the same sleeping Mac,
+   so it is asleep too, and its idle clock is not running: no `failed:
+   connection lost` line. D37's "the viewer reports connection lost after
+   30–35 s" needs the viewer on **another machine**, which this run
+   cannot show; that case is described below for Phase 5.
+3. **Lid opened:** no reconnect happens and none is needed. The same QUIC
+   connection simply continues, because no timeout ran during sleep.
+   Remora has no automatic reconnect at all. Capture's restart loop finds
+   the display listed: the host prints `capture resumed` **≤ 2 s after the
+   power log's `Display is turned on`**, the first frame after it is a
+   **keyframe**, and the viewer prints `stream resumed` in the **same
+   session**. If a countdown had started in step 1, it continues from
+   about where it stood, not 30 s lower.
+
+**PASS if:** the Mac really slept (power log), the session is the same one
+afterwards, `capture resumed` ≤ 2 s after the display came on (+1 s for
+the power log's whole-second times), keyframe first, and no `connection
+lost`. A session that ends on wake is a FAIL against this expectation and
+is reported with its logs.
+
+**For information: the two-machine case (Phase 5, not run here).** The
+host Mac sleeps; the viewer on another machine hears nothing for 30 s and
+prints `failed: connection lost - no reply from the host for 30 s
+(network down, or the host stopped)` (D37; `remora-viewer` main.rs). When
+the lid opens, the host's own connection has not timed out yet (its clock
+stood still); its packets reach a viewer that has already closed the
+connection, and the host's session ends — at once if the viewer's QUIC
+stack answers with a stateless reset, otherwise by the host's own idle
+timeout about 30 s later (**unverified** which; to be checked in Phase 5). The person at the viewer must connect again with a new code: there
+is no automatic reconnect.
+
 ## 12. Changes to criteria
 
 * **2026-10-19 — owner approval.** R1–R5 approved as proposed. R1 and R2 are
@@ -788,3 +814,177 @@ is no automatic reconnect.
   new wording run 1 passes on the frames it sent (100 %); whether it
   captured frames it never sent was not logged, so P1 is run again with
   the capture count. Not a threshold change for P1 or P2.
+
+## 13. Results — the Phase 4 report (2026-10-23, draft for the owner)
+
+**Status:** every Phase 4 criterion passes on the M4, with three caveats
+listed in §13.5. Still to do before Phase 4 is done: **D-9** (remove the
+dev signing identity and the RemoraDev grant — last, after the owner
+reads this report) and the owner's acceptance. Evidence: `results/phase4/`
+(raw output of every measured run), the commits named below, CI on
+`6f1d984` (all five workflows green).
+
+### 13.1 Criteria, row by row
+
+| ID | Result | Numbers vs limit | Evidence |
+|---|---|---|---|
+| R1 | Done as decided | winit 0.30.13 + wgpu 30.0.1; present mode `Immediate` offered and used | architecture D41 |
+| R2 | Done as decided | CPU upload of NV12 planes; zero-copy still D-18 | D41; upload 0.78 ms p50 (§13.2) |
+| R3 | Done | stats in the title + one stderr line per second | D41 |
+| R4 | Done | INV2 tested on media; input → D-1b (Phase 6) | §5 |
+| R5 | Done | winit direct dependency | dependencies.md |
+| **P0** | PASS | offset ≤ 0.42 µs (≤ 50), round trip 3.4–3.75 µs (≤ 200); planted 1 ms skew caught | §11b step 1 |
+| **P1** | PASS | p95 worst run: **14.00 ms** (02:16 set), **14.53 ms** (18:12 set, with the fix); limit < 20 | `p1-0216.txt`, `p1-1812.txt` |
+| **P2** | PASS | p95 worst run 4.65 / 4.54 ms; limit ≤ 11.9 | same |
+| P3 | PASS (reworded 2026-10-23, §12) | 100 % of captured frames drawn in all 6 counted runs; sources 58.4–60.0 fps (floor 55); 0 decode/AEAD/reassembly failures | same; the 01:40 set (`p1-0140.txt`) is kept as recorded, run 1 FAIL under the old wording |
+| P4 | Reported | frame interval p50 16.67 ms; "present returned" comes **1.0–1.4 ms before** the GPU finishes (present only queues); `Fifo` not measured (`Immediate` was offered); glass-to-glass not measured (no camera, D-19) | same |
+| P5 | PASS, **1 MB margin** | window in front: peak **148 MB** (02:24) and **149 MB** (18:17), limit < 150; growth +0.00 MB, slope −0.008 / −0.022 MB/min. Covered window: not achievable by hand (§11b) | `p5-0224.txt`, `p5-1817.txt`; roadmap D-34 |
+| P6 | PASS | **0.88 %** of one core incl. VTEncoderXPCService; limit < 2 % | `p6-0236.txt` |
+| P7 | PASS | 90/90 frames drawn once, in order; loss and reorder cases never backwards, never twice | §11b step 6 |
+| P8 | PASS | C12 p95 7.61–7.64 ms (≤ 11); p50 7.49–7.51 ms (Phase 2: 7.51); C2 p50 7.06 ms (the D-10 drift was 9.0) | `p8-0205.txt` |
+| **M1a** | PASS | no frame window or canary in any datagram payload; plaintext-seal plant caught | §11b step 4 |
+| **M1b** | PASS | 10.7 MB of UDP payloads, entropy 7.9989 (≥ 7.99), no frame window or canary | `m1b_m4_n1_wire.rs`, 3afe9a0 |
+| **M2** | PASS | compile-fail doctests; one `send_datagram` call site (scanner) | §11b step 4 |
+| M3 | PASS | no media before `Active`; viewer drops pending-state datagrams unread | §11b step 4, §12 |
+| M4 | PASS | 150 replayed packets: 600/600 frames delivered once, drawn in increasing order | step 7b |
+| M5 | PASS | tamper / unknown key / truncation dropped and counted | step 4 |
+| M6 | PASS | every limit checked before storing or allocating, 32 MiB total budget; mutation 88 (82 caught, 5 unviable, 1 timeout, 0 missed); fuzz `video_reassembly` 13.6 M runs, 0 crashes | `remora-proto/tests/m6_video.rs`, d34952b RED / 54e4dc3 GREEN (step 3 has no §11b note — a gap in the record; its evidence is the commit) |
+| M7 | PASS | oversize refused before configuration; hostile streams no crash/hang; memory **+0.0 MB on the real M4** (limit +8) | step 5; `m7-0237.txt` |
+| M8 | PASS | 10⁶ packets, 20 rotations, no counter repeated | step 4 |
+| **N1** | PASS | 45 565 trace lines, no window or canary | step 7b |
+| **N2** | PASS | only the two key files on disk | step 7b |
+| **N3** | PASS | policy rule; plants caught | step 7b |
+| N4 | PASS | found and fixed three `Debug` leaks over plaintext | step 7b |
+| T1 | PASS | 12 sans-IO tests + D-29 tests; mutation 0 missed | steps 2, 7c |
+| T2 | PASS | 5/5: pause 0.08–0.10 s (≤ 1), resume 0.70–0.72 s (≤ 2), keyframe after every resume, same session, +0.00 MB | `t2-0240.txt` |
+| T3 | PASS | lid, Mac awake: resume 0.7–1.7 s after display on; lid, Mac asleep (G-2): 0.1–1.1 s, matched §11c; display removed: `Interrupted` ≤ 1 s, stop after the limit, 0.7 % CPU | `t3-lid-0249.txt`, `t3-lid-mac-sleeps-1809.txt`, step 7c |
+| T4 | PASS | no OS names in session/net; plant caught | step 2 |
+| §8 functional | PASS | `serve` streams after approval; the viewer window shows it; closing ends the session; CI's macOS runner encodes and decodes with VideoToolbox | steps 1, 5, 7a |
+
+### 13.2 Measured numbers vs the latency budget (§3)
+
+The 18:12 set (with the fix), p95 of the worst run:
+
+| Stage | Budget p95 | Measured p95 |
+|---|---|---|
+| Capture + encode | ≤ 11 | 9.37–10.01 |
+| Seal + send | 1.0 | 0.07–0.09 |
+| Loopback | — | 0.34–0.39 |
+| Decode | 4.0 | 1.50–1.69 |
+| Upload + draw to GPU completion | **1.5** | **2.08–2.42 — over** |
+| Sum after encode (P2) | 7.0 | 3.95–4.54 |
+
+**Over budget: decoded → drawn.** It does **not** include waiting for the
+display's refresh (getting a surface: 0.03 ms). It is the work: the hand-off
+to the window thread 0.02 ms, the CPU copy of each 3 MB picture 0.78 ms
+(p50), and the GPU draw 1.17 ms. The budget came from a spike that measured
+upload + draw on the CPU only (≤ 0.80 ms p95); the endpoint here is GPU
+completion. The code, not the budget, is where time can be saved: D-18
+(zero-copy import) removes the copy. The gates P1 and P2 pass with 5.5 and
+7.4 ms to spare.
+
+**Between sessions**, the same code measured P1 p50 ≈ 16.0 ms (01:40) and
+13.0–13.4 ms (02:16, 18:12): at 01:40 every stage after the encoder was
+about 1.5× slower, loopback included — a machine-wide state, not
+determined further (§11b).
+
+### 13.3 Manual test steps (exact)
+
+From `~/Documents/github/Remora` on the M4, AC power, Low Power Mode off,
+Do Not Disturb on, only Terminal (and Safari for the moving page) open:
+
+1. `scripts/macos/phase4-session.py check` — preflight; must say PASS.
+2. `open -a Safari scripts/macos/motion-pattern.html`, Option-click the
+   green button (fills the screen; not full screen), then
+   `scripts/macos/phase4-session.py p1`; drag each viewer window to the
+   bottom-right corner and click it once.
+3. `scripts/macos/phase4-session.py p8` (Safari as in 2, no viewer).
+4. `scripts/macos/phase4-session.py p5` (as in 2; 10 minutes).
+5. `osascript -e 'quit app "Safari"'`, then
+   `scripts/macos/phase4-session.py p6` (hands off for 80 s).
+6. `scripts/macos/phase4-session.py m7`.
+7. `scripts/macos/phase4-session.py t2` (the display goes off 5 times;
+   hands off).
+8. `scripts/macos/phase4-session.py t3-lid --mac-sleeps` (close the lid
+   when told, open it after ~30 s).
+
+By hand, without the runner: `remora-host serve` prints a code and a
+password; `remora-viewer connect <code> --password <password>` connects;
+type `accept <n>` at the host; the viewer window shows the screen.
+
+### 13.4 Findings this phase
+
+* **Covered-window GPU leak** (found 2026-10-23 while explaining P5's
+  147 MB): a window that cannot draw kept every picture's upload; 2.4 GB in
+  15 s. Fixed test-first (ff35fcb RED, b996e04 GREEN).
+* **A closed lid with the Mac awake leaves the display list** — D38 and the
+  `GoneTimer` docs said the opposite, written from expectation. Found by
+  T3, corrected (architecture D44), wire reasons renamed.
+* **Three `Debug` implementations printed plaintext** (N4), fixed.
+* **P3's wording assumed a 60 fps source**; reworded after run 1 failed
+  while drawing 100 % (§12).
+* **The P5 test was flaky on CI's VM** (read memory before the GPU had
+  finished); fixed with a bounded wait (6f1d984), plant shown failing on
+  the VM.
+
+**Mistakes of mine this phase, for the record:** the session runner first
+mis-judged occlusion and P3 from running totals (two false INVALID/FAIL
+verdicts), and a tooling check wrote unmarked lines into the owner's
+`summary.md` (removed, and synthetic runs are now tagged); protocol.md
+said the viewer's countdown ends "never early" (wrong: up to ~2 s early;
+corrected); I called the upload copy "D-17" twice when it is D-18.
+
+### 13.5 Known limitations
+
+* **P5 passes by 1 MB** (149 of 150 MB); what holds the 94 MB of GPU memory
+  is unknown → D-34, a v0.1 blocker.
+* **A real covered window that cannot draw was never reproduced by hand**;
+  that path is guarded only by the synthetic test (§11b).
+* **Everything ran on one Mac over loopback.** No network loss, no second
+  machine: the two-machine lid case (the viewer reports `connection lost`
+  after 30–35 s; whether the host's session then ends at once or after its
+  own idle timeout is unverified) is Phase 5. No FEC (D-27).
+* **The viewer keeps drawing while covered or minimised** (D-35).
+* A display that **returns** after removal was not producible with a
+  virtual display (new ID); physical monitors untested (D-16).
+* Software timestamps end at "GPU finished", not at the glass (D-19).
+* macOS only: Windows backends are Phase 6.5.
+
+### 13.6 Deferred list, row by row (roadmap.md)
+
+| # | Phase 4 outcome |
+|---|---|
+| D-1 | **Closed** 2026-10-22 — INV2 on the real media path (M1a, M1b, M2–M8) |
+| D-1b | Unchanged — INV2 for input, Phase 6 |
+| D-2 | **Closed** 2026-10-22 — INV9 (N1–N4) |
+| D-3 | Unchanged — INV10, Phase 6 |
+| D-4 | Unchanged — INV11 GUI test, Phase 4.5 |
+| D-5 | Unchanged — keychain, v0.1 |
+| D-6, D-7 | Unchanged — v1.0 |
+| D-8 | **Closed** 2026-10-23 — capture restart: T2 twice, T3 lid awake and asleep, display removed |
+| D-9 | **Open — next**, after the owner reads this report |
+| D-10 | **Closed** 2026-10-23 — shown gone (C2 p50 7.06 ms in 3 runs), **not explained**; reopen if it returns |
+| D-11, D-12 | Unchanged — Phase 6.5 |
+| D-13 | Unchanged — first public release |
+| D-14, D-15 | Unchanged |
+| D-16 | Unchanged — physical unplug/replug stays here, including a removed display coming back with its ID (not producible with a virtual display, D-28) |
+| D-17 | Unchanged — Phase 4.5 design; cross-referenced from D-34 |
+| D-18 | Unchanged (nice-to-have, Phase 9 or earlier if the budget needs it) — **this report shows the budget needs it** (decoded → drawn over 1.5 ms, §13.2) and D-34 depends on it; proposed: decide its phase together with D-34 |
+| D-19 | **Moved** to Phase 9 by its own rule (no camera at this report) |
+| D-20, D-21 | Unchanged — Phase 4.5 |
+| D-22 | Unchanged — Phase 6.5 |
+| D-23 | Unchanged — Phase 7 |
+| D-24 | Unchanged — Phase 5 |
+| D-25 | **Not done in Phase 4** (its "close by"): runs are compared by eye in the session runner, but no check flags a > 1 ms disagreement. Proposed: move to Phase 7 (rate controller benchmark work) — needs the owner's OK |
+| D-26 | Unchanged — Phase 4.5 planned work |
+| D-27 | Unchanged — Phase 5 |
+| D-28 | **Closed** 2026-10-23 — T3 lid and display removal run in step 7 |
+| D-29 | **Closed** 2026-10-23 — implemented, shown, corrected (D43, D44) |
+| D-30 | Unchanged — Phase 4.5 or later |
+| D-31 | Unchanged — Phase 5 |
+| D-32 | Unchanged — Phase 7 |
+| D-33 | New this phase (2026-10-22) — the countdown overlay, Phase 4.5 |
+| D-34 | **New** 2026-10-23 — the 94 MB of GPU memory, **v0.1 blocker** |
+| D-35 | **New** 2026-10-23 — viewer draws while covered/minimised, Phase 4.5, nice-to-have |
+
+Gates: G-1 met (Phase 3), **G-2 met** 2026-10-23. Open gates: 0.
