@@ -87,6 +87,12 @@ jobs:
             echo "\`$line\`"
             grep "^M7 memory after\|^M7 memory: " m7_memory.log | sed 's/^/    /'
           } >> "$GITHUB_STEP_SUMMARY"
+      # Roadmap D-9: the dev signing identity is deleted at the end of a phase
+      # and recreated when capture work needs it again, so `create` and
+      # `remove` must keep working. Uses a throwaway keychain only.
+      - name: Dev identity script (macOS)
+        if: runner.os == 'macOS'
+        run: bash scripts/macos/test-dev-identity.sh
 
       - name: Install cargo-deny and cargo-audit
         uses: taiki-e/install-action@861a07ce7084f55488e375df125cdc99bba60eb7 # v2.87.23
