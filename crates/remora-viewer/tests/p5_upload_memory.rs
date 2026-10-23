@@ -20,6 +20,9 @@ const PICTURES: usize = 300;
 /// A leak of 300 × 3.1 MB is ≈ 930 MB; GitHub's VM footprint readings
 /// swing by ~50 MB (phase4-criteria §12, M7), so 150 MB separates them.
 const MAX_GROWTH_MB: f64 = 150.0;
+/// How long the GPU may take to finish 300 uploads (≈ 1 GB of copies);
+/// far above what the M4 or the VM needs, far below CI's job timeout.
+const GPU_WAIT: std::time::Duration = std::time::Duration::from_secs(20);
 
 #[test]
 fn p5_pictures_that_are_never_drawn_do_not_pile_up() {
@@ -36,6 +39,22 @@ fn p5_pictures_that_are_never_drawn_do_not_pile_up() {
     for _ in 0..PICTURES {
         renderer.upload(&picture);
     }
+    // The question is whether the memory comes back, not how far the
+    // uploads ran ahead of the GPU: 300 pictures in ~1.7 s is a burst no
+    // window sees (60 a second). On GitHub's VM, whose GPU is slower, the
+    // reading right after the burst caught copies still in flight
+    // (+274 MB, 2026-10-23). So wait for the GPU first. A real leak is
+    // unaffected: copies never sent are never freed, however long we wait.
+    // Bounded wait (wgpu-hal 30.0.1 Metal `wait` honours the timeout,
+    // `src/metal/device.rs:2041-2044`): a stuck GPU fails the test instead
+    // of hanging CI.
+    renderer
+        .device()
+        .poll(wgpu::PollType::Wait {
+            submission_index: None,
+            timeout: Some(GPU_WAIT),
+        })
+        .expect("the GPU did not finish the uploads in time");
     let after = footprint_mb();
     let growth = after - before;
     println!("P5 upload memory: {before:.1} -> {after:.1} MB over {PICTURES} undrawn pictures");
