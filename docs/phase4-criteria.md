@@ -963,19 +963,19 @@ corrected); I called the upload copy "D-17" twice when it is D-18.
 | D-6, D-7 | Unchanged — v1.0 |
 | D-8 | **Closed** 2026-10-23 — capture restart: T2 twice, T3 lid awake and asleep, display removed |
 | D-9 | **Open — next**, after the owner reads this report |
-| D-10 | **Closed** 2026-10-23 — shown gone (C2 p50 7.06 ms in 3 runs), **not explained**; reopen if it returns |
+| D-10 | **Closed** 2026-10-23 — shown gone (C2 p50 7.06 ms in 3 runs), **not explained**; reopen if it returns. This report's comparison (the interim rule until D-25): C2 p50 **7.06 ms** vs the 7.06 ms baseline — the drift is **not** back |
 | D-11, D-12 | Unchanged — Phase 6.5 |
 | D-13 | Unchanged — first public release |
 | D-14, D-15 | Unchanged |
 | D-16 | Unchanged — physical unplug/replug stays here, including a removed display coming back with its ID (not producible with a virtual display, D-28) |
 | D-17 | Unchanged — Phase 4.5 design; cross-referenced from D-34 |
-| D-18 | Unchanged (nice-to-have, Phase 9 or earlier if the budget needs it) — **this report shows the budget needs it** (decoded → drawn over 1.5 ms, §13.2) and D-34 depends on it; proposed: decide its phase together with D-34 |
+| D-18 | **Decided with D-34** (owner, 2026-10-24): its phase is set when D-34's Instruments investigation reports, no later than the v0.1 gate; the copy path tied to the 94 MB → the phase that fixes D-34, otherwise Phase 9 (decoded → drawn is over its stage budget, §13.2, but P1/P2 keep 5.5/7.4 ms spare) |
 | D-19 | **Moved** to Phase 9 by its own rule (no camera at this report) |
 | D-20, D-21 | Unchanged — Phase 4.5 |
 | D-22 | Unchanged — Phase 6.5 |
 | D-23 | Unchanged — Phase 7 |
 | D-24 | Unchanged — Phase 5 |
-| D-25 | **Not done in Phase 4** (its "close by"): runs are compared by eye in the session runner, but no check flags a > 1 ms disagreement. Proposed: move to Phase 7 (rate controller benchmark work) — needs the owner's OK |
+| D-25 | **Not done in Phase 4** (its "close by"): runs are compared by eye in the session runner, but no check flags a > 1 ms disagreement. **Moved to Phase 7** (owner, 2026-10-24), linked to D-10: until it exists, each phase report compares C2 p50 with the 7.06 ms baseline |
 | D-26 | Unchanged — Phase 4.5 planned work |
 | D-27 | Unchanged — Phase 5 |
 | D-28 | **Closed** 2026-10-23 — T3 lid and display removal run in step 7 |
