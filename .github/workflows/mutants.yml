@@ -13,6 +13,9 @@ on:
       - "crates/remora-session/**"
       - "crates/remora-net/**"
       - "crates/remora-proto/**"
+      - "crates/remora-codec/src/h264.rs"
+      - "crates/remora-codec/src/bitstream.rs"
+      - "crates/remora-codec/tests/m7_h264.rs"
       - "crates/remora-testkit/src/policy.rs"
       - "crates/remora-testkit/tests/policy.rs"
 
@@ -56,6 +59,13 @@ jobs:
       - run: rustup toolchain install
       - name: Install cargo-mutants 27.1.0
         run: cargo install --locked cargo-mutants@27.1.0
+      - name: The tests still read the variables set below
+        # A renamed variable is silently ignored and the test falls back to
+        # its full size: on 2026-10-21 `M8_PACKETS` was read as
+        # `M8_packets` and the session shard ran out of time.
+        run: |
+          grep -q 'env::var("A04_SAMPLES")' crates/remora-net/tests/a04_timing.rs
+          grep -q 'env::var("M8_PACKETS")' crates/remora-session/tests/m3_m5_m8_media.rs
       - name: Run (fails if any in-scope mutant survives)
         # cargo-mutants exit codes: 0 all caught, 2 some MISSED, 3 some timed
         # out (none missed), 4 baseline tests failed. A timeout is a mutant
@@ -68,6 +78,10 @@ jobs:
           # here (any single sample shows it); the 200-sample criteria run
           # is the separate "A04 timing" workflow.
           A04_SAMPLES: "3"
+          # M8's 10^6-packet run takes ~15 s and would rerun for each of
+          # ~220 session mutants (over the job's time limit). 20 000 packets
+          # still rotate the key 20 times; CI's test job runs the full 10^6.
+          M8_PACKETS: "20000"
         run: |
           set +e
           cargo mutants --no-shuffle -p "$CRATE" -o mutants-out

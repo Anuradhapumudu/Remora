@@ -1,6 +1,8 @@
 //! Helpers shared by the host and viewer command-line apps.
 
+use std::ffi::OsString;
 use std::net::SocketAddr;
+use std::path::Path;
 
 use remora_crypto::identity::{IdentityPublic, ShortCode};
 use remora_crypto::sas::Sas;
@@ -26,6 +28,162 @@ pub enum CliError {
     /// An identity key is 64 hex digits.
     #[error("an identity key is 64 hexadecimal digits")]
     BadIdentity,
+}
+
+/// What kind of value a piece of text looks like - by its shape only, so
+/// an error can say which line of the host's output belongs in a field
+/// (walkthrough finding F-UX5). Nothing here is trusted or acted on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Looks {
+    /// `remora1:...` - the host's `code:` line.
+    ConnectionCode,
+    /// 64 hex digits - an `identity:` line.
+    IdentityKey,
+    /// 6 digits - the host's `password:` line.
+    Password,
+    /// A valid device code - a `device:` line.
+    DeviceCode,
+}
+
+/// The kind of value `text` looks like, if any.
+pub fn looks_like(text: &str) -> Option<Looks> {
+    let t = text.trim();
+    let all = |f: fn(&u8) -> bool| t.as_bytes().iter().all(f);
+    if t.starts_with(remora_proto::code::PREFIX) {
+        Some(Looks::ConnectionCode)
+    } else if t.len() == 64 && all(u8::is_ascii_hexdigit) {
+        Some(Looks::IdentityKey)
+    } else if t.len() == 6 && all(u8::is_ascii_digit) {
+        Some(Looks::Password)
+    } else if ShortCode::parse(t).is_ok() {
+        Some(Looks::DeviceCode)
+    } else {
+        None
+    }
+}
+
+impl Looks {
+    fn name(self) -> &'static str {
+        match self {
+            Looks::ConnectionCode => "a connection code",
+            Looks::IdentityKey => "an identity key",
+            Looks::Password => "a password",
+            Looks::DeviceCode => "a device code",
+        }
+    }
+
+    fn line(self) -> &'static str {
+        match self {
+            Looks::ConnectionCode => "code:",
+            Looks::IdentityKey => "identity:",
+            Looks::Password => "password:",
+            Looks::DeviceCode => "device:",
+        }
+    }
+}
+
+/// A hint for a value refused in the field that wants `want`: the host
+/// line to copy, and what the value looks like if it is another field's.
+/// Never repeats the value itself (it may be the password).
+pub fn misplaced(want: Looks, text: &str) -> String {
+    let copy = format!("copy the host's '{}' line", want.line());
+    match looks_like(text) {
+        Some(got) if got != want => format!(
+            "that looks like {} (a '{}' line) - {copy}",
+            got.name(),
+            got.line()
+        ),
+        _ => copy,
+    }
+}
+
+/// Rejoins a device code typed without quotes: `--device 8531 422 5411-5`
+/// becomes `--device "8531 422 5411-5"` (walkthrough finding F-UX6 - the
+/// code is printed in three groups, so people type it that way). Only up
+/// to two words right after `--device` that are made of digits and dashes
+/// are joined, so a connection code or another option is never taken; the
+/// result is still checked in full by `ShortCode::parse`.
+pub fn join_device_words(args: impl IntoIterator<Item = OsString>) -> Vec<OsString> {
+    let digits_and_dashes = |a: &OsString| {
+        a.to_str()
+            .is_some_and(|s| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit() || b == b'-'))
+    };
+    let mut out: Vec<OsString> = Vec::new();
+    let mut args = args.into_iter().peekable();
+    while let Some(arg) = args.next() {
+        let is_device = arg == "--device";
+        out.push(arg);
+        if !is_device {
+            continue;
+        }
+        let Some(first) = args.next_if(digits_and_dashes) else {
+            continue;
+        };
+        let mut joined = first;
+        for _ in 0..2 {
+            match args.next_if(digits_and_dashes) {
+                Some(word) => {
+                    joined.push(" ");
+                    joined.push(word);
+                }
+                None => break,
+            }
+        }
+        out.push(joined);
+    }
+    out
+}
+
+/// Printed to stderr on **every** run that loads the device key file
+/// (walkthrough finding F-UX2): while keys live in a plain file, the person
+/// running the app must see that, every time, so the file storage cannot
+/// quietly become the shipped behaviour (roadmap D-5: keychain before v0.1).
+pub fn key_file_warning(path: &Path) -> String {
+    format!(
+        "WARNING: this device's identity keys are stored UNENCRYPTED in {} - anyone who can read that file can impersonate this device. \
+         Development-stage storage, protected only by file permissions; Remora moves the keys to the OS keychain before v0.1.",
+        path.display()
+    )
+}
+
+/// What happened to the one-time password since it was last shown
+/// (walkthrough finding F-UX3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PasswordChange {
+    /// Same password as last shown.
+    Unchanged,
+    /// A viewer proved it, which uses it up (INV15).
+    UsedUp,
+    /// Replaced after 3 failed attempts (INV12).
+    ReplacedAfterFailures,
+}
+
+impl PasswordChange {
+    /// Classifies a change: `rotated` is whether the host reported a
+    /// replacement after failed attempts since the last time it was shown.
+    pub fn between(previous: &str, current: &str, rotated: bool) -> Self {
+        match (previous == current, rotated) {
+            (true, _) => Self::Unchanged,
+            (false, true) => Self::ReplacedAfterFailures,
+            (false, false) => Self::UsedUp,
+        }
+    }
+
+    /// The line printed before a new `code:` / `password:` pair, so it is
+    /// clear which pair is current and why a new one appeared.
+    pub fn note(self) -> &'static str {
+        match self {
+            Self::Unchanged => {
+                "note: new connection code for the next viewer (each code works for one attempt); the password is unchanged"
+            }
+            Self::UsedUp => {
+                "note: the previous code and password were used up when that viewer proved the password - each works for ONE connection. Give the next viewer these new ones:"
+            }
+            Self::ReplacedAfterFailures => {
+                "note: the password was replaced after 3 failed attempts and the old one no longer works. Give the next viewer these new ones:"
+            }
+        }
+    }
 }
 
 /// A safety code as people read it aloud: `123 456`.
@@ -57,6 +215,22 @@ pub fn parse_identity(text: &str) -> Result<IdentityPublic, CliError> {
 /// The device short code of an identity key.
 pub fn short_code_of(key: &IdentityPublic) -> ShortCode {
     remora_crypto::identity::DeviceId::of(key).short_code()
+}
+
+/// How often the host and the viewer repeat the "display unavailable" line in
+/// the terminal while the host waits (roadmap D-29; the viewer's window
+/// title counts down every second).
+pub const WAIT_LINE_EVERY: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// What both sides show while the host waits for its unavailable display:
+/// the lid closed with the Mac awake, or disconnected (roadmap D-29). Not
+/// "off": display sleep also turns it off and starts no countdown (T2).
+/// Whole seconds, rounded up: "0 s left" only when the time is really up.
+pub fn display_unavailable_text(left: std::time::Duration) -> String {
+    let secs = left.as_millis().div_ceil(1000);
+    format!(
+        "The host's display is unavailable (lid closed or disconnected). Waiting, {secs} s left."
+    )
 }
 
 /// Seconds since the Unix epoch (0 if the clock is before 1970).
@@ -94,4 +268,62 @@ pub fn offer_code(
         }],
     }
     .encode()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn d29_display_unavailable_text_rounds_up_to_whole_seconds() {
+        let t = |ms| display_unavailable_text(std::time::Duration::from_millis(ms));
+        assert_eq!(
+            t(120_000),
+            "The host's display is unavailable (lid closed or disconnected). Waiting, 120 s left."
+        );
+        assert_eq!(
+            t(41_001),
+            "The host's display is unavailable (lid closed or disconnected). Waiting, 42 s left."
+        );
+        assert_eq!(
+            t(1),
+            "The host's display is unavailable (lid closed or disconnected). Waiting, 1 s left."
+        );
+        assert_eq!(
+            t(0),
+            "The host's display is unavailable (lid closed or disconnected). Waiting, 0 s left."
+        );
+    }
+
+    #[test]
+    fn key_file_warning_names_the_file_and_the_risk() {
+        let w = key_file_warning(Path::new("/x/host-identity.key"));
+        assert!(w.starts_with("WARNING: "), "{w}");
+        assert!(w.contains("/x/host-identity.key"), "{w}");
+        assert!(w.contains("UNENCRYPTED"), "{w}");
+        assert!(w.contains("impersonate"), "{w}");
+        assert!(w.contains("keychain"), "{w}");
+    }
+
+    #[test]
+    fn password_change_is_classified_and_explained() {
+        use PasswordChange::*;
+        assert_eq!(
+            PasswordChange::between("111111", "111111", false),
+            Unchanged
+        );
+        assert_eq!(PasswordChange::between("111111", "111111", true), Unchanged);
+        assert_eq!(PasswordChange::between("111111", "222222", false), UsedUp);
+        assert_eq!(
+            PasswordChange::between("111111", "222222", true),
+            ReplacedAfterFailures
+        );
+        assert!(Unchanged.note().contains("unchanged"));
+        assert!(UsedUp.note().contains("used up"));
+        assert!(UsedUp.note().contains("ONE connection"));
+        assert!(ReplacedAfterFailures.note().contains("3 failed attempts"));
+        for c in [Unchanged, UsedUp, ReplacedAfterFailures] {
+            assert!(c.note().starts_with("note: "));
+        }
+    }
 }

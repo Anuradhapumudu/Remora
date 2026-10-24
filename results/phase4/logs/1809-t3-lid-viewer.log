@@ -1,0 +1,33 @@
+WARNING: this device's identity keys are stored UNENCRYPTED in /Users/pumudu/Library/Application Support/Remora/viewer-identity.key - anyone who can read that file can impersonate this device. Development-stage storage, protected only by file permissions; Remora moves the keys to the OS keychain before v0.1.
+connecting to 127.0.0.1:65474 (host device 8531 422 5411-5)
+media: opened=0 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=0 frames_dropped=0
+safety code: 598 638 - compare it with the host's screen (host "Remora host", device 8531 422 5411-5)
+waiting for the person at the host to accept or deny (nothing to type here)
+SESSION ACTIVE
+media: opened=620 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=47 frames_dropped=0
+media: opened=632 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=52 frames_dropped=0
+media: opened=641 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=55 frames_dropped=0
+media: opened=644 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=56 frames_dropped=0
+media: opened=650 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=58 frames_dropped=0
+media: opened=663 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=61 frames_dropped=0
+stream paused (the host's display is asleep) - the session stays open
+media: opened=669 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=63 frames_dropped=0
+stream paused - The host's display is unavailable (lid closed or disconnected). Waiting, 120 s left. The session stays open
+media: opened=669 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=63 frames_dropped=0
+media: opened=669 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=63 frames_dropped=0
+media: opened=669 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=63 frames_dropped=0
+media: opened=669 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=63 frames_dropped=0
+media: opened=669 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=63 frames_dropped=0
+media: opened=669 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=63 frames_dropped=0
+media: opened=669 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=63 frames_dropped=0
+media: opened=669 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=63 frames_dropped=0
+stream paused (the host's display is asleep) - the session stays open
+stream resumed
+media: opened=1045 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=86 frames_dropped=0
+media: opened=1408 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=146 frames_dropped=0
+media: opened=1430 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=153 frames_dropped=0
+media: opened=1436 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=155 frames_dropped=0
+media: opened=1442 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=157 frames_dropped=0
+media: opened=1454 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=161 frames_dropped=0
+session ended
+video: 159 frames decoded, 0 refused, 1 waiting for a keyframe, 0 failed, 1 dropped

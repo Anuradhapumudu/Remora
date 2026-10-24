@@ -109,7 +109,18 @@ squash, rebase or reorder phase-3 commits into a tidier shape.
   Each crate directory carries its license file(s).
 - Small, focused commits; imperative subject ≤ 72 chars; body explains *why*.
 - After each phase: update `docs/roadmap.md` (status + progress log), give exact
-  manual test steps, measured numbers vs targets, and known limitations.
+  manual test steps, measured numbers vs targets, and known limitations — and
+  **report the "Deferred items" list in roadmap.md row by row** (what closed,
+  what moved, what is new). Deferred work lives only in that list.
+- **An owner approval of future work becomes a row in that list (or a
+  criteria item) in the same commit that records it.** Approved-but-unwritten
+  work is how the render spike slipped (roadmap "Process slips").
+- **Every owner gate ("don't proceed until X") becomes a row in roadmap.md
+  "Open gates" in the same commit that acknowledges it.** Before starting
+  each step, run `python3 scripts/ci/check-roadmap.py --open-gates` and stop
+  if a gate blocks it — gates are checked, not remembered. A gate is only
+  MET (with evidence) or WAIVED (with the owner's own words); "continue" is
+  not a waiver of a gate it does not name.
 
 ## macOS development notes
 

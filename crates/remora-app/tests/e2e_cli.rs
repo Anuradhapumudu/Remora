@@ -64,20 +64,43 @@ struct App {
 
 impl App {
     fn spawn(exe: &Path, args: &[&str]) -> App {
-        let mut child = Command::new(exe)
-            .args(args)
-            .env("RUST_LOG", "warn")
+        Self::spawn_env(exe, args, &[], None)
+    }
+
+    /// With extra environment variables and a working directory.
+    fn spawn_env(exe: &Path, args: &[&str], env: &[(&str, &Path)], cwd: Option<&Path>) -> App {
+        let mut cmd = Command::new(exe);
+        cmd.args(args).env("RUST_LOG", "warn");
+        for (k, v) in env {
+            cmd.env(k, v);
+        }
+        if let Some(d) = cwd {
+            cmd.current_dir(d);
+        }
+        let mut child = cmd
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::inherit())
+            .stderr(Stdio::piped())
             .spawn()
             .unwrap();
         let stdout = child.stdout.take().unwrap();
+        let stderr = child.stderr.take().unwrap();
         let (tx, rx) = mpsc::channel();
+        // stdout and stderr both arrive on the channel, so a test can check
+        // warnings (stderr) as well as the normal output (F-UX2).
+        let tx_err = tx.clone();
         std::thread::spawn(move || {
             for line in BufReader::new(stdout).lines() {
                 let Ok(line) = line else { break };
                 if tx.send(line).is_err() {
+                    break;
+                }
+            }
+        });
+        std::thread::spawn(move || {
+            for line in BufReader::new(stderr).lines() {
+                let Ok(line) = line else { break };
+                if tx_err.send(line).is_err() {
                     break;
                 }
             }
@@ -180,6 +203,11 @@ fn start_host(dir: &Path, extra: &[&str]) -> Host {
         "--name",
         "e2e host",
     ];
+    // Phase 3's tests need no video; screen capture would need the Screen
+    // Recording permission, which a CI machine does not have.
+    if !extra.contains(&"--source") {
+        args.extend_from_slice(&["--source", "none"]);
+    }
     args.extend_from_slice(extra);
     let mut app = App::spawn(&bins().0, &args);
     let device = value(&app.expect("device:", 10));
@@ -424,11 +452,420 @@ fn unknown_command_or_session_id_changes_nothing() {
     let mut host = start_host(&dir, &[]);
     let mut viewer = connect_viewer(&dir, &host.code, &["--password", &host.password]);
     let (id, _) = parse_prompt(&host.app.expect("prompt ", 15));
+    // F-UX1: every mistake gets an explicit answer that says what to type.
     host.app.send("accept 999999");
-    host.app.expect("no pending session 999999", 10);
+    host.app
+        .expect(&format!("no pending prompt 999999 - waiting: {id}"), 10);
+    host.app.send("accept");
+    host.app
+        .expect("'accept' needs the prompt number shown on screen", 10);
+    host.app.send("accept abc");
+    host.app.expect("\"abc\" is not a prompt number", 10);
     host.app.send("launch-rockets");
     host.app.expect("unknown command", 10);
     assert!(!viewer.sees_within("SESSION ACTIVE", 1000));
     host.app.send(&format!("accept {id}"));
     viewer.expect("SESSION ACTIVE", 10);
+}
+
+// --------------------------------------------- walkthrough findings F-UX --
+
+/// F-UX2 (owner walkthrough, 2026-10-20): while keys are in a plain file,
+/// EVERY run that loads them warns, naming the file and the risk - not only
+/// the run that created it.
+#[test]
+fn f_ux2_unencrypted_key_warning_on_every_run_of_both_apps() {
+    let dir = tmp_dir();
+    let host_key = dir.join("host.key");
+    let viewer_key = dir.join("viewer.key");
+    let warned = |app: &mut App, path: &Path| {
+        let line = app.expect("WARNING: ", 10);
+        assert!(line.contains("UNENCRYPTED"), "{line}");
+        assert!(line.contains(path.to_str().unwrap()), "{line}");
+    };
+    for run in 0..2 {
+        // run 0 creates each key file, run 1 only loads it
+        let host = start_host(&dir, &[]);
+        let mut all = host.app.seen.clone();
+        all.extend(std::iter::from_fn(|| {
+            host.app.lines.recv_timeout(Duration::from_millis(300)).ok()
+        }));
+        assert!(
+            all.iter()
+                .any(|l| l.starts_with("WARNING: ") && l.contains("UNENCRYPTED")),
+            "host serve run {run} did not warn; saw:\n{}",
+            all.join("\n")
+        );
+        drop(host);
+        let mut id = App::spawn(
+            &bins().0,
+            &["identity", "--identity-file", host_key.to_str().unwrap()],
+        );
+        warned(&mut id, &host_key);
+        let mut vid = App::spawn(
+            &bins().1,
+            &["identity", "--identity-file", viewer_key.to_str().unwrap()],
+        );
+        warned(&mut vid, &viewer_key);
+    }
+    let host = start_host(&dir, &[]);
+    let mut viewer = connect_viewer(&dir, &host.code, &["--password", &host.password]);
+    warned(&mut viewer, &viewer_key);
+}
+
+/// F-UX1: prompts are numbered 1, 2, 3 ... and a number is never reused, so
+/// a stale 'accept 1' can never approve a different viewer.
+#[test]
+fn f_ux1_prompts_are_numbered_from_one_and_never_reused() {
+    let (mut host, mut viewers) = two_pending();
+    assert_eq!(viewers[0].1, "1");
+    assert_eq!(viewers[1].1, "2");
+    host.app.send("deny 1");
+    assert_eq!(viewers[0].0.wait_exit(10), 2);
+    host.app.expect("session ended 1", 10);
+    // A third viewer after prompt 1 is gone: it gets 3, not the freed 1.
+    // (Denying prints no new pair: the one shown after prompt 2 is unused.)
+    let last = |p: &str| {
+        value(
+            host.app
+                .seen
+                .iter()
+                .rev()
+                .find(|l| l.starts_with(p))
+                .unwrap(),
+        )
+    };
+    let (code, password) = (last("code:"), last("password:"));
+    let _third = connect_viewer(&tmp_dir(), &code, &["--password", &password]);
+    let (id, _) = parse_prompt(&host.app.expect("prompt ", 15));
+    assert_eq!(id, "3");
+    host.app.send("accept 1");
+    host.app.expect("no pending prompt 1 - waiting: 2, 3", 10);
+    // The prompt line tells the person exactly what to type.
+    let prompt_line = host
+        .app
+        .seen
+        .iter()
+        .find(|l| l.starts_with("prompt 3:"))
+        .unwrap()
+        .clone();
+    assert!(
+        prompt_line.contains("'accept 3'") && prompt_line.contains("'deny 3'"),
+        "{prompt_line}"
+    );
+    let _ = viewers.pop();
+}
+
+/// F-UX3: when the password is used up at authentication (INV15), the new
+/// code and password come with a line saying why, so two passwords on
+/// screen are not mistaken for an error.
+#[test]
+fn f_ux3_a_new_password_after_authentication_is_explained() {
+    let dir = tmp_dir();
+    let mut host = start_host(&dir, &[]);
+    let _viewer = connect_viewer(&dir, &host.code, &["--password", &host.password]);
+    host.app.expect("prompt ", 15);
+    let note = host.app.expect("note: ", 10);
+    assert!(
+        note.contains("used up") && note.contains("ONE connection"),
+        "{note}"
+    );
+    let code = value(&host.app.expect("code:", 10));
+    let password = value(&host.app.expect("password:", 10));
+    assert_ne!(code, host.code);
+    assert_ne!(password, host.password, "INV15: a new password");
+}
+
+/// F-UX3, the other branch: a wrong password does not use the password up,
+/// and the note says it is unchanged (only the code is new).
+#[test]
+fn f_ux3_after_a_failed_attempt_the_note_says_the_password_is_unchanged() {
+    let dir = tmp_dir();
+    let mut host = start_host(&dir, &[]);
+    let wrong = if host.password == "000000" {
+        "111111"
+    } else {
+        "000000"
+    };
+    let mut viewer = connect_viewer(&dir, &host.code, &["--password", wrong]);
+    assert_eq!(viewer.wait_exit(15), 4);
+    let note = host.app.expect("note: ", 10);
+    assert!(note.contains("password is unchanged"), "{note}");
+    let password = value(&host.app.expect("password:", 10));
+    assert_eq!(password, host.password);
+}
+
+/// F-UX4 (owner walkthrough, 2026-10-20): the owner typed 'deny 1' into the
+/// VIEWER's terminal - nothing there said the decision is made on the host.
+/// After the safety code the viewer must say it is waiting for the host.
+#[test]
+fn f_ux4_viewer_says_the_host_decides() {
+    let dir = tmp_dir();
+    let host = start_host(&dir, &[]);
+    let mut viewer = connect_viewer(&dir, &host.code, &["--password", &host.password]);
+    viewer.expect("safety code:", 15);
+    let wait = viewer.expect("waiting", 10);
+    assert!(
+        wait.contains("host") && wait.contains("nothing to type here"),
+        "{wait}"
+    );
+}
+
+/// F-UX5 (walkthrough 2026-10-21): the owner's real first attempts at
+/// step 6 - each must be refused before any network traffic, say which
+/// host line belongs there, and never echo the password.
+#[test]
+fn f_ux5_values_in_the_wrong_place_name_the_host_line_to_copy() {
+    let dir = tmp_dir();
+    let mut host = start_host(&dir, &[]);
+    let attempts: [(&str, Vec<&str>, &str); 3] = [
+        // the password where the code goes
+        (&host.password, vec!["--pin", &host.identity], "'code:'"),
+        // the code as --pin
+        (&host.code, vec!["--pin", &host.code], "'identity:'"),
+        // a device code as --pin
+        (&host.code, vec!["--pin", &host.device], "'identity:'"),
+    ];
+    for (code, extra, want) in attempts {
+        let mut viewer = connect_viewer(&dir, code, &extra);
+        let line = viewer.expect("failed:", 10);
+        assert!(line.contains(want), "{line}");
+        assert!(
+            !line.contains(&host.password),
+            "echoed the password: {line}"
+        );
+        assert_ne!(viewer.wait_exit(10), 0);
+    }
+    assert!(
+        !host.app.sees_within("prompt ", 1000),
+        "a refused attempt reached the host"
+    );
+}
+
+/// F-UX6 (walkthrough 2026-10-21, twice): `--device 8531 422 5411-5`
+/// without quotes was a clap error ("unexpected argument '422'"). The
+/// device code is printed with spaces, so it must also work typed that
+/// way - and still be checked in full (A16).
+#[test]
+fn f_ux6_an_unquoted_device_code_is_accepted_and_still_checked() {
+    let dir = tmp_dir();
+    let mut host = start_host(&dir, &[]);
+    let other = tmp_dir();
+    let (_, other_device) = viewer_identity(&other);
+    let mut args = vec!["--password", host.password.as_str(), "--device"];
+    args.extend(other_device.split(' '));
+    assert_eq!(args.len(), 6, "a device code prints as three groups");
+    let mut viewer = connect_viewer(&dir, &host.code, &args);
+    viewer.expect("identity mismatch", 15);
+    assert_eq!(viewer.wait_exit(10), 3);
+    assert!(
+        !host.app.sees_within("prompt ", 1000),
+        "never reaches the host's prompt"
+    );
+}
+
+// ------------------------------------------------------- Phase 4 step 7 --
+
+/// The streaming host end to end: a synthetic test pattern through the
+/// real hardware encoder, the sealed media path and the viewer's decoder
+/// (phase4-criteria §8 "Functional"). The viewer runs without a window
+/// and prints its decoder counters when the session ends.
+#[cfg(target_os = "macos")]
+#[test]
+fn streaming_host_video_is_decoded_by_the_viewer() {
+    let dir = tmp_dir();
+    let mut host = start_host(
+        &dir,
+        &["--source", "synthetic", "--width", "1280", "--timing"],
+    );
+    let mut viewer = connect_viewer(
+        &dir,
+        &host.code,
+        &["--password", &host.password, "--no-window"],
+    );
+    let (id, _) = parse_prompt(&host.app.expect("prompt ", 15));
+    host.app.send(&format!("accept {id}"));
+    host.app.expect(&format!("SESSION ACTIVE {id}"), 10);
+    viewer.expect("SESSION ACTIVE", 10);
+    std::thread::sleep(Duration::from_secs(3));
+    host.app.send(&format!("disconnect {id}"));
+    host.app.expect(&format!("session ended {id}"), 10);
+    let line = viewer.expect("video:", 10);
+    assert_eq!(viewer.wait_exit(10), 0);
+    // "video: N frames decoded, R refused, F failed, D dropped"
+    let n = |word: &str| -> u64 {
+        let before = line.split(&format!(" {word}")).next().unwrap();
+        before.rsplit(' ').next().unwrap().parse().unwrap()
+    };
+    // 3 s at 60 fps is 180; a loaded CI machine gets fewer, never none.
+    println!("{line}");
+    // Nothing is captured once nobody is connected.
+    assert!(
+        host.app.seen.iter().any(|l| l == "streaming stopped")
+            || host.app.sees_within("streaming stopped", 5000),
+        "host:\n{}",
+        host.app.seen.join("\n")
+    );
+    assert!(n("frames decoded") >= 30, "{line}");
+    // `--timing` lines (P1/P2 tooling): times and sizes only, as
+    // key=number fields, never content (INV9).
+    let timing: Vec<&String> = host
+        .app
+        .seen
+        .iter()
+        .filter(|l| l.starts_with("timing: "))
+        .collect();
+    assert!(timing.len() >= 30, "{} timing lines", timing.len());
+    for l in &timing {
+        for field in l["timing: ".len()..].split(' ') {
+            let (k, v) = field.split_once('=').unwrap();
+            assert!(
+                ["capture_us", "encoded_us", "sent_us", "bytes", "keyframe"].contains(&k)
+                    && (v.parse::<u64>().is_ok() || v == "true" || v == "false"),
+                "{l}"
+            );
+        }
+    }
+    // Nothing malformed. ("waiting for a keyframe" is allowed: frames
+    // encoded between approval and the keyframe forced for this viewer.)
+    assert_eq!(n("refused"), 0, "{line}");
+    assert_eq!(n("failed"), 0, "{line}");
+}
+
+/// Every file under `dir` (recursively), unreadable entries skipped.
+#[cfg(target_os = "macos")]
+fn files_under(dir: &Path) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return out;
+    };
+    for e in entries.flatten() {
+        let p = e.path();
+        match e.file_type() {
+            Ok(t) if t.is_dir() => out.extend(files_under(&p)),
+            Ok(t) if t.is_file() => out.push(p),
+            _ => {}
+        }
+    }
+    out
+}
+
+/// An H.264 parameter set or keyframe slice after a start code: a file
+/// holding encoded video holds these.
+#[cfg(target_os = "macos")]
+fn holds_h264(bytes: &[u8]) -> bool {
+    bytes
+        .windows(4)
+        .any(|w| w[..3] == [0, 0, 1] && matches!(w[3] & 0x1f, 5 | 7 | 8) && w[3] & 0x80 == 0)
+}
+
+/// N2 (phase4-criteria §6, INV9): after a 10 s streaming session, the
+/// only files host and viewer wrote in their home, temp and working
+/// directories are their key files, and no file anywhere they wrote holds
+/// encoded video. Files under the macOS per-user temp and cache folders
+/// whose path names our binaries are listed and scanned the same way.
+#[cfg(target_os = "macos")]
+#[test]
+fn n2_a_streaming_session_leaves_only_the_key_files_on_disk() {
+    let started = std::time::SystemTime::now();
+    let dirs = |who: &str| -> Vec<(&'static str, PathBuf)> {
+        let base = tmp_dir().join(who);
+        [
+            "HOME",
+            "TMPDIR",
+            "XDG_CONFIG_HOME",
+            "XDG_CACHE_HOME",
+            "XDG_DATA_HOME",
+            "XDG_STATE_HOME",
+            "cwd",
+        ]
+        .into_iter()
+        .map(|k| {
+            let d = base.join(k);
+            std::fs::create_dir_all(&d).unwrap();
+            (k, d)
+        })
+        .collect()
+    };
+    let (host_dirs, viewer_dirs) = (dirs("host"), dirs("viewer"));
+    let env = |d: &[(&'static str, PathBuf)]| -> Vec<(&'static str, PathBuf)> {
+        d.iter().filter(|(k, _)| *k != "cwd").cloned().collect()
+    };
+    let cwd =
+        |d: &[(&'static str, PathBuf)]| d.iter().find(|(k, _)| *k == "cwd").unwrap().1.clone();
+    let (henv, venv) = (env(&host_dirs), env(&viewer_dirs));
+    let henv: Vec<(&str, &Path)> = henv.iter().map(|(k, v)| (*k, v.as_path())).collect();
+    let venv: Vec<(&str, &Path)> = venv.iter().map(|(k, v)| (*k, v.as_path())).collect();
+
+    let mut host = App::spawn_env(
+        &bins().0,
+        &["serve", "--source", "synthetic", "--width", "1280"],
+        &henv,
+        Some(&cwd(&host_dirs)),
+    );
+    let code = value(&host.expect("code:", 10));
+    let password = value(&host.expect("password:", 10));
+    let mut viewer = App::spawn_env(
+        &bins().1,
+        &["connect", &code, "--password", &password, "--no-window"],
+        &venv,
+        Some(&cwd(&viewer_dirs)),
+    );
+    let (id, _) = parse_prompt(&host.expect("prompt ", 15));
+    host.send(&format!("accept {id}"));
+    viewer.expect("SESSION ACTIVE", 10);
+    std::thread::sleep(Duration::from_secs(10));
+    host.send(&format!("disconnect {id}"));
+    let line = viewer.expect("video:", 10);
+    assert_eq!(viewer.wait_exit(10), 0);
+    host.send("quit");
+    let _ = host.wait_exit(10);
+    assert!(
+        !line.starts_with("video: 0 "),
+        "nothing was streamed: {line}"
+    );
+
+    let support = Path::new("Library/Application Support/Remora");
+    for (who, dirs, key) in [
+        ("host", &host_dirs, "host-identity.key"),
+        ("viewer", &viewer_dirs, "viewer-identity.key"),
+    ] {
+        let mut found: Vec<PathBuf> = dirs.iter().flat_map(|(_, d)| files_under(d)).collect();
+        found.sort();
+        let home = &dirs[0].1;
+        assert_eq!(
+            found,
+            vec![home.join(support).join(key)],
+            "{who} wrote other files"
+        );
+        for f in &found {
+            assert!(
+                !holds_h264(&std::fs::read(f).unwrap()),
+                "{} holds video",
+                f.display()
+            );
+        }
+    }
+
+    // The macOS per-user folders (not redirected by HOME/TMPDIR).
+    let mut ours = Vec::new();
+    for var in ["DARWIN_USER_TEMP_DIR", "DARWIN_USER_CACHE_DIR"] {
+        let out = Command::new("/usr/bin/getconf").arg(var).output().unwrap();
+        let dir = PathBuf::from(String::from_utf8_lossy(&out.stdout).trim());
+        for f in files_under(&dir) {
+            let named = f.to_string_lossy().contains("remora-");
+            let new = std::fs::metadata(&f)
+                .and_then(|m| m.modified())
+                .is_ok_and(|t| t >= started);
+            if named && new && !f.to_string_lossy().contains("remora-e2e-") {
+                assert!(
+                    !holds_h264(&std::fs::read(&f).unwrap_or_default()),
+                    "{} holds video",
+                    f.display()
+                );
+                ours.push(f);
+            }
+        }
+    }
+    println!("N2: {line}; files in the macOS per-user folders: {ours:?}");
 }

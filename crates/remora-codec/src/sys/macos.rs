@@ -1,4 +1,4 @@
-//! macOS backend: VideoToolbox hardware encoder.
+//! macOS backend: VideoToolbox hardware encoder and decoder.
 //!
 //! Configuration follows Apple's documented recipe for "ultra-low-latency
 //! conferencing and cloud gaming" (VTCompressionProperties.h, SDK 27):
@@ -8,8 +8,8 @@
 use std::ffi::{c_int, c_void};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::ptr::{self, NonNull};
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use objc2_core_foundation::{
@@ -17,13 +17,15 @@ use objc2_core_foundation::{
 };
 use objc2_core_media::{
     CMBlockBuffer, CMFormatDescription, CMSampleBuffer, CMTime, CMVideoCodecType,
+    CMVideoFormatDescriptionCreateFromH264ParameterSets,
     CMVideoFormatDescriptionGetH264ParameterSetAtIndex,
-    CMVideoFormatDescriptionGetHEVCParameterSetAtIndex, kCMSampleAttachmentKey_NotSync,
-    kCMTimeInvalid, kCMVideoCodecType_H264, kCMVideoCodecType_HEVC,
+    CMVideoFormatDescriptionGetHEVCParameterSetAtIndex, kCMBlockBufferAssureMemoryNowFlag,
+    kCMSampleAttachmentKey_NotSync, kCMTimeInvalid, kCMVideoCodecType_H264, kCMVideoCodecType_HEVC,
 };
 use objc2_core_video::{
-    CVPixelBuffer, CVPixelBufferCreate, CVPixelBufferGetBaseAddressOfPlane,
-    CVPixelBufferGetBytesPerRowOfPlane, CVPixelBufferGetHeightOfPlane, CVPixelBufferGetWidth,
+    CVImageBuffer, CVPixelBuffer, CVPixelBufferCreate, CVPixelBufferGetBaseAddressOfPlane,
+    CVPixelBufferGetBytesPerRowOfPlane, CVPixelBufferGetHeight, CVPixelBufferGetHeightOfPlane,
+    CVPixelBufferGetPixelFormatType, CVPixelBufferGetPlaneCount, CVPixelBufferGetWidth,
     CVPixelBufferLockBaseAddress, CVPixelBufferLockFlags, CVPixelBufferPool,
     CVPixelBufferUnlockBaseAddress, kCVPixelBufferHeightKey, kCVPixelBufferIOSurfacePropertiesKey,
     kCVPixelBufferPixelFormatTypeKey, kCVPixelBufferWidthKey,
@@ -31,14 +33,16 @@ use objc2_core_video::{
     kCVPixelFormatType_444YpCbCr8BiPlanarVideoRange,
 };
 use objc2_video_toolbox::{
-    VTCompressionSession, VTCopyVideoEncoderList, VTEncodeInfoFlags,
+    VTCompressionSession, VTCopyVideoEncoderList, VTDecodeFrameFlags, VTDecodeInfoFlags,
+    VTDecompressionOutputCallbackRecord, VTDecompressionSession, VTEncodeInfoFlags,
     VTSessionCopySupportedPropertyDictionary, VTSessionSetProperty,
     kVTCompressionPropertyKey_AllowFrameReordering, kVTCompressionPropertyKey_AverageBitRate,
     kVTCompressionPropertyKey_EnableLTR, kVTCompressionPropertyKey_ExpectedFrameRate,
     kVTCompressionPropertyKey_MaxKeyFrameInterval,
     kVTCompressionPropertyKey_PrioritizeEncodingSpeedOverQuality,
     kVTCompressionPropertyKey_ProfileLevel, kVTCompressionPropertyKey_RealTime,
-    kVTEncodeFrameOptionKey_ForceKeyFrame, kVTProfileLevel_H264_ConstrainedBaseline_AutoLevel,
+    kVTDecompressionPropertyKey_RealTime, kVTEncodeFrameOptionKey_ForceKeyFrame,
+    kVTProfileLevel_H264_ConstrainedBaseline_AutoLevel,
     kVTProfileLevel_H264_ConstrainedHigh_AutoLevel, kVTProfileLevel_HEVC_Main_AutoLevel,
     kVTPropertySupportedValueListKey, kVTVideoEncoderList_CodecType,
     kVTVideoEncoderList_DisplayName, kVTVideoEncoderList_EncoderID,
@@ -51,9 +55,10 @@ use remora_capture::PixelBufferRef;
 use crate::bitstream::{
     ProfileInfo, START_CODE, h264_sps_profile, hevc_sps_profile, length_prefixed_to_annexb,
 };
+use crate::h264::{DecodeGate, SizeLimit, SpsInfo};
 use crate::{
-    Codec, CodecError, EncodedFrame, EncoderConfig, EncoderEvent, EncoderSink, H264Profile,
-    TuneValue,
+    Codec, CodecError, DecodeError, DecodeStats, EncodedFrame, EncoderConfig, EncoderEvent,
+    EncoderSink, H264Profile, Nv12, TuneValue,
 };
 
 /// Submit timestamps are kept for this many in-flight frames (power of two).
@@ -583,6 +588,55 @@ impl SyntheticSource {
         Ok(Self { pool, frame: 0 })
     }
 
+    /// The next frame with its number drawn in as a barcode strip
+    /// ([`crate::barcode`]); numbers count 0, 1, 2, … from the first frame
+    /// this source made, marked or not (phase4-criteria P7).
+    pub fn next_frame_marked(&mut self) -> Result<(u32, PixelBufferRef), CodecError> {
+        let number = u32::try_from(self.frame).unwrap_or(u32::MAX);
+        let frame = self
+            .next_frame_with(|luma, stride, width, rows| {
+                crate::barcode::stamp(luma, stride, width, rows, number)
+            })
+            .map_err(|e| match e {
+                CodecError::Unsupported(_) => {
+                    CodecError::Unsupported("frame smaller than the barcode strip")
+                }
+                other => other,
+            })?;
+        Ok((number, frame))
+    }
+
+    /// The next frame, after `draw(luma, stride, width, rows)` changed its
+    /// luma plane (tests: a canary written into the pixels, phase4-criteria
+    /// N1). `draw` returns `false` if it could not draw: an error.
+    pub fn next_frame_with(
+        &mut self,
+        draw: impl FnOnce(&mut [u8], usize, usize, usize) -> bool,
+    ) -> Result<PixelBufferRef, CodecError> {
+        let frame = self.next_frame()?;
+        let buf = frame.as_cv();
+        // SAFETY: valid buffer; flags 0 = read/write lock.
+        os("CVPixelBufferLockBaseAddress", unsafe {
+            CVPixelBufferLockBaseAddress(buf, CVPixelBufferLockFlags(0))
+        })?;
+        let base = CVPixelBufferGetBaseAddressOfPlane(buf, 0).cast::<u8>();
+        let stride = CVPixelBufferGetBytesPerRowOfPlane(buf, 0);
+        let rows = CVPixelBufferGetHeightOfPlane(buf, 0);
+        let stamped = !base.is_null()
+            && stride.checked_mul(rows).is_some_and(|len| {
+                // SAFETY: while locked, the luma plane is `stride * rows`
+                // writable bytes at `base`.
+                let luma = unsafe { std::slice::from_raw_parts_mut(base, len) };
+                draw(luma, stride, CVPixelBufferGetWidth(buf), rows)
+            });
+        // SAFETY: matched with the lock above.
+        unsafe { CVPixelBufferUnlockBaseAddress(buf, CVPixelBufferLockFlags(0)) };
+        if !stamped {
+            return Err(CodecError::Unsupported("the frame could not be drawn"));
+        }
+        Ok(frame)
+    }
+
     /// Returns the next frame: a vertical bar sweeping across a gradient, so
     /// every frame differs (like a moving test pattern on screen).
     pub fn next_frame(&mut self) -> Result<PixelBufferRef, CodecError> {
@@ -903,4 +957,459 @@ fn first_sps_profile(codec: Codec, annexb: &[u8]) -> Option<ProfileInfo> {
                 Codec::Hevc => hevc_sps_profile(nal),
             }
         })
+}
+
+// ───────────────────────── Decoder (Phase 4 step 5) ─────────────────────────
+
+/// One decoded picture (NV12, IOSurface-backed). `Debug` prints its size
+/// and id, never pixels (INV9).
+pub struct DecodedFrame {
+    /// The video frame it came from (`frame_id` on the wire).
+    pub frame_id: u32,
+    image: PixelBufferRef,
+    _alive: Alive,
+}
+
+/// Counts objects of one kind while they exist: +1 when made, −1 when
+/// dropped (M7: the decoder's own objects are bounded, checked by
+/// counting on any machine — phase4-criteria §12, 2026-10-22).
+struct Alive(Arc<AtomicU64>);
+
+impl Alive {
+    fn new(count: &Arc<AtomicU64>) -> Self {
+        count.fetch_add(1, Ordering::Relaxed);
+        Self(Arc::clone(count))
+    }
+}
+
+impl Drop for Alive {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::Relaxed);
+    }
+}
+
+impl DecodedFrame {
+    /// The picture.
+    pub fn image(&self) -> &PixelBufferRef {
+        &self.image
+    }
+
+    /// Calls `f` with the picture's NV12 planes, locked read-only for the
+    /// duration of the call (phase4-criteria R2: the viewer uploads them
+    /// to the GPU). Fails if the picture is not 8-bit NV12 or its planes
+    /// are not what their sizes say.
+    pub fn with_nv12<R>(&self, f: impl FnOnce(&Nv12<'_>) -> R) -> Result<R, CodecError> {
+        let buf = self.image.as_cv();
+        if CVPixelBufferGetPixelFormatType(buf) != kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange
+            || CVPixelBufferGetPlaneCount(buf) != 2
+        {
+            return Err(CodecError::Unsupported("picture is not 8-bit NV12"));
+        }
+        // SAFETY: valid buffer; read-only lock (we never write the planes).
+        os("CVPixelBufferLockBaseAddress", unsafe {
+            CVPixelBufferLockBaseAddress(buf, CVPixelBufferLockFlags::ReadOnly)
+        })?;
+        let _unlock = UnlockOnDrop(buf);
+        let plane = |i: usize| -> Option<(&[u8], usize)> {
+            let base = CVPixelBufferGetBaseAddressOfPlane(buf, i).cast::<u8>();
+            let stride = CVPixelBufferGetBytesPerRowOfPlane(buf, i);
+            let len = stride.checked_mul(CVPixelBufferGetHeightOfPlane(buf, i))?;
+            // SAFETY: while the buffer is locked (until `_unlock` drops, after
+            // `f` returns), plane `i` is `stride * rows` readable bytes at
+            // `base`. The slices never leave this function: `f` gets them
+            // for the call only.
+            (!base.is_null()).then(|| (unsafe { std::slice::from_raw_parts(base, len) }, stride))
+        };
+        let ((y, y_stride), (uv, uv_stride)) = plane(0)
+            .zip(plane(1))
+            .ok_or(CodecError::Bitstream("picture planes not readable"))?;
+        let width = u32::try_from(CVPixelBufferGetWidth(buf)).unwrap_or(0);
+        let height = u32::try_from(CVPixelBufferGetHeight(buf)).unwrap_or(0);
+        let nv12 = Nv12::new(width, height, y, y_stride, uv, uv_stride).ok_or(
+            CodecError::Bitstream("picture planes smaller than the picture"),
+        )?;
+        Ok(f(&nv12))
+    }
+}
+
+/// Unlocks a read-only-locked pixel buffer when dropped (also on panic).
+struct UnlockOnDrop<'a>(&'a CVPixelBuffer);
+
+impl Drop for UnlockOnDrop<'_> {
+    fn drop(&mut self) {
+        // SAFETY: matched with the read-only lock in `with_nv12`.
+        unsafe { CVPixelBufferUnlockBaseAddress(self.0, CVPixelBufferLockFlags::ReadOnly) };
+    }
+}
+
+impl std::fmt::Debug for DecodedFrame {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DecodedFrame")
+            .field("frame_id", &self.frame_id)
+            .field("width", &self.image.width())
+            .field("height", &self.image.height())
+            .finish()
+    }
+}
+
+/// Hardware H.264 decoder behind a [`DecodeGate`]: no frame reaches
+/// VideoToolbox unless the gate admitted it, and the decoder is only ever
+/// configured with parameter sets the gate checked (phase4-criteria M7).
+///
+/// Decoding is synchronous: VideoToolbox calls the output callback before
+/// `VTDecompressionSessionDecodeFrame` returns when no asynchronous flag is
+/// set (VTDecompressionSession.h, SDK 27). Run it on its own thread.
+pub struct VtDecoder {
+    gate: DecodeGate,
+    stats: DecodeStats,
+    session: Option<(DecodeSession, Alive)>,
+    /// Live decoder sessions and pictures ([`DecodeStats`]).
+    sessions_alive: Arc<AtomicU64>,
+    pictures_alive: Arc<AtomicU64>,
+    /// The id of the last frame offered to `decode`.
+    last_frame_id: Option<u32>,
+}
+
+// SAFETY: a VTDecompressionSession may be used from any thread (it is a CF
+// object, and decoding runs on the caller's thread); `VtDecoder` is only
+// used through `&mut self`, and `DecodeOutput` is Sync (a Mutex).
+unsafe impl Send for VtDecoder {}
+
+impl VtDecoder {
+    /// A decoder for pictures up to `limit`. Nothing is created until the
+    /// first keyframe passes the gate.
+    pub fn new(limit: SizeLimit) -> Self {
+        Self {
+            gate: DecodeGate::new(limit),
+            stats: DecodeStats::default(),
+            session: None,
+            sessions_alive: Arc::default(),
+            pictures_alive: Arc::default(),
+            last_frame_id: None,
+        }
+    }
+
+    /// Decodes one Annex B frame. On any error the viewer needs a keyframe.
+    ///
+    /// `frame_id` must follow the previous one: after a gap (a frame lost,
+    /// given up, or not offered) a predicted frame would refer to a picture
+    /// the decoder never saw, and VideoToolbox decodes it without an error
+    /// (seen in `m7_a_missing_frame_waits_for_a_keyframe`). So a gap is
+    /// treated like a decode error: nothing until the next keyframe.
+    pub fn decode(&mut self, frame_id: u32, annexb: &[u8]) -> Result<DecodedFrame, DecodeError> {
+        let previous = self.last_frame_id.replace(frame_id);
+        if previous.is_some_and(|p| frame_id != p.wrapping_add(1)) {
+            self.gate.decode_failed();
+        }
+        let admitted = match self.gate.admit(annexb) {
+            Ok(a) => a,
+            Err(r) => {
+                self.stats.refused += 1;
+                return Err(DecodeError::Refused(r));
+            }
+        };
+        if admitted.reconfigure {
+            // The old session goes first: never two decoders at once.
+            self.session = None;
+            let created = match (admitted.frame.sps, admitted.frame.pps) {
+                (Some((sps, info)), Some(pps)) => DecodeSession::new(sps, pps, info),
+                _ => Err(CodecError::Bitstream("keyframe without parameter sets")),
+            };
+            match created {
+                Ok(s) => {
+                    self.session = Some((s, Alive::new(&self.sessions_alive)));
+                    self.stats.sessions_created += 1;
+                }
+                Err(e) => return Err(self.failed(DecodeError::Configure(e))),
+            }
+        }
+        let Some((session, _)) = &self.session else {
+            return Err(self.failed(DecodeError::NoPicture));
+        };
+        match session.decode(&admitted.frame.to_avcc()) {
+            Ok(image) => {
+                self.stats.decoded += 1;
+                Ok(DecodedFrame {
+                    frame_id,
+                    image,
+                    _alive: Alive::new(&self.pictures_alive),
+                })
+            }
+            Err(e) => Err(self.failed(e)),
+        }
+    }
+
+    /// Counts a failure, drops the decoder session and makes the gate wait
+    /// for a keyframe that creates a new one. A failed session is never
+    /// reused: its reference pictures are suspect, and some errors (e.g. an
+    /// invalidated session) would repeat on every later frame.
+    fn failed(&mut self, e: DecodeError) -> DecodeError {
+        self.stats.failed += 1;
+        self.session = None;
+        self.gate.configure_failed();
+        e
+    }
+
+    /// Counters, with the live sessions and pictures as of now.
+    pub fn stats(&self) -> DecodeStats {
+        DecodeStats {
+            sessions_alive: self.sessions_alive.load(Ordering::Relaxed),
+            pictures_alive: self.pictures_alive.load(Ordering::Relaxed),
+            ..self.stats
+        }
+    }
+}
+
+/// The decoder's output for the frame being decoded (the callback's refcon).
+#[derive(Default)]
+struct DecodeOutput {
+    slot: Mutex<Option<Result<CFRetained<CVPixelBuffer>, i32>>>,
+}
+
+/// One `VTDecompressionSession`, configured from checked parameter sets.
+struct DecodeSession {
+    session: CFRetained<VTDecompressionSession>,
+    format: CFRetained<CMFormatDescription>,
+    /// Pictures larger than this are not passed on (the SPS's coded size).
+    max: (u32, u32),
+    // Boxed so their addresses are stable: VideoToolbox holds pointers to
+    // both until the session is invalidated in `Drop`. Whether it copies
+    // the callback record is not documented (VTDecompressionSession.h), so
+    // the record lives as long as the session.
+    _record: Box<VTDecompressionOutputCallbackRecord>,
+    output: Box<DecodeOutput>,
+    /// The SPS and PPS the description was made from (see `new`).
+    _parameter_sets: Box<(Vec<u8>, Vec<u8>)>,
+}
+
+impl DecodeSession {
+    fn new(sps: &[u8], pps: &[u8], info: SpsInfo) -> Result<Self, CodecError> {
+        // Our own copies, kept as long as the description: the header
+        // (CMFormatDescription.h, SDK 27) does not say whether CoreMedia
+        // copies the parameter sets or keeps pointing at them.
+        let parameter_sets = Box::new((sps.to_vec(), pps.to_vec()));
+        let mut sets = [
+            NonNull::from(parameter_sets.0.as_slice()).cast::<u8>(),
+            NonNull::from(parameter_sets.1.as_slice()).cast::<u8>(),
+        ];
+        let mut sizes = [sps.len(), pps.len()];
+        let mut format: *const CMFormatDescription = ptr::null();
+        // SAFETY: two parameter sets of the given sizes, which live as long
+        // as the description (`parameter_sets`, a field); 4-byte NAL length
+        // prefixes (our AVCC); valid out pointer.
+        let status = unsafe {
+            CMVideoFormatDescriptionCreateFromH264ParameterSets(
+                None,
+                2,
+                NonNull::from(&mut sets).cast(),
+                NonNull::from(&mut sizes).cast(),
+                4,
+                NonNull::from(&mut format),
+            )
+        };
+        os(
+            "CMVideoFormatDescriptionCreateFromH264ParameterSets",
+            status,
+        )?;
+        // SAFETY: on success a +1 retained, non-null description.
+        let format = NonNull::new(format.cast_mut())
+            .map(|p| unsafe { CFRetained::from_raw(p) })
+            .ok_or(CodecError::Os {
+                api: "CMVideoFormatDescriptionCreateFromH264ParameterSets",
+                status: -1,
+            })?;
+        let output = Box::new(DecodeOutput::default());
+        let record = Box::new(VTDecompressionOutputCallbackRecord {
+            decompressionOutputCallback: Some(on_decoded),
+            decompressionOutputRefCon: (&*output as *const DecodeOutput).cast_mut().cast(),
+        });
+        // NV12 (what the viewer uploads, R2), IOSurface-backed.
+        // SAFETY: Apple constant keys.
+        let (k_fmt, k_io) = unsafe {
+            (
+                kCVPixelBufferPixelFormatTypeKey,
+                kCVPixelBufferIOSurfacePropertiesKey,
+            )
+        };
+        let empty = CFDictionary::<CFString, CFType>::empty();
+        let attrs = CFDictionary::<CFString, CFType>::from_slices(
+            &[k_fmt, k_io],
+            &[
+                &*CFNumber::new_i32(kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange as i32),
+                empty.as_opaque(),
+            ],
+        );
+        let mut out: *mut VTDecompressionSession = ptr::null_mut();
+        // SAFETY: valid description and attributes; the record and the
+        // `DecodeOutput` it points to outlive the session (see `Drop`);
+        // valid out pointer.
+        let status = unsafe {
+            VTDecompressionSession::create(
+                None,
+                &format,
+                None,
+                Some(attrs.as_opaque()),
+                &*record,
+                NonNull::from(&mut out),
+            )
+        };
+        os("VTDecompressionSessionCreate", status)?;
+        // SAFETY: on success a +1 retained, non-null session.
+        let session = NonNull::new(out)
+            .map(|p| unsafe { CFRetained::from_raw(p) })
+            .ok_or(CodecError::Os {
+                api: "VTDecompressionSessionCreate",
+                status: -1,
+            })?;
+        // Optional: favour latency. Ignored if the decoder does not support it.
+        let t: &CFType = CFBoolean::new(true);
+        // SAFETY: valid session (a VTSession); Apple constant key.
+        unsafe {
+            let _ = VTSessionSetProperty(&session, kVTDecompressionPropertyKey_RealTime, Some(t));
+        }
+        Ok(Self {
+            session,
+            format,
+            max: (info.coded_width, info.coded_height),
+            _record: record,
+            output,
+            _parameter_sets: parameter_sets,
+        })
+    }
+
+    /// Decodes one AVCC frame synchronously.
+    fn decode(&self, avcc: &[u8]) -> Result<PixelBufferRef, DecodeError> {
+        let os_err = |api, status| DecodeError::Decode(CodecError::Os { api, status });
+        let len = avcc.len();
+        let mut block: *mut CMBlockBuffer = ptr::null_mut();
+        // SAFETY: CoreMedia allocates `len` bytes now (null memory block,
+        // default allocator, AssureMemoryNow); valid out pointer.
+        let st = unsafe {
+            CMBlockBuffer::create_with_memory_block(
+                None,
+                ptr::null_mut(),
+                len,
+                None,
+                ptr::null(),
+                0,
+                len,
+                kCMBlockBufferAssureMemoryNowFlag,
+                NonNull::from(&mut block),
+            )
+        };
+        if st != 0 {
+            return Err(os_err("CMBlockBufferCreateWithMemoryBlock", st));
+        }
+        // SAFETY: +1 retained, non-null on success.
+        let block = NonNull::new(block)
+            .map(|p| unsafe { CFRetained::from_raw(p) })
+            .ok_or(os_err("CMBlockBufferCreateWithMemoryBlock", -1))?;
+        let src = NonNull::new(avcc.as_ptr().cast_mut().cast::<c_void>())
+            .ok_or(DecodeError::NoPicture)?;
+        // SAFETY: `src` is `len` readable bytes; the block holds `len` bytes.
+        let st = unsafe { CMBlockBuffer::replace_data_bytes(src, &block, 0, len) };
+        if st != 0 {
+            return Err(os_err("CMBlockBufferReplaceDataBytes", st));
+        }
+        let mut sample: *mut CMSampleBuffer = ptr::null_mut();
+        // SAFETY: valid block and description; one sample of `len` bytes, no
+        // timing (decode order = arrival order); valid out pointers.
+        let st = unsafe {
+            CMSampleBuffer::create_ready(
+                None,
+                Some(&block),
+                Some(&self.format),
+                1,
+                0,
+                ptr::null(),
+                1,
+                &len,
+                NonNull::from(&mut sample),
+            )
+        };
+        if st != 0 {
+            return Err(os_err("CMSampleBufferCreateReady", st));
+        }
+        // SAFETY: +1 retained, non-null on success.
+        let sample = NonNull::new(sample)
+            .map(|p| unsafe { CFRetained::from_raw(p) })
+            .ok_or(os_err("CMSampleBufferCreateReady", -1))?;
+        if let Ok(mut slot) = self.output.slot.lock() {
+            *slot = None;
+        }
+        let mut info = VTDecodeInfoFlags(0);
+        // SAFETY: valid session and sample. No asynchronous flag: the output
+        // callback runs before this returns (VTDecompressionSession.h).
+        let st = unsafe {
+            self.session
+                .decode_frame(&sample, VTDecodeFrameFlags(0), ptr::null_mut(), &mut info)
+        };
+        if info.0 & VTDecodeInfoFlags::Asynchronous.0 != 0 {
+            // Not expected without the flag; wait rather than read too early.
+            // SAFETY: valid session.
+            let _ = unsafe { self.session.wait_for_asynchronous_frames() };
+        }
+        if st != 0 {
+            return Err(os_err("VTDecompressionSessionDecodeFrame", st));
+        }
+        let got = self.output.slot.lock().ok().and_then(|mut s| s.take());
+        match got {
+            Some(Ok(image)) => {
+                let image = PixelBufferRef::from_retained(image);
+                if image.width() > self.max.0 || image.height() > self.max.1 {
+                    return Err(DecodeError::NoPicture);
+                }
+                Ok(image)
+            }
+            Some(Err(status)) => Err(os_err("VTDecompressionOutputCallback", status)),
+            None => Err(DecodeError::NoPicture),
+        }
+    }
+}
+
+impl Drop for DecodeSession {
+    fn drop(&mut self) {
+        // SAFETY: valid session. After `invalidate` returns VideoToolbox
+        // makes no further callbacks, so freeing the record and the output
+        // afterwards (field drop) is sound.
+        unsafe {
+            let _ = self.session.wait_for_asynchronous_frames();
+            self.session.invalidate();
+        }
+    }
+}
+
+/// VideoToolbox decoder output callback (runs before `decode_frame`
+/// returns, on the decoding thread).
+unsafe extern "C-unwind" fn on_decoded(
+    output_refcon: *mut c_void,
+    _source_refcon: *mut c_void,
+    status: i32,
+    flags: VTDecodeInfoFlags,
+    image: *mut CVImageBuffer,
+    _pts: CMTime,
+    _duration: CMTime,
+) {
+    if output_refcon.is_null() {
+        return;
+    }
+    // SAFETY: the refcon is the session's `DecodeOutput`, which outlives it.
+    let output = unsafe { &*output_refcon.cast::<DecodeOutput>() };
+    // Never let a panic unwind into VideoToolbox.
+    let _ = catch_unwind(AssertUnwindSafe(|| {
+        let result = if status != 0 {
+            Err(status)
+        } else if flags.0 & VTDecodeInfoFlags::FrameDropped.0 != 0 {
+            Err(-1)
+        } else {
+            // SAFETY: VideoToolbox passes a valid image buffer (or null) for
+            // the callback's duration; retaining keeps it alive after.
+            NonNull::new(image)
+                .map(|p| unsafe { CFRetained::retain(p) })
+                .ok_or(-1)
+        };
+        if let Ok(mut slot) = output.slot.lock() {
+            *slot = Some(result);
+        }
+    }));
 }

@@ -18,6 +18,7 @@
 #![forbid(unsafe_code)]
 
 mod host;
+mod media;
 mod tls;
 mod viewer;
 mod wire;
@@ -25,7 +26,7 @@ mod wire;
 use std::time::Duration;
 
 pub use host::{HostEvent, HostServer};
-pub use tls::{ALPN, SERVER_NAME, client_config, server_config};
+pub use tls::{ALPN, IDLE_TIMEOUT, KEEP_ALIVE, SERVER_NAME, client_config, server_config};
 pub use viewer::{ViewerClient, ViewerEvent, connect};
 pub use wire::{
     FrameReceiver, FrameSender, FramedStream, close, close_code_of, exporter, to_varint,

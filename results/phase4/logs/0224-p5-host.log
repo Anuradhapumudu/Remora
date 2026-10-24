@@ -1,0 +1,14 @@
+WARNING: this device's identity keys are stored UNENCRYPTED in /Users/pumudu/Library/Application Support/Remora/host-identity.key - anyone who can read that file can impersonate this device. Development-stage storage, protected only by file permissions; Remora moves the keys to the OS keychain before v0.1.
+device: 8531 422 5411-5
+identity: 5fdd914063d13e8a1be65b852ab957a543eb7bcf7f86ab173d763e8a27506b85
+listening: 127.0.0.1:49163
+[redacted]
+[redacted]
+prompt 1: "Remora viewer" (device 0539 023 4826-0) safety code 052 358 - check it matches the viewer's screen, then type 'accept 1' or 'deny 1'
+note: the previous code and password were used up when that viewer proved the password - each works for ONE connection. Give the next viewer these new ones:
+[redacted]
+[redacted]
+streaming: Screen, H.264
+SESSION ACTIVE 1: a viewer is connected (type 'disconnect 1' to end it)
+streaming stopped
+session ended 1 (Normal)

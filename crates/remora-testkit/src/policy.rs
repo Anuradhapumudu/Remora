@@ -7,6 +7,13 @@
 //!   `snow` type can reach a public signature or another crate.
 //! * `remora-testkit` only ever as a `[dev-dependencies]` entry (it contains the
 //!   counting allocator, which must never ship).
+//! * No OS-specific names in `remora-session` / `remora-net` (phase4-criteria
+//!   §7 T4): only capture/codec/input backends know the OS.
+//! * quinn's datagram send only in `remora-net/src/media.rs`, whose send
+//!   function takes a `SealedDatagram` (phase4-criteria M2, INV2). Tests
+//!   may call it: they play hostile peers.
+//! * No file writes in the `src/` of the crates that handle screen content
+//!   (phase4-criteria N3, INV9), except the capture-to-file benchmark.
 
 use std::path::Path;
 
@@ -30,6 +37,47 @@ const CRYPTO_WRAPPERS: [&str; 2] = [
 ];
 /// Third-party crates confined behind Remora's own abstractions.
 const CONFINED_CRATES: [&str; 2] = ["spake2", "snow"];
+/// Crates that must not know which OS they run on (phase4-criteria §7 T4):
+/// capture backends map OS errors to OS-neutral reasons below them.
+const OS_FREE: [&str; 2] = ["crates/remora-session/", "crates/remora-net/"];
+/// Names that only OS backend code may use.
+const OS_WORDS: [&str; 8] = [
+    "SCStream",
+    "ScreenCaptureKit",
+    "VideoToolbox",
+    "DXGI",
+    "objc2",
+    "windows_sys",
+    "target_os",
+    "3815",
+];
+
+/// Crates that handle screen content: no file writes in their `src/`
+/// (phase4-criteria N3, INV9).
+const NO_FILE_WRITES: [&str; 6] = [
+    "crates/remora-capture/src/",
+    "crates/remora-codec/src/",
+    "crates/remora-net/src/",
+    "crates/remora-session/src/",
+    "crates/remora-host/src/",
+    "crates/remora-viewer/src/",
+];
+/// The one writer allowed among them: the Phase 2 `bench-capture --out`
+/// tool, which saves the encoded stream on purpose (INV9's exception).
+const FILE_WRITE_ALLOWED: &str = "crates/remora-host/src/bench.rs";
+/// Ways to create or write a file.
+const FILE_WRITES: [&str; 5] = [
+    "File::create",
+    "File::create_new",
+    "File::options",
+    "fs::write",
+    "OpenOptions",
+];
+
+/// The one file allowed to hand datagrams to quinn (M2).
+const MEDIA_SEND_FILE: &str = "crates/remora-net/src/media.rs";
+/// quinn's datagram send methods.
+const DATAGRAM_SENDS: [&str; 2] = ["send_datagram", "send_datagram_wait"];
 
 fn is_ident_char(c: char) -> bool {
     c.is_alphanumeric() || c == '_'
@@ -86,12 +134,41 @@ pub fn check_rust(path: &str, content: &str) -> Vec<Violation> {
     let unsafe_allowed =
         path.starts_with("spikes/") || (path.starts_with("crates/") && path.contains("/src/sys/"));
     let confined_allowed = CRYPTO_WRAPPERS.iter().any(|w| path.starts_with(w));
+    let os_free = OS_FREE.iter().any(|c| path.starts_with(c));
+    let sends_checked =
+        path.starts_with("crates/") && path.contains("/src/") && path != MEDIA_SEND_FILE;
+    let writes_checked =
+        NO_FILE_WRITES.iter().any(|c| path.starts_with(c)) && path != FILE_WRITE_ALLOWED;
     let mut v = Vec::new();
     for (i, line) in content.lines().enumerate() {
         let code = code_part(line);
         if !unsafe_allowed && has_word(&code, "unsafe") {
             v.push(Violation {
                 rule: "unsafe outside src/sys",
+                path: path.into(),
+                line: i + 1,
+                text: line.trim().into(),
+            });
+        }
+        if os_free && OS_WORDS.iter().any(|w| has_word(&code, w)) {
+            v.push(Violation {
+                rule: "OS-specific name in remora-session / remora-net",
+                path: path.into(),
+                line: i + 1,
+                text: line.trim().into(),
+            });
+        }
+        if sends_checked && DATAGRAM_SENDS.iter().any(|w| has_word(&code, w)) {
+            v.push(Violation {
+                rule: "QUIC datagram send outside remora-net/src/media.rs",
+                path: path.into(),
+                line: i + 1,
+                text: line.trim().into(),
+            });
+        }
+        if writes_checked && FILE_WRITES.iter().any(|w| has_word(&code, w)) {
+            v.push(Violation {
+                rule: "file write in a crate that handles screen content",
                 path: path.into(),
                 line: i + 1,
                 text: line.trim().into(),
@@ -198,6 +275,87 @@ pub fn check_workspace(root: &Path) -> Scan {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn t4_os_names_are_refused_in_session_and_net_only() {
+        // phase4-criteria §7 T4: the session layer never learns the OS.
+        for word in [
+            "SCStream",
+            "ScreenCaptureKit",
+            "VideoToolbox",
+            "DXGI",
+            "objc2",
+            "windows_sys",
+            "target_os",
+            "3815",
+        ] {
+            let src = format!("let x = {word};");
+            for path in [
+                "crates/remora-session/src/host.rs",
+                "crates/remora-net/src/host.rs",
+            ] {
+                let v = check_rust(path, &src);
+                assert_eq!(v.len(), 1, "{word} in {path}");
+                assert_eq!(v[0].rule, "OS-specific name in remora-session / remora-net");
+            }
+            assert!(check_rust("crates/remora-capture/src/sys/macos.rs", &src).is_empty());
+            assert!(check_rust("crates/remora-app/src/sys/macos.rs", &src).is_empty());
+        }
+        // Comments may explain the mapping; longer identifiers are not hits.
+        assert!(
+            check_rust(
+                "crates/remora-session/src/lib.rs",
+                "/// macOS: SCStream error -3815\nlet scstream_like = 38150;"
+            )
+            .is_empty()
+        );
+    }
+
+    #[test]
+    fn n3_no_file_writes_in_the_media_crates() {
+        // phase4-criteria §6 N3 (INV9): nothing that could put screen
+        // content on disk in the crates that handle it.
+        let crates = [
+            "remora-capture",
+            "remora-codec",
+            "remora-net",
+            "remora-session",
+            "remora-host",
+            "remora-viewer",
+        ];
+        for call in [
+            "File::create(\"frame.bin\")",
+            "std::fs::write(p, &data)",
+            "OpenOptions::new().write(true)",
+            "File::options().append(true)",
+            "File::create_new(p)",
+        ] {
+            let src = format!("let f = {call};");
+            for c in crates {
+                let path = format!("crates/{c}/src/lib.rs");
+                let v = check_rust(&path, &src);
+                assert_eq!(v.len(), 1, "{call} in {path}");
+                assert_eq!(
+                    v[0].rule,
+                    "file write in a crate that handles screen content"
+                );
+                assert_eq!(v[0].line, 1);
+                // Tests may write (temp dirs, fixtures); the key store may.
+                assert!(check_rust(&format!("crates/{c}/tests/x.rs"), &src).is_empty());
+            }
+            assert!(check_rust("crates/remora-app/src/keystore.rs", &src).is_empty());
+            // The one allowed writer: the Phase 2 capture-to-file benchmark.
+            assert!(check_rust("crates/remora-host/src/bench.rs", &src).is_empty());
+        }
+        // Comments and strings may name them.
+        assert!(
+            check_rust(
+                "crates/remora-viewer/src/main.rs",
+                "// never File::create here\nlet s = \"fs::write\";"
+            )
+            .is_empty()
+        );
+    }
 
     #[test]
     fn flags_unsafe_outside_sys_but_not_inside() {

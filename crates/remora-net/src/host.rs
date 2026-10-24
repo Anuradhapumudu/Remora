@@ -13,12 +13,13 @@ use remora_crypto::sas::Sas;
 use remora_crypto::secret::Otp;
 use remora_session::{
     AppMessage, ApproveError, CloseCode, FailReason, Host, HostAction, HostConfig, Millis,
-    SessionId, Step,
+    SendVideoError, SessionId, Step,
 };
 use tokio::sync::mpsc;
 use tokio::time::Instant;
 
-use crate::wire::FrameSender;
+use crate::media::MediaPath;
+use crate::wire::{FrameSender, is_lost};
 use crate::{FramedStream, NetError, TICK, close, exporter, floor_deadline, server_config};
 
 /// What the host UI / CLI is told.
@@ -67,6 +68,9 @@ pub enum HostEvent {
     },
     /// Three failures: a new password is in effect (show it).
     OtpRotated,
+    /// Capture resumed after an interruption: encode the next frame as a
+    /// keyframe.
+    ForceKeyframe,
     /// The password was used: a new one is in effect (INV15).
     OtpUsed {
         /// Session that used it.
@@ -78,6 +82,14 @@ pub enum HostEvent {
         id: SessionId,
         /// Code sent to the peer.
         code: CloseCode,
+    },
+    /// The connection for `id` died without a close from either side: the
+    /// viewer went silent for [`crate::IDLE_TIMEOUT`] (network gone, viewer
+    /// machine asleep or crashed) or reset it. The session is over; this is
+    /// reported instead of [`HostEvent::Closed`], never as an orderly close.
+    Lost {
+        /// Session.
+        id: SessionId,
     },
 }
 
@@ -93,6 +105,9 @@ struct Conn {
     out: mpsc::UnboundedSender<Out>,
     peer: SocketAddr,
     accepted: Instant,
+    /// For media datagrams, which bypass the ordered writer: a late frame
+    /// is worth nothing, so they go out at once.
+    quic: quinn::Connection,
 }
 
 struct Shared {
@@ -100,6 +115,7 @@ struct Shared {
     conns: Mutex<HashMap<SessionId, Conn>>,
     events: mpsc::UnboundedSender<HostEvent>,
     start: Instant,
+    media: MediaPath,
 }
 
 /// A running host endpoint.
@@ -127,6 +143,7 @@ impl HostServer {
             conns: Mutex::new(HashMap::new()),
             events,
             start: Instant::now(),
+            media: MediaPath::default(),
         });
         tokio::spawn(accept_loop(endpoint.clone(), shared.clone()));
         tokio::spawn(tick_loop(Arc::downgrade(&shared)));
@@ -155,7 +172,8 @@ impl HostServer {
 
     /// Accept on the prompt for `id` showing `sas`.
     pub fn approve(&self, id: SessionId, sas: Sas) -> Result<(), ApproveError> {
-        let actions = lock(&self.shared.host).approve(id, sas)?;
+        let now = self.shared.now();
+        let actions = lock(&self.shared.host).approve(id, sas, now)?;
         self.shared.apply(actions, None);
         Ok(())
     }
@@ -164,6 +182,52 @@ impl HostServer {
     pub fn deny(&self, id: SessionId) {
         let actions = lock(&self.shared.host).deny(id);
         self.shared.apply(actions, None);
+    }
+
+    /// Screen capture changed state (phase4-criteria §7); see
+    /// [`remora_session::Host::capture_changed`].
+    pub fn capture_changed(&self, status: remora_session::CaptureStatus) {
+        let now = self.shared.now();
+        let actions = lock(&self.shared.host).capture_changed(status, now);
+        self.shared.apply(actions, None);
+    }
+
+    /// While the captured display is removed: how long until the host
+    /// gives up waiting (roadmap D-29); `None` otherwise.
+    pub fn pause_remaining(&self) -> Option<Duration> {
+        let now = self.shared.now();
+        lock(&self.shared.host)
+            .pause_remaining(now)
+            .map(|ms| Duration::from_millis(u64::from(ms)))
+    }
+
+    /// Sends one encoded video frame to every active session; see
+    /// [`remora_session::Host::send_video`].
+    pub fn send_video(
+        &self,
+        keyframe: bool,
+        capture_ts_us: u64,
+        data: &[u8],
+    ) -> Result<(), SendVideoError> {
+        let now = self.shared.now();
+        let actions =
+            lock(&self.shared.host).send_video(keyframe, capture_ts_us, data, now, &mut OsRng)?;
+        self.shared.apply(actions, None);
+        Ok(())
+    }
+
+    /// Every media datagram payload handed to quinn from now on
+    /// (phase4-criteria M1a; feature `test-tap`, tests only).
+    #[cfg(feature = "test-tap")]
+    pub fn tap_datagrams(&self) -> mpsc::UnboundedReceiver<Vec<u8>> {
+        let (tx, rx) = mpsc::unbounded_channel();
+        *self
+            .shared
+            .media
+            .tap
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some(tx);
+        rx
     }
 
     /// Disconnect session `id` (any state).
@@ -190,6 +254,24 @@ impl Shared {
         Millis(u64::try_from(self.start.elapsed().as_millis()).unwrap_or(u64::MAX))
     }
 
+    /// Performs the actions of a session whose connection died (see
+    /// [`is_lost`]): nothing can be sent any more, and the end is reported
+    /// as [`HostEvent::Lost`] - not as the orderly close the session layer
+    /// chose for it (walkthrough 2026-10-21: it used to print "Normal").
+    fn lost(&self, actions: Vec<HostAction>) {
+        let mut rest = Vec::new();
+        for action in actions {
+            match action {
+                HostAction::Send { .. } | HostAction::Media { .. } => {}
+                HostAction::Close { id, .. } => {
+                    let _ = self.events.send(HostEvent::Lost { id });
+                }
+                other => rest.push(other),
+            }
+        }
+        self.apply(rest, None);
+    }
+
     /// Performs the session's actions. `arrival` is when the frame that
     /// produced them arrived: an `AUTH_FAILED` close is then held back
     /// until the floor (A04).
@@ -201,6 +283,11 @@ impl Shared {
                 HostAction::Send { id, frame } => {
                     if let Some(c) = conns.get(&id) {
                         let _ = c.out.send(Out::Frame(frame));
+                    }
+                }
+                HostAction::Media { id, datagram } => {
+                    if let Some(c) = conns.get(&id) {
+                        self.media.send(&c.quic, datagram);
                     }
                 }
                 HostAction::Close { id, code } => {
@@ -284,6 +371,9 @@ impl Shared {
                 HostAction::OtpUsed { id } => {
                     let _ = self.events.send(HostEvent::OtpUsed { id });
                 }
+                HostAction::ForceKeyframe => {
+                    let _ = self.events.send(HostEvent::ForceKeyframe);
+                }
             }
         }
     }
@@ -341,6 +431,7 @@ async fn run_connection(incoming: quinn::Incoming, shared: Arc<Shared>) {
             out: out_tx,
             peer,
             accepted: Instant::now(),
+            quic: conn.clone(),
         },
     );
     let mut out_rx = out_rx;
@@ -394,10 +485,14 @@ async fn run_connection(incoming: quinn::Incoming, shared: Arc<Shared>) {
         }
     };
     reader.await;
-    let _ = conn.closed().await;
+    let err = conn.closed().await;
     // The connection is gone: end the session (frees its slot) and forget it.
     let actions = lock(&shared.host).disconnect(id);
-    shared.apply(actions, None);
+    if is_lost(&err) {
+        shared.lost(actions);
+    } else {
+        shared.apply(actions, None);
+    }
     lock(&shared.host).forget(id);
     lock(&shared.conns).remove(&id);
 }

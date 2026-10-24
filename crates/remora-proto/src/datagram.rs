@@ -24,6 +24,12 @@ pub enum DatagramKind {
 
 /// Bits of `flags` that have a meaning; all others must be zero.
 pub const KNOWN_FLAGS: u8 = 0b0000_0111;
+/// `flags` bit 0: the fragment belongs to a keyframe.
+pub const FLAG_KEYFRAME: u8 = 0b0000_0001;
+/// `flags` bit 1: the last fragment of its frame.
+pub const FLAG_LAST: u8 = 0b0000_0010;
+/// `flags` bit 2: a refinement frame (static-screen sharpening, Phase 7).
+pub const FLAG_REFINEMENT: u8 = 0b0000_0100;
 
 /// The parsed clear header.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

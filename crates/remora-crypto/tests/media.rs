@@ -91,7 +91,7 @@ fn a11_every_bit_flip_is_dropped_and_the_session_continues() {
     let mut dropped = 0;
     for byte in 0..good.len() {
         for bit in 0..8 {
-            let mut d = good.clone();
+            let mut d = good.to_vec();
             d[byte] ^= 1 << bit;
             assert!(r.open(&d).is_err(), "byte {byte} bit {bit} accepted");
             dropped += 1;
@@ -111,11 +111,11 @@ fn a11_header_tamper_is_auth_failure_not_a_parse_error() {
     let good = s.seal(header(), b"x").unwrap();
     for idx in [12, 13, 14] {
         // stream_id, layer_id: still a valid header, but AAD differs
-        let mut d = good.clone();
+        let mut d = good.to_vec();
         d[idx] ^= 1;
         assert_eq!(r.open(&d).err(), Some(MediaDrop::Auth), "header byte {idx}");
     }
-    let mut d = good.clone();
+    let mut d = good.to_vec();
     d[15] = 1; // reserved byte
     assert_eq!(
         r.open(&d).err(),
@@ -219,7 +219,7 @@ fn a12_forged_far_ahead_counter_does_not_slide_the_window() {
     let (mut s, mut r) = pair(1);
     let d0 = s.seal(header(), b"zero").unwrap();
     let d1 = s.seal(header(), b"one").unwrap();
-    let mut forged = d0.clone();
+    let mut forged = d0.to_vec();
     forged[4..12].copy_from_slice(&(u64::MAX - 1).to_be_bytes());
     assert_eq!(r.open(&forged).err(), Some(MediaDrop::Auth));
     assert!(r.open(&d1).is_ok());
@@ -344,9 +344,9 @@ fn a12_replay_window_matches_a_reference_model() {
                 _ => next() % 3,
             };
             for _ in 0..skip {
-                sent.push(s.seal(header(), b"").unwrap());
+                sent.push(s.seal(header(), b"").unwrap().into_bytes());
             }
-            sent.push(s.seal(header(), b"").unwrap());
+            sent.push(s.seal(header(), b"").unwrap().into_bytes());
             (sent.len() - 1) as u64
         } else {
             let back = next() % (REPLAY_WINDOW + 200);
@@ -364,4 +364,16 @@ fn a12_replay_window_matches_a_reference_model() {
             highest = Some(highest.map_or(c, |h| h.max(c)));
         }
     }
+}
+
+#[test]
+fn m2_a_sealed_datagram_is_the_sealed_bytes_and_prints_only_its_size() {
+    let (mut s, mut r) = pair(4);
+    let d = s.seal(header(), b"twelve bytes").unwrap();
+    assert_eq!(d.len(), 16 + 12 + 16);
+    assert_eq!(format!("{d:?}"), "SealedDatagram { bytes: 44 }");
+    let view = d.to_vec();
+    let owned = d.into_bytes();
+    assert_eq!(owned, view);
+    assert_eq!(r.open(&owned).unwrap().1, b"twelve bytes");
 }

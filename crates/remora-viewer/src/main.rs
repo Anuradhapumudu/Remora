@@ -1,14 +1,21 @@
 //! Remora viewer: views and controls a remote Remora host.
 //!
 //! Phase 3: `connect` runs the authenticated handshake against a host's
-//! connection code on loopback and shows the safety code; no screen yet.
+//! connection code on loopback and shows the safety code. Phase 4: it
+//! decodes the video it receives (step 5) and shows it in a window (step
+//! 6), or only decodes it with `--no-window` (step 7a).
 //!
 //! Output lines (stable prefixes; the end-to-end tests read them):
 //! `safety code:`, `SESSION ACTIVE`, `rejected by the host`, `identity
 //! mismatch: ...`, `this device's identity changed ...`, `failed: ...`,
-//! `session ended`. Exit codes: see [`remora_app::cli::exit`].
+//! `session ended`, `video:` (decoder counts, at the end). Exit codes:
+//! see [`remora_app::cli::exit`].
 
 #![forbid(unsafe_code)]
+
+mod decode;
+#[cfg(target_os = "macos")]
+mod window;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -16,11 +23,14 @@ use std::sync::Arc;
 
 use anyhow::{Context, anyhow};
 use clap::{Parser, Subcommand};
-use remora_app::cli::{exit, format_sas, identity_hex, parse_identity, short_code_of, unix_now};
+use remora_app::cli::{
+    Looks, exit, format_sas, identity_hex, join_device_words, key_file_warning, misplaced,
+    parse_identity, short_code_of, unix_now,
+};
 use remora_app::keystore::{self, Role};
 use remora_crypto::identity::{DeviceId, IdentityPublic, ShortCode};
 use remora_crypto::secret::Otp;
-use remora_net::{ViewerEvent, connect};
+use remora_net::{IDLE_TIMEOUT, ViewerEvent, connect};
 use remora_proto::code::{CodeKind, ConnectionCode};
 use remora_session::{CloseCode, FailReason, Identity, ViewerConfig, ViewerMode};
 
@@ -45,7 +55,7 @@ enum Command {
 
 #[derive(clap::Args)]
 struct ConnectArgs {
-    /// The host's connection code (`remora1:...`).
+    /// The host's connection code (its `code:` line, `remora1:...`).
     code: String,
     /// Key file (default: the per-user config directory).
     #[arg(long)]
@@ -56,16 +66,31 @@ struct ConnectArgs {
     /// The host's one-time password (asked on stdin if not given).
     #[arg(long, conflicts_with = "pin")]
     password: Option<String>,
-    /// Trusted mode: the host's pinned identity key (64 hex digits).
+    /// Trusted mode: the host's identity key (its `identity:` line, 64 hex
+    /// digits); replaces the password.
     #[arg(long)]
     pin: Option<String>,
-    /// The device code of the host you mean to reach; refuse any other.
-    #[arg(long)]
+    /// The device code of the host you mean to reach (the host's `device:`
+    /// line, e.g. --device 8531 422 5411-5, quotes optional); refuse any
+    /// other.
+    #[arg(long, value_name = "DEVICE CODE")]
     device: Option<String>,
+    /// Decode the video but open no window (tests and measurements); the
+    /// decoder's counts are printed when the session ends.
+    #[arg(long)]
+    no_window: bool,
+    /// Print one `timing:` line per drawn frame on stderr: shared-clock
+    /// times of capture, arrival, decode, GPU draw done and present
+    /// (latency measurement, phase4-criteria P1/P2), and once a second a
+    /// `media:` line with the media datagram counts (P3). Times and counts
+    /// only.
+    #[arg(long)]
+    timing: bool,
 }
 
 fn main() -> ExitCode {
-    let cli = Cli::parse();
+    // F-UX6: a device code typed without quotes is rejoined first.
+    let cli = Cli::parse_from(join_device_words(std::env::args_os()));
     init_logging();
     let result = match cli.command {
         None => {
@@ -77,17 +102,119 @@ fn main() -> ExitCode {
             Ok(exit::OK)
         }
         Some(Command::Identity { identity_file }) => identity(identity_file).map(|()| exit::OK),
-        Some(Command::Connect(args)) => tokio::runtime::Builder::new_multi_thread()
-            .enable_all()
-            .build()
-            .context("starting the async runtime")
-            .and_then(|rt| rt.block_on(run_connect(args))),
+        Some(Command::Connect(args)) => connect_command(args),
     };
+    ExitCode::from(exit_code(result))
+}
+
+/// The exit code for a command's result, printing the error if any.
+fn exit_code(result: anyhow::Result<u8>) -> u8 {
     match result {
-        Ok(code) => ExitCode::from(code),
+        Ok(code) => code,
         Err(e) => {
             println!("failed: {e:#}");
-            ExitCode::from(exit::ERROR)
+            exit::ERROR
+        }
+    }
+}
+
+fn runtime() -> anyhow::Result<tokio::runtime::Runtime> {
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .context("starting the async runtime")
+}
+
+/// macOS: the window owns the main thread and the session runs on its
+/// own (phase4-criteria R1); the session's output and exit codes are
+/// unchanged.
+#[cfg(target_os = "macos")]
+fn connect_command(args: ConnectArgs) -> anyhow::Result<u8> {
+    use window::Event;
+    if args.no_window {
+        let display = Display {
+            show: None,
+            on_counters: Box::new(|_| {}),
+            on_pause: Box::new(|_| {}),
+            close: None,
+        };
+        return runtime().and_then(|rt| rt.block_on(run_connect(args, display)));
+    }
+    window::run(args.timing, move |proxy, close| {
+        let show_proxy = proxy.clone();
+        let counters_proxy = proxy.clone();
+        let pause_proxy = proxy.clone();
+        let display = Display {
+            show: Some(Box::new(move |p| {
+                let _ = show_proxy.send_event(Event::Picture(p));
+            })),
+            on_counters: Box::new(move |c| {
+                let _ = counters_proxy.send_event(Event::Counters(c));
+            }),
+            on_pause: Box::new(move |p| {
+                let _ = pause_proxy.send_event(Event::Pause(p));
+            }),
+            close: Some(close),
+        };
+        let code = exit_code(runtime().and_then(|rt| rt.block_on(run_connect(args, display))));
+        let _ = proxy.send_event(Event::Ended(code));
+    })
+}
+
+/// Other systems: no window or decoder yet (Phase 6.5).
+#[cfg(not(target_os = "macos"))]
+fn connect_command(args: ConnectArgs) -> anyhow::Result<u8> {
+    let _ = (args.no_window, args.timing); // no window here either way
+    let display = Display {
+        show: decode::Show,
+        on_counters: Box::new(|_| {}),
+        on_pause: Box::new(|_| {}),
+        close: None,
+    };
+    runtime().and_then(|rt| rt.block_on(run_connect(args, display)))
+}
+
+/// Where decoded pictures go, and how the window asks to end the session.
+struct Display {
+    show: decode::Show,
+    on_counters: Box<dyn FnOnce(Arc<decode::Counters>) + Send>,
+    /// The stream paused (`Some`) or resumed (`None`), for the window.
+    on_pause: Box<dyn Fn(Option<Pause>) + Send>,
+    close: Option<tokio::sync::oneshot::Receiver<()>>,
+}
+
+/// A paused stream as the viewer shows it.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Pause {
+    /// Why, for a person.
+    pub(crate) why: &'static str,
+    /// Display unavailable (D-29): when the host gives up, on this viewer's
+    /// clock (counted from when the message arrived).
+    pub(crate) deadline: Option<std::time::Instant>,
+}
+
+impl Pause {
+    fn of(reason: remora_session::PauseReason) -> Self {
+        let deadline = match reason {
+            remora_session::PauseReason::DisplayUnavailable { remaining_ms } => Some(
+                std::time::Instant::now()
+                    + std::time::Duration::from_millis(u64::from(remaining_ms)),
+            ),
+            _ => None,
+        };
+        Self {
+            why: pause_text(reason),
+            deadline,
+        }
+    }
+
+    /// What to show now: the countdown if the display is unavailable.
+    pub(crate) fn text(&self) -> String {
+        match self.deadline {
+            Some(d) => remora_app::cli::display_unavailable_text(
+                d.saturating_duration_since(std::time::Instant::now()),
+            ),
+            None => format!("Stream paused: {}.", self.why),
         }
     }
 }
@@ -98,15 +225,23 @@ fn identity(file: Option<PathBuf>) -> anyhow::Result<()> {
         None => keystore::default_path(Role::Viewer)?,
     };
     let (keys, _) = keystore::load_or_create(&path)?;
+    // F-UX2: on every run that loads the key file.
+    eprintln!("{}", key_file_warning(&path));
     let public = keys.identity.public();
     println!("identity: {}", identity_hex(&public));
     println!("device: {}", short_code_of(&public));
     Ok(())
 }
 
-async fn run_connect(args: ConnectArgs) -> anyhow::Result<u8> {
+async fn run_connect(args: ConnectArgs, display: Display) -> anyhow::Result<u8> {
+    let timing = args.timing;
     // The code is checked before any network traffic (A07: expiry).
-    let code = ConnectionCode::parse(args.code.trim(), unix_now()).context("connection code")?;
+    let code = ConnectionCode::parse(args.code.trim(), unix_now()).map_err(|e| {
+        anyhow!(
+            "connection code: {e} - {}",
+            misplaced(Looks::ConnectionCode, &args.code)
+        )
+    })?;
     if code.kind != CodeKind::Offer {
         return Err(anyhow!("this is an answer code, not a host's offer code"));
     }
@@ -120,8 +255,9 @@ async fn run_connect(args: ConnectArgs) -> anyhow::Result<u8> {
 
     // A16: the user asked for a specific device; refuse a code for another
     // one before connecting at all.
-    if let Some(want) = &args.device {
-        let want = ShortCode::parse(want).context("--device")?;
+    if let Some(typed) = &args.device {
+        let want = ShortCode::parse(typed)
+            .map_err(|e| anyhow!("--device: {e} - {}", misplaced(Looks::DeviceCode, typed)))?;
         if !want.matches(&host_id) {
             println!(
                 "identity mismatch: this code is for device {}, not {} which you asked for - not connecting",
@@ -134,7 +270,8 @@ async fn run_connect(args: ConnectArgs) -> anyhow::Result<u8> {
 
     let mode = match &args.pin {
         Some(pin) => {
-            let pinned = parse_identity(pin).context("--pin")?;
+            let pinned = parse_identity(pin)
+                .map_err(|e| anyhow!("--pin: {e} - {}", misplaced(Looks::IdentityKey, pin)))?;
             // A19: the pinned device now presents another key. Hard failure,
             // never a silent re-pin and never a fallback to a password.
             if pinned != host_key {
@@ -152,7 +289,8 @@ async fn run_connect(args: ConnectArgs) -> anyhow::Result<u8> {
                 Some(p) => p.clone(),
                 None => ask_password()?,
             };
-            let otp = Otp::parse(typed.trim()).context("password")?;
+            let otp = Otp::parse(typed.trim())
+                .map_err(|e| anyhow!("password: {e} - {}", misplaced(Looks::Password, &typed)))?;
             // Bind the session to the key in the code: the host's cert must
             // have this device ID (80 bits), so a substituted key fails.
             ViewerMode::Password {
@@ -167,6 +305,8 @@ async fn run_connect(args: ConnectArgs) -> anyhow::Result<u8> {
         None => keystore::default_path(Role::Viewer)?,
     };
     let (keys, _) = keystore::load_or_create(&path)?;
+    // F-UX2: on every run that loads the key file.
+    eprintln!("{}", key_file_warning(&path));
     let cert = keys
         .cert(&args.name, unix_now())
         .context("--name is at most 64 bytes")?;
@@ -182,26 +322,121 @@ async fn run_connect(args: ConnectArgs) -> anyhow::Result<u8> {
         host_id.short_code()
     );
     let (client, mut events) = connect(addr, config, code.nonce).await?;
+    let mut decoder =
+        decode::Decoder::start(client.clone(), display.show).context("decoder thread")?;
+    (display.on_counters)(decoder.counters());
+    let code = session_loop(
+        &client,
+        &mut events,
+        &mut decoder,
+        display.close,
+        &*display.on_pause,
+        timing,
+    )
+    .await;
+    let t = decoder.finish();
+    println!(
+        "video: {} frames decoded, {} refused, {} waiting for a keyframe, {} failed, {} dropped",
+        t.decoded, t.refused, t.waiting, t.failed, t.dropped
+    );
+    drop(client);
+    Ok(code)
+}
+
+/// Shows the session's events until it ends; returns the exit code.
+async fn session_loop(
+    client: &remora_net::ViewerClient,
+    events: &mut tokio::sync::mpsc::UnboundedReceiver<ViewerEvent>,
+    decoder: &mut decode::Decoder,
+    mut close: Option<tokio::sync::oneshot::Receiver<()>>,
+    on_pause: &(dyn Fn(Option<Pause>) + Send),
+    timing: bool,
+) -> u8 {
     let mut outcome: Option<u8> = None;
-    while let Some(ev) = events.recv().await {
+    let mut pause: Option<Pause> = None;
+    // `--timing`: the media counts once a second, so a measurement can
+    // check its own window (P3: 0 authentication failures, 0 frames
+    // given up). Counts only, never content (INV9).
+    let mut media_line = tokio::time::interval(std::time::Duration::from_secs(1));
+    // D-29: while the host waits for its unavailable display, say how long is left.
+    let mut wait_line = tokio::time::interval(remora_app::cli::WAIT_LINE_EVERY);
+    wait_line.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    loop {
+        let ev = tokio::select! {
+            _ = wait_line.tick() => {
+                if let Some(p) = pause.filter(|p| p.deadline.is_some()) {
+                    println!("{}", p.text());
+                }
+                continue;
+            }
+            _ = media_line.tick(), if timing => {
+                if let Some(m) = client.media_stats().await {
+                    eprintln!(
+                        "media: opened={} auth_failed={} replayed={} too_old={} unknown_key={} bad_header={} bad_fragments={} late_fragments={} frames={} frames_dropped={}",
+                        m.opened, m.auth_failed, m.replayed, m.too_old, m.unknown_key,
+                        m.bad_header, m.bad_fragments, m.late_fragments, m.frames, m.frames_dropped
+                    );
+                }
+                continue;
+            }
+            ev = events.recv() => match ev {
+                Some(ev) => ev,
+                None => break,
+            },
+            // The window was closed: end the session the normal way and
+            // keep reading until the connection reports how it ended.
+            _ = async { if let Some(c) = close.as_mut() { let _ = c.await; } }, if close.is_some() => {
+                close = None;
+                client.disconnect();
+                continue;
+            }
+        };
         match ev {
-            ViewerEvent::ShowSas { sas, host } => println!(
-                "safety code: {} - compare it with the host's screen (host {:?}, device {})",
-                format_sas(sas),
-                host.device_name(),
-                short_code_of(host.identity())
-            ),
+            ViewerEvent::ShowSas { sas, host } => {
+                println!(
+                    "safety code: {} - compare it with the host's screen (host {:?}, device {})",
+                    format_sas(sas),
+                    host.device_name(),
+                    short_code_of(host.identity())
+                );
+                // F-UX4: the decision is made on the host, not here.
+                println!(
+                    "waiting for the person at the host to accept or deny (nothing to type here)"
+                );
+            }
             ViewerEvent::Active => println!("SESSION ACTIVE"),
-            ViewerEvent::Deliver(_) => {}
+            ViewerEvent::StreamPaused(reason) => {
+                let p = Pause::of(reason);
+                match p.deadline {
+                    Some(_) => println!("stream paused - {} The session stays open", p.text()),
+                    None => println!("stream paused ({}) - the session stays open", p.why),
+                }
+                pause = Some(p);
+                on_pause(pause);
+                wait_line.reset();
+            }
+            ViewerEvent::StreamResumed => {
+                println!("stream resumed");
+                pause = None;
+                on_pause(None);
+            }
+            ViewerEvent::Video(frame) => decoder.offer(frame),
             ViewerEvent::Failed { reason, .. } => outcome = Some(report_failure(&reason)),
             ViewerEvent::Closed { local, remote } => {
-                let code = outcome.unwrap_or_else(|| report_close(local, remote));
-                drop(client);
-                return Ok(code);
+                return outcome.unwrap_or_else(|| report_close(local, remote));
+            }
+            ViewerEvent::Lost => {
+                return outcome.unwrap_or_else(|| {
+                    println!(
+                        "failed: connection lost - no reply from the host for {} s (network down, or the host stopped)",
+                        IDLE_TIMEOUT.as_secs()
+                    );
+                    exit::ERROR
+                });
             }
         }
     }
-    Ok(outcome.unwrap_or(exit::ERROR))
+    outcome.unwrap_or(exit::ERROR)
 }
 
 fn report_failure(reason: &FailReason) -> u8 {
@@ -229,6 +464,18 @@ fn report_failure(reason: &FailReason) -> u8 {
     }
 }
 
+/// What a pause reason means, for a person.
+fn pause_text(reason: remora_session::PauseReason) -> &'static str {
+    match reason {
+        remora_session::PauseReason::DisplayAsleep => "the host's display is asleep",
+        remora_session::PauseReason::AccessLost => "the host's system took the screen away",
+        remora_session::PauseReason::Other => "the host's screen capture was interrupted",
+        remora_session::PauseReason::DisplayUnavailable { .. } => {
+            "the host's display is unavailable (lid closed or disconnected)"
+        }
+    }
+}
+
 fn report_close(local: Option<CloseCode>, remote: Option<CloseCode>) -> u8 {
     match remote.or(local) {
         Some(CloseCode::Normal) => {
@@ -238,6 +485,10 @@ fn report_close(local: Option<CloseCode>, remote: Option<CloseCode>) -> u8 {
         Some(CloseCode::Rejected) => {
             println!("rejected by the host (a new attempt needs a fresh code and password)");
             exit::REJECTED
+        }
+        Some(CloseCode::CaptureStopped) => {
+            println!("failed: the host's screen capture stopped (it needs attention at the host)");
+            exit::ERROR
         }
         Some(CloseCode::AuthFailed) => {
             println!("failed: authentication failed (wrong or used password, or not trusted)");

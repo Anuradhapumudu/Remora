@@ -67,8 +67,9 @@ pub struct SessionReject {
     pub reason: u32,
 }
 
-/// A sender announces its media key.
+/// A sender announces its media key. `Debug` never prints the key.
 #[derive(Clone, PartialEq, prost::Message)]
+#[prost(skip_debug)]
 pub struct MediaKeyAnnounce {
     /// Key identifier used in datagram headers.
     #[prost(uint32, tag = "1")]
@@ -78,9 +79,52 @@ pub struct MediaKeyAnnounce {
     pub key: Vec<u8>,
 }
 
+impl std::fmt::Debug for MediaKeyAnnounce {
+    // The key is a secret (CLAUDE.md: never log secrets); prost's derived
+    // Debug would print its bytes, and so would any Envelope holding it.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MediaKeyAnnounce")
+            .field("key_id", &self.key_id)
+            .field("key", &"[redacted]")
+            .finish()
+    }
+}
+
 /// Orderly close.
 #[derive(Clone, Copy, PartialEq, prost::Message)]
 pub struct Goodbye {}
+
+/// Host → viewer: the video stream paused or resumed because screen
+/// capture was interrupted (display asleep, …) and came back
+/// (phase4-criteria §7, protocol.md §5 tag 16).
+#[derive(Clone, Copy, PartialEq, prost::Message)]
+pub struct StreamState {
+    /// `true`: paused; `false`: resumed.
+    #[prost(bool, tag = "1")]
+    pub paused: bool,
+    /// When paused: 1 display asleep, 2 access lost, 3 other, 4 display
+    /// unavailable — lid closed with the Mac awake, or disconnected (a
+    /// receiver treats unknown values as "other"). Names changed
+    /// 2026-10-23, values unchanged.
+    /// Must be 0 when resumed.
+    #[prost(uint32, tag = "2")]
+    pub reason: u32,
+    /// With reason 4 (display unavailable): milliseconds until the host gives
+    /// up waiting and ends the session, counted from when this message is
+    /// sent; the viewer counts down locally from when it received it. Sent
+    /// again only if the deadline changes. 0 with every other reason and
+    /// when resumed; at most [`crate::limits::PAUSE_REMAINING_MAX_MS`].
+    /// Added 2026-10-22 as a minor addition (protocol.md §8): a viewer
+    /// without this field ignores it.
+    #[prost(uint32, tag = "3")]
+    pub remaining_ms: u32,
+}
+
+/// Viewer → host: the viewer's decoder cannot continue (a frame was lost,
+/// refused or failed to decode); send a keyframe (protocol.md §5 tag 9).
+/// Phase 4 carries no fields; lost frame ids (for LTR recovery) come later.
+#[derive(Clone, Copy, PartialEq, prost::Message)]
+pub struct RecoveryRequest {}
 
 /// Mouse button press/release at normalised coordinates.
 #[derive(Clone, Copy, PartialEq, prost::Message)]
@@ -114,7 +158,7 @@ pub struct Key {
 #[derive(Clone, PartialEq, prost::Message)]
 pub struct Control {
     /// The message.
-    #[prost(oneof = "control::Kind", tags = "2, 3, 4, 5, 6, 14")]
+    #[prost(oneof = "control::Kind", tags = "2, 3, 4, 5, 6, 9, 14, 16")]
     pub kind: Option<control::Kind>,
 }
 
@@ -138,9 +182,15 @@ pub mod control {
         /// Media key announcement.
         #[prost(message, tag = "6")]
         MediaKey(super::MediaKeyAnnounce),
+        /// Keyframe request (viewer → host, Active only).
+        #[prost(message, tag = "9")]
+        Recovery(super::RecoveryRequest),
         /// Orderly close.
         #[prost(message, tag = "14")]
         Bye(super::Goodbye),
+        /// Stream paused / resumed (host → viewer, Active only).
+        #[prost(message, tag = "16")]
+        StreamState(super::StreamState),
     }
 }
 
@@ -272,8 +322,28 @@ pub fn decode_envelope(bytes: &[u8]) -> Result<Envelope, MessageError> {
             Some(control::Kind::Reject(r)) => {
                 require((1..=2).contains(&r.reason), "reject reason")?
             }
-            Some(control::Kind::MediaKey(k)) => require(k.key.len() == 32, "media key length")?,
-            Some(control::Kind::Pending(_) | control::Kind::Bye(_)) => {}
+            Some(control::Kind::MediaKey(k)) => {
+                require(k.key.len() == 32, "media key length")?;
+                // Datagram headers carry the id as u16 (protocol.md §6).
+                require(k.key_id <= u32::from(u16::MAX), "media key id")?;
+            }
+            Some(
+                control::Kind::Pending(_) | control::Kind::Bye(_) | control::Kind::Recovery(_),
+            ) => {}
+            Some(control::Kind::StreamState(st)) => {
+                require(
+                    st.paused == (st.reason != 0),
+                    "stream state: paused needs a reason, resumed has none",
+                )?;
+                require(
+                    st.paused || st.remaining_ms == 0,
+                    "stream state: resumed has no time left",
+                )?;
+                require(
+                    st.remaining_ms <= crate::limits::PAUSE_REMAINING_MAX_MS,
+                    "stream state: time left",
+                )?;
+            }
         },
         Some(envelope::Msg::Input(i)) => match &i.kind {
             None => return Err(MessageError::Invalid("empty or unknown input message")),

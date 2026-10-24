@@ -19,11 +19,16 @@ use remora_crypto::secret::{Exporter, Otp};
 
 use remora_proto::messages::{
     Control, Envelope, Goodbye, HostHello, Mode, SasReveal, SessionAccept, SessionPending,
-    SessionReject, control, decode_envelope, decode_viewer_hello, envelope,
+    SessionReject, StreamState, control, decode_envelope, decode_viewer_hello, envelope,
 };
+
+use remora_crypto::media::{MAX_PACKETS_PER_KEY, SealedDatagram};
+use remora_proto::limits::VIDEO_FRAGMENT_DATA;
+use remora_proto::video::{PacketizeError, packetize};
 
 use crate::fail::{AuthDetail, Violation};
 use crate::limiter::Limiter;
+use crate::media::{KEYFRAME_REQUEST_INTERVAL_MS, MediaOut, video_header};
 use crate::{
     AppMessage, CloseCode, FailReason, HANDSHAKE_TIMEOUT_MS, Millis, PROMPT_TIMEOUT_MS,
     PROTOCOL_VERSION, State, Step,
@@ -59,6 +64,18 @@ pub struct HostConfig {
     pub password_enabled: bool,
     /// Viewer identity keys allowed to use trusted (password-less) mode.
     pub trusted: Vec<IdentityPublic>,
+}
+
+/// Why [`Host::send_video`] could not send a frame.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum SendVideoError {
+    /// The frame cannot be cut into fragments (empty, or over 8 MiB).
+    #[error("frame not sendable: {0}")]
+    Frame(PacketizeError),
+    /// 2³² frames were sent (about 2 years at 60 fps): the stream must be
+    /// restarted.
+    #[error("frame ids used up")]
+    FrameIdsExhausted,
 }
 
 /// A connection refused at admission, before any crypto (A03).
@@ -142,6 +159,23 @@ pub enum HostAction {
         /// The session that used it.
         id: SessionId,
     },
+    /// The next encoded frame must be a keyframe: capture came back after
+    /// an interruption (the viewer's decoder state is stale), or a new
+    /// viewer was approved (it can only start decoding at a keyframe).
+    ForceKeyframe,
+    /// Send one media datagram on session `id` (Active only). The type can
+    /// only be made by sealing (phase4-criteria M2):
+    ///
+    /// ```compile_fail
+    /// use remora_session::{HostAction, SessionId};
+    /// let plain = HostAction::Media { id: SessionId(1), datagram: vec![0u8; 64] };
+    /// ```
+    Media {
+        /// Session.
+        id: SessionId,
+        /// Header ‖ ciphertext ‖ tag, sealed under this session's key.
+        datagram: SealedDatagram,
+    },
     /// Three failed attempts: a new password is in effect; tell the user
     /// ("3 failed attempts — new password") and show [`Host::otp`].
     OtpRotated {
@@ -169,8 +203,12 @@ pub(crate) enum HostSessionState {
         est: Established,
         sas: Sas,
         prompt_deadline: Millis,
+        media: MediaOut,
     },
-    Active(Established),
+    Active {
+        est: Established,
+        media: MediaOut,
+    },
     Closed,
 }
 
@@ -181,7 +219,7 @@ impl HostSessionState {
             HostSessionState::Spake { .. } => State::Spake,
             HostSessionState::Msg1(_) | HostSessionState::Msg3(_) => State::Noise,
             HostSessionState::Pending { .. } => State::PendingApproval,
-            HostSessionState::Active(_) => State::Active,
+            HostSessionState::Active { .. } => State::Active,
             HostSessionState::Closed => State::Closed,
         }
     }
@@ -193,7 +231,7 @@ impl HostSessionState {
             HostSessionState::Msg1(_) => Step::NoiseMsg1,
             HostSessionState::Msg3(_) => Step::NoiseMsg3,
             HostSessionState::Pending { .. } => Step::Approval,
-            HostSessionState::Active(_) | HostSessionState::Closed => Step::Active,
+            HostSessionState::Active { .. } | HostSessionState::Closed => Step::Active,
         }
     }
 }
@@ -216,6 +254,18 @@ pub struct Host {
     pub(crate) sessions: HashMap<SessionId, HostSession>,
     /// Issued connection-code nonces, oldest first (A06).
     pub(crate) nonces: VecDeque<IssuedNonce>,
+    /// What screen capture is doing (phase4-criteria §7).
+    pub(crate) capture: crate::CaptureStatus,
+    /// While the captured display is unavailable: when the host gives up
+    /// (D-29), so a viewer approved later is told the time actually left.
+    pub(crate) pause_deadline: Option<Millis>,
+    /// `frame_id` of the next video frame (one stream for all sessions).
+    pub(crate) next_frame_id: u32,
+    /// Packets per media key before rotation (protocol.md §6: 2³²).
+    pub(crate) rotate_after: u64,
+    /// When a viewer's keyframe request last forced a keyframe (any
+    /// session: the encoder is shared).
+    pub(crate) keyframe_requested: Option<Millis>,
 }
 
 /// One nonce the host put in an offer code.
@@ -246,7 +296,78 @@ impl Host {
             limiter: Limiter::new(),
             sessions: HashMap::new(),
             nonces: VecDeque::new(),
+            capture: crate::CaptureStatus::Running,
+            pause_deadline: None,
+            next_frame_id: 0,
+            rotate_after: MAX_PACKETS_PER_KEY,
+            keyframe_requested: None,
         }
+    }
+
+    /// Rotates every session's media key after `packets` packets instead
+    /// of 2³² (clamped to 1..=2³²). Shorter key lives only, for testing
+    /// rotation (phase4-criteria M8); keys still also rotate hourly.
+    pub fn set_key_rotation(&mut self, packets: u64) {
+        self.rotate_after = packets.clamp(1, MAX_PACKETS_PER_KEY);
+    }
+
+    /// Sends one encoded video frame to every `Active` session: cuts it
+    /// into fragments ([`VIDEO_FRAGMENT_DATA`] bytes each) and seals each
+    /// fragment under each session's own key. Sessions in any other state
+    /// get nothing (phase4-criteria M3). New key announcements, if a key
+    /// rotated, come first in the returned actions.
+    pub fn send_video<R: RngCore + CryptoRng>(
+        &mut self,
+        keyframe: bool,
+        capture_ts_us: u64,
+        data: &[u8],
+        now: Millis,
+        rng: &mut R,
+    ) -> Result<Vec<HostAction>, SendVideoError> {
+        let frame_id = self.next_frame_id;
+        let fragments = packetize(frame_id, capture_ts_us, keyframe, data, VIDEO_FRAGMENT_DATA)
+            .map_err(SendVideoError::Frame)?;
+        self.next_frame_id = frame_id
+            .checked_add(1)
+            .ok_or(SendVideoError::FrameIdsExhausted)?;
+        let mut out = Vec::new();
+        for id in self.active_sessions() {
+            let mut datagrams = Vec::with_capacity(fragments.len());
+            let mut failed = None;
+            if let Some(HostSession {
+                state: HostSessionState::Active { est, media },
+                ..
+            }) = self.sessions.get_mut(&id)
+            {
+                for f in &fragments {
+                    match media.seal(video_header(f.flags), &f.body, self.rotate_after, now, rng) {
+                        Ok(datagram) => datagrams.push(HostAction::Media { id, datagram }),
+                        Err(_) => {
+                            failed = Some(Violation::MediaKey("key ids used up"));
+                            break;
+                        }
+                    }
+                }
+                for announce in media.take_announcements() {
+                    match est.encrypt(&control_env(control::Kind::MediaKey(announce))) {
+                        Ok(frame) => out.push(HostAction::Send { id, frame }),
+                        Err(_) => failed = Some(Violation::TransportAuth),
+                    }
+                }
+            }
+            match failed {
+                None => out.extend(datagrams),
+                Some(v) => self.fail(
+                    id,
+                    FailReason::ProtocolViolation(v),
+                    Step::Active,
+                    None,
+                    false,
+                    &mut out,
+                ),
+            }
+        }
+        Ok(out)
     }
 
     /// The current one-time password (for the host's screen only).
@@ -350,9 +471,11 @@ impl Host {
                 spake_b,
             } => self.on_spake(id, frame, vh, hh, pake, spake_b, &mut out),
             HostSessionState::Msg1(hs) => self.on_msg1(id, frame, hs, rng, &mut out),
-            HostSessionState::Msg3(hs) => self.on_msg3(id, frame, hs, now, &mut out),
+            HostSessionState::Msg3(hs) => self.on_msg3(id, frame, hs, now, rng, &mut out),
             HostSessionState::Pending { est, .. } => Self::on_pending(frame, est),
-            HostSessionState::Active(est) => self.on_active(id, frame, est, &mut out),
+            HostSessionState::Active { est, media } => {
+                self.on_active(id, frame, est, media, now, &mut out)
+            }
         };
         match result {
             Ok(next) => {
@@ -412,7 +535,7 @@ impl Host {
                 continue;
             };
             match &mut sess.state {
-                HostSessionState::Closed | HostSessionState::Active(_) => {}
+                HostSessionState::Closed | HostSessionState::Active { .. } => {}
                 HostSessionState::Pending {
                     est,
                     prompt_deadline,
@@ -450,7 +573,12 @@ impl Host {
     /// The host user pressed "accept" on the prompt for `id` showing `sas`.
     /// Applies only if that session is pending approval **and** its safety
     /// code is `sas` (A22, A23).
-    pub fn approve(&mut self, id: SessionId, sas: Sas) -> Result<Vec<HostAction>, ApproveError> {
+    pub fn approve(
+        &mut self,
+        id: SessionId,
+        sas: Sas,
+        now: Millis,
+    ) -> Result<Vec<HostAction>, ApproveError> {
         let sess = self
             .sessions
             .get_mut(&id)
@@ -461,8 +589,18 @@ impl Host {
         if *shown != sas {
             return Err(ApproveError::SasMismatch);
         }
+        if self.capture == crate::CaptureStatus::Stopped {
+            // Nothing to stream until the user fixes capture at the host:
+            // do not tell the viewer it is active and then cut it off.
+            let mut out = Vec::new();
+            self.close(id, CloseCode::CaptureStopped, true, &mut out);
+            return Ok(out);
+        }
         let state = std::mem::replace(&mut sess.state, HostSessionState::Closed);
-        let HostSessionState::Pending { mut est, .. } = state else {
+        let HostSessionState::Pending {
+            mut est, mut media, ..
+        } = state
+        else {
             return Err(ApproveError::NotPending);
         };
         let mut out = Vec::new();
@@ -471,12 +609,42 @@ impl Host {
         }))) {
             Ok(frame) => {
                 out.push(HostAction::Send { id, frame });
-                sess.state = HostSessionState::Active(est);
+                // The session's media keys (current and next) follow the
+                // accept on the same ordered, encrypted stream.
+                for announce in media.take_announcements() {
+                    match est.encrypt(&control_env(control::Kind::MediaKey(announce))) {
+                        Ok(frame) => out.push(HostAction::Send { id, frame }),
+                        Err(_) => {
+                            self.fail(
+                                id,
+                                FailReason::AuthFailed(AuthDetail::Handshake(
+                                    remora_crypto::noise::HandshakeError::Internal,
+                                )),
+                                Step::Approval,
+                                None,
+                                true,
+                                &mut out,
+                            );
+                            return Ok(out);
+                        }
+                    }
+                }
+                let Some(sess) = self.sessions.get_mut(&id) else {
+                    return Ok(out);
+                };
+                sess.state = HostSessionState::Active { est, media };
                 if sess.holds_pending_slot {
                     sess.holds_pending_slot = false;
                     self.limiter.release();
                 }
                 out.push(HostAction::Active { id });
+                // A new viewer can only start decoding at a keyframe.
+                out.push(HostAction::ForceKeyframe);
+                // Approved while capture is paused: say so at once.
+                if let crate::CaptureStatus::Interrupted(reason) = self.capture {
+                    let left = self.pause_remaining(now).unwrap_or(0);
+                    self.send_stream_state(id, true, reason.wire(), left, &mut out);
+                }
             }
             Err(_) => self.fail(
                 id,
@@ -519,7 +687,7 @@ impl Host {
         let prompt_open = matches!(sess.state, HostSessionState::Pending { .. });
         match &mut sess.state {
             HostSessionState::Closed => return out,
-            HostSessionState::Pending { est, .. } | HostSessionState::Active(est) => {
+            HostSessionState::Pending { est, .. } | HostSessionState::Active { est, .. } => {
                 if let Ok(frame) = est.encrypt(&control_env(control::Kind::Bye(Goodbye {}))) {
                     out.push(HostAction::Send { id, frame });
                 }
@@ -563,11 +731,130 @@ impl Host {
         let mut v: Vec<SessionId> = self
             .sessions
             .iter()
-            .filter(|(_, s)| matches!(s.state, HostSessionState::Active(_)))
+            .filter(|(_, s)| matches!(s.state, HostSessionState::Active { .. }))
             .map(|(id, _)| *id)
             .collect();
         v.sort();
         v
+    }
+
+    /// Screen capture changed state (phase4-criteria §7). One capture serves
+    /// every session, so this applies to all of them:
+    ///
+    /// * `Interrupted` → every Active session is told `StreamState{paused}`;
+    ///   sessions stay Active. Repeating the same status does nothing.
+    /// * `Running` after an interruption → `StreamState{resumed}` to every
+    ///   Active session and [`HostAction::ForceKeyframe`].
+    /// * `Stopped` → every Active session closes with
+    ///   [`CloseCode::CaptureStopped`](crate::CloseCode::CaptureStopped).
+    ///
+    /// A session approved while capture is interrupted is told it is paused
+    /// right after `SessionAccept` (with the time actually left if the
+    /// display is unavailable); one approved while it is stopped closes with
+    /// `CaptureStopped`.
+    ///
+    /// `Interrupted(DisplayUnavailable { remaining_ms })` sets a deadline
+    /// `now + remaining_ms` (D-29). The capture reports it only when the
+    /// deadline is new (the display went missing, again), so it is always
+    /// sent, even if the status looks the same as before.
+    pub fn capture_changed(
+        &mut self,
+        status: crate::CaptureStatus,
+        now: Millis,
+    ) -> Vec<HostAction> {
+        use crate::{CaptureStatus, PauseReason};
+        let mut out = Vec::new();
+        let unavailable = matches!(
+            status,
+            CaptureStatus::Interrupted(PauseReason::DisplayUnavailable { .. })
+        );
+        if status == self.capture && !unavailable {
+            return out;
+        }
+        let was = std::mem::replace(&mut self.capture, status);
+        self.pause_deadline = match status {
+            CaptureStatus::Interrupted(PauseReason::DisplayUnavailable { remaining_ms }) => {
+                Some(now.plus(u64::from(remaining_ms)))
+            }
+            _ => None,
+        };
+        let active = self.active_sessions();
+        match status {
+            CaptureStatus::Interrupted(reason) => {
+                for id in active {
+                    let left = reason.remaining_ms();
+                    self.send_stream_state(id, true, reason.wire(), left, &mut out);
+                }
+            }
+            CaptureStatus::Running => {
+                // Only a resume after an interruption is news to viewers;
+                // Running after Stopped has no Active sessions left to tell.
+                if matches!(was, CaptureStatus::Interrupted(_)) {
+                    for id in active {
+                        self.send_stream_state(id, false, 0, 0, &mut out);
+                    }
+                    // One shared encoder: one keyframe, however many viewers.
+                    out.push(HostAction::ForceKeyframe);
+                }
+            }
+            CaptureStatus::Stopped => {
+                for id in active {
+                    self.close(id, CloseCode::CaptureStopped, false, &mut out);
+                }
+            }
+        }
+        out
+    }
+
+    /// Sends `StreamState` on an Active session's encrypted stream.
+    fn send_stream_state(
+        &mut self,
+        id: SessionId,
+        paused: bool,
+        reason: u32,
+        remaining_ms: u32,
+        out: &mut Vec<HostAction>,
+    ) {
+        let Some(HostSession {
+            state: HostSessionState::Active { est, .. },
+            ..
+        }) = self.sessions.get_mut(&id)
+        else {
+            return;
+        };
+        // The validator's bound (1 h) is far above the 2-minute wait; the
+        // clamp only keeps a misconfigured limit from breaking the message.
+        let remaining_ms = remaining_ms.min(remora_proto::limits::PAUSE_REMAINING_MAX_MS);
+        let env = control_env(control::Kind::StreamState(StreamState {
+            paused,
+            reason,
+            remaining_ms,
+        }));
+        match est.encrypt(&env) {
+            Ok(frame) => out.push(HostAction::Send { id, frame }),
+            Err(_) => self.fail(
+                id,
+                FailReason::AuthFailed(AuthDetail::Handshake(
+                    remora_crypto::noise::HandshakeError::Internal,
+                )),
+                Step::Active,
+                None,
+                false,
+                out,
+            ),
+        }
+    }
+
+    /// What screen capture is doing, as last reported.
+    pub fn capture_status(&self) -> crate::CaptureStatus {
+        self.capture
+    }
+
+    /// While the captured display is unavailable: milliseconds at `now` until
+    /// the host gives up waiting (D-29). `None` otherwise.
+    pub fn pause_remaining(&self, now: Millis) -> Option<u32> {
+        self.pause_deadline
+            .map(|d| u32::try_from(d.0.saturating_sub(now.0)).unwrap_or(u32::MAX))
     }
 
     /// Forgets a closed session entirely (call once its connection is gone,
@@ -708,12 +995,13 @@ impl Host {
         Ok(HostSessionState::Msg3(hs))
     }
 
-    fn on_msg3(
+    fn on_msg3<R: RngCore + CryptoRng>(
         &mut self,
         id: SessionId,
         frame: &[u8],
         hs: HostAwaitMsg3,
         now: Millis,
+        rng: &mut R,
         out: &mut Vec<HostAction>,
     ) -> Result<HostSessionState, Ending> {
         let policy = self
@@ -752,6 +1040,9 @@ impl Host {
             est,
             sas,
             prompt_deadline: now.plus(PROMPT_TIMEOUT_MS),
+            // Generated now (the step has a random source; approval does
+            // not), announced only once the host user accepts.
+            media: MediaOut::new(rng),
         })
     }
 
@@ -776,16 +1067,33 @@ impl Host {
         id: SessionId,
         frame: &[u8],
         mut est: Established,
+        media: MediaOut,
+        now: Millis,
         out: &mut Vec<HostAction>,
     ) -> Result<HostSessionState, Ending> {
         let env = decrypt_envelope(&mut est, frame).map_err(|r| Ending::Failed(r, false))?;
         match env.msg {
+            Some(envelope::Msg::Control(Control {
+                kind: Some(control::Kind::Recovery(_)),
+            })) => {
+                // A viewer's decoder needs a keyframe (phase4-criteria M7).
+                // One forced keyframe serves every viewer, so requests
+                // inside the interval are answered by the last one.
+                if self
+                    .keyframe_requested
+                    .is_none_or(|t| now.0 >= t.0.saturating_add(KEYFRAME_REQUEST_INTERVAL_MS))
+                {
+                    self.keyframe_requested = Some(now);
+                    out.push(HostAction::ForceKeyframe);
+                }
+                Ok(HostSessionState::Active { est, media })
+            }
             Some(envelope::Msg::Input(input)) => {
                 out.push(HostAction::Deliver {
                     id,
                     msg: AppMessage::Input(input),
                 });
-                Ok(HostSessionState::Active(est))
+                Ok(HostSessionState::Active { est, media })
             }
             Some(envelope::Msg::Control(Control {
                 kind: Some(control::Kind::Bye(_)),

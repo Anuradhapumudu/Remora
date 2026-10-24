@@ -1,0 +1,19 @@
+
+running 1 test
+M7 memory after 500 frames: footprint 180.0 MB
+M7 memory after 1000 frames: footprint 180.0 MB
+M7 memory after 1500 frames: footprint 180.0 MB
+M7 memory after 2000 frames: footprint 180.0 MB
+M7 memory after 2500 frames: footprint 180.0 MB
+M7 memory after 3000 frames: footprint 180.0 MB
+M7 memory: footprint 180.0 -> 180.0 MB, IOSurfaces 0.0 -> 0.0 MB over 3000 hostile frames, DecodeStats { decoded: 275, refused: 1925, failed: 1100, sessions_created: 1100, sessions_alive: 0, pictures_alive: 0 }
+M7 memory: footprint just after vmmap 180.0 MB
+M7 memory limit: checked (+0.0 MB, limit +8 MB); live decoder sessions and pictures checked
+test m7_memory_stays_bounded_under_a_hostile_stream ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 10.56s
+
+   Compiling remora-capture v0.0.1 (/Users/pumudu/Documents/github/Remora/crates/remora-capture)
+   Compiling remora-codec v0.0.1 (/Users/pumudu/Documents/github/Remora/crates/remora-codec)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 3.27s
+     Running tests/m7_decode_memory.rs (target/debug/deps/m7_decode_memory-c55c1df50f9a4f22)

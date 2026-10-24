@@ -28,6 +28,39 @@ pub enum CloseCode {
     Timeout = 0x14,
     /// Too many attempts / connections.
     RateLimited = 0x15,
+    /// Screen capture stopped and will not come back without user action
+    /// (phase4-criteria §7; an interruption only pauses the stream).
+    CaptureStopped = 0x16,
+}
+
+impl CloseCode {
+    /// Every close code, for decoding a code received from the peer. Kept
+    /// complete by [`CloseCode::index`], whose `match` stops compiling when a
+    /// variant is added and not listed.
+    pub const ALL: [CloseCode; 8] = [
+        CloseCode::Normal,
+        CloseCode::AuthFailed,
+        CloseCode::ProtocolViolation,
+        CloseCode::VersionUnsupported,
+        CloseCode::Rejected,
+        CloseCode::Timeout,
+        CloseCode::RateLimited,
+        CloseCode::CaptureStopped,
+    ];
+
+    /// This code's position in [`CloseCode::ALL`]. Exhaustive on purpose.
+    pub const fn index(self) -> usize {
+        match self {
+            CloseCode::Normal => 0,
+            CloseCode::AuthFailed => 1,
+            CloseCode::ProtocolViolation => 2,
+            CloseCode::VersionUnsupported => 3,
+            CloseCode::Rejected => 4,
+            CloseCode::Timeout => 5,
+            CloseCode::RateLimited => 6,
+            CloseCode::CaptureStopped => 7,
+        }
+    }
 }
 
 /// Where in the protocol a failure happened (for the local log).
@@ -133,6 +166,10 @@ pub enum Violation {
     /// A transport frame failed to decrypt (A10).
     #[error("transport frame failed to authenticate")]
     TransportAuth,
+    /// A media key announcement out of order or beyond the limits, or a
+    /// sender that used up its key ids (protocol.md §6).
+    #[error("media key: {0}")]
+    MediaKey(&'static str),
 }
 
 impl FailReason {
@@ -186,5 +223,21 @@ impl FailReason {
             PakeError::Internal => FailReason::AuthFailed(AuthDetail::Pake),
             other => FailReason::ProtocolViolation(Violation::PakeElement(other)),
         }
+    }
+}
+
+#[cfg(test)]
+mod close_code_tests {
+    use super::CloseCode;
+
+    #[test]
+    fn all_lists_every_code_once_in_index_order() {
+        for (i, c) in CloseCode::ALL.iter().enumerate() {
+            assert_eq!(c.index(), i, "{c:?}");
+        }
+        let mut wire: Vec<u16> = CloseCode::ALL.iter().map(|&c| c as u16).collect();
+        wire.sort_unstable();
+        wire.dedup();
+        assert_eq!(wire.len(), CloseCode::ALL.len(), "duplicate wire values");
     }
 }

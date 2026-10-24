@@ -1,0 +1,148 @@
+WARNING: this device's identity keys are stored UNENCRYPTED in /Users/pumudu/Library/Application Support/Remora/viewer-identity.key - anyone who can read that file can impersonate this device. Development-stage storage, protected only by file permissions; Remora moves the keys to the OS keychain before v0.1.
+connecting to 127.0.0.1:51593 (host device 8531 422 5411-5)
+media: opened=0 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=0 frames_dropped=0
+safety code: 399 767 - compare it with the host's screen (host "Remora host", device 8531 422 5411-5)
+waiting for the person at the host to accept or deny (nothing to type here)
+SESSION ACTIVE
+media: opened=448 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=45 frames_dropped=0
+stream paused (the host's display is asleep, closed or unavailable) - the session stays open
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+stream paused - Display removed. Waiting, 120 s left. The session stays open
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+Display removed. Waiting, 110 s left.
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+Display removed. Waiting, 100 s left.
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+Display removed. Waiting, 90 s left.
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+Display removed. Waiting, 80 s left.
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+Display removed. Waiting, 70 s left.
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+Display removed. Waiting, 60 s left.
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+Display removed. Waiting, 50 s left.
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+Display removed. Waiting, 40 s left.
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+Display removed. Waiting, 30 s left.
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+Display removed. Waiting, 20 s left.
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+Display removed. Waiting, 10 s left.
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+media: opened=508 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=65 frames_dropped=0
+stream paused (the host's display is asleep, closed or unavailable) - the session stays open
+stream resumed
+media: opened=856 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=86 frames_dropped=0
+media: opened=993 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=127 frames_dropped=0
+media: opened=1075 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=152 frames_dropped=0
+media: opened=1152 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=176 frames_dropped=0
+media: opened=1233 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=202 frames_dropped=0
+session ended
+video: 219 frames decoded, 0 refused, 0 waiting for a keyframe, 0 failed, 0 dropped

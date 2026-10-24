@@ -12,6 +12,8 @@ use clap::{Parser, Subcommand};
 #[cfg(target_os = "macos")]
 mod bench;
 mod serve;
+#[cfg(target_os = "macos")]
+mod stream;
 // Used by the macOS benchmark; pure Rust, so their tests run on every platform.
 #[cfg(any(target_os = "macos", test))]
 mod stats;
@@ -41,6 +43,20 @@ enum Command {
     /// List capturable displays and their IDs.
     #[cfg(target_os = "macos")]
     ListDisplays,
+    /// Phase 4 T2/T3: print capture events (interrupted / resumed /
+    /// stopped) with times.
+    #[cfg(target_os = "macos")]
+    WatchCapture {
+        /// How long to watch.
+        #[arg(long, default_value_t = 60)]
+        seconds: u64,
+        /// Display to capture (default: the main display; see list-displays).
+        #[arg(long)]
+        display_id: Option<u32>,
+        /// Seconds an unavailable display is waited for (default 120, D-29).
+        #[arg(long)]
+        gone_limit: Option<u64>,
+    },
     /// Phase 2: report encoder capabilities (4:4:4, LTR, intra-refresh) as evidence.
     #[cfg(target_os = "macos")]
     ProbeEncoder,
@@ -66,6 +82,12 @@ fn main() -> ExitCode {
         Some(Command::ProbeEncoder) => bench::probe(),
         #[cfg(target_os = "macos")]
         Some(Command::ListDisplays) => bench::list_displays(),
+        #[cfg(target_os = "macos")]
+        Some(Command::WatchCapture {
+            seconds,
+            display_id,
+            gone_limit,
+        }) => bench::watch_capture(seconds, display_id, gone_limit),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,

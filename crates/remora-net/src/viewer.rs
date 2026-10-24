@@ -6,13 +6,14 @@ use rand_core::OsRng;
 use remora_crypto::identity::IdentityCert;
 use remora_crypto::sas::Sas;
 use remora_session::{
-    AppMessage, CloseCode, FailReason, Millis, Step, ViewerAction, ViewerConfig, ViewerSession,
+    CloseCode, FailReason, MediaStats, Millis, Step, ViewerAction, ViewerConfig, ViewerSession,
 };
 use std::time::Duration;
 use tokio::sync::mpsc;
 
 use tokio::time::Instant;
 
+use crate::wire::is_lost;
 use crate::{
     FramedStream, NetError, SERVER_NAME, TICK, client_config, close, close_code_of, exporter,
 };
@@ -29,8 +30,12 @@ pub enum ViewerEvent {
     },
     /// The host approved.
     Active,
-    /// An application message from the host.
-    Deliver(AppMessage),
+    /// A complete video frame from the host, for the decoder.
+    Video(remora_proto::video::VideoFrame),
+    /// The host's capture paused (session stays active).
+    StreamPaused(remora_session::PauseReason),
+    /// The stream resumed.
+    StreamResumed,
     /// The session failed locally.
     Failed {
         /// Reason.
@@ -46,10 +51,14 @@ pub enum ViewerEvent {
         /// Code the host sent, if it closed.
         remote: Option<CloseCode>,
     },
+    /// The connection died without a close from either side: the host went
+    /// silent for [`crate::IDLE_TIMEOUT`] or reset it.
+    Lost,
 }
 
-/// Handle to a running viewer connection.
-#[derive(Debug)]
+/// Handle to a running viewer connection. Clones control the same
+/// connection; it ends when the last one is dropped or one disconnects.
+#[derive(Debug, Clone)]
 pub struct ViewerClient {
     pub(crate) commands: mpsc::UnboundedSender<ViewerCommand>,
 }
@@ -57,6 +66,8 @@ pub struct ViewerClient {
 #[derive(Debug)]
 pub(crate) enum ViewerCommand {
     Input(remora_proto::messages::Input),
+    Stats(tokio::sync::oneshot::Sender<MediaStats>),
+    RequestKeyframe,
     Disconnect,
 }
 
@@ -85,6 +96,18 @@ pub async fn connect(
         endpoint, conn, stream, session, first, events, cmd_rx, start,
     ));
     Ok((ViewerClient { commands }, rx))
+}
+
+/// How the connection ended, when the host (or the network) ended it.
+fn ended(err: &quinn::ConnectionError) -> ViewerEvent {
+    if is_lost(err) {
+        ViewerEvent::Lost
+    } else {
+        ViewerEvent::Closed {
+            local: None,
+            remote: close_code_of(err),
+        }
+    }
 }
 
 fn now(start: Instant) -> Millis {
@@ -132,8 +155,14 @@ async fn drive(
                 ViewerAction::Active => {
                     let _ = events.send(ViewerEvent::Active);
                 }
-                ViewerAction::Deliver(msg) => {
-                    let _ = events.send(ViewerEvent::Deliver(msg));
+                ViewerAction::Video(frame) => {
+                    let _ = events.send(ViewerEvent::Video(frame));
+                }
+                ViewerAction::StreamPaused(reason) => {
+                    let _ = events.send(ViewerEvent::StreamPaused(reason));
+                }
+                ViewerAction::StreamResumed => {
+                    let _ = events.send(ViewerEvent::StreamResumed);
                 }
                 ViewerAction::Failed { reason, step } => {
                     let _ = events.send(ViewerEvent::Failed { reason, step });
@@ -145,19 +174,25 @@ async fn drive(
                 Ok(Some(frame)) => pending = session.on_frame(&frame, now(start), &mut OsRng),
                 _ => {
                     let err = conn.closed().await;
-                    let _ = events.send(ViewerEvent::Closed { local: None, remote: close_code_of(&err) });
+                    let _ = events.send(ended(&err));
                     return;
                 }
             },
             dgram = conn.read_datagram() => match dgram {
-                Ok(d) => pending = session.on_datagram(&d),
+                Ok(d) => pending = session.on_datagram(&d, now(start)),
                 Err(err) => {
-                    let _ = events.send(ViewerEvent::Closed { local: None, remote: close_code_of(&err) });
+                    let _ = events.send(ended(&err));
                     return;
                 }
             },
             cmd = commands.recv() => match cmd {
                 Some(ViewerCommand::Input(input)) => pending = session.send_input(input).into_iter().collect(),
+                Some(ViewerCommand::RequestKeyframe) => {
+                    pending = session.request_keyframe(now(start)).into_iter().collect();
+                }
+                Some(ViewerCommand::Stats(reply)) => {
+                    let _ = reply.send(session.media_stats());
+                }
                 Some(ViewerCommand::Disconnect) | None => pending = session.disconnect(),
             },
             _ = tick.tick() => pending = session.tick(now(start)),
@@ -169,6 +204,20 @@ impl ViewerClient {
     /// Sends an input event (dropped unless the session is Active).
     pub fn send_input(&self, input: remora_proto::messages::Input) {
         let _ = self.commands.send(ViewerCommand::Input(input));
+    }
+
+    /// The decoder needs a keyframe (phase4-criteria M7). Sent only while
+    /// Active, at most once per 500 ms (`KEYFRAME_REQUEST_INTERVAL_MS`).
+    pub fn request_keyframe(&self) {
+        let _ = self.commands.send(ViewerCommand::RequestKeyframe);
+    }
+
+    /// What happened to the media datagrams received so far (`None` once
+    /// the connection is gone).
+    pub async fn media_stats(&self) -> Option<MediaStats> {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        self.commands.send(ViewerCommand::Stats(tx)).ok()?;
+        rx.await.ok()
     }
 
     /// Ends the session.

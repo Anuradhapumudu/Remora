@@ -11,13 +11,15 @@
 
 use std::time::{Duration, Instant};
 
+pub mod barcode;
 pub mod bitstream;
+pub mod h264;
 mod sys;
 
 #[cfg(target_os = "macos")]
 pub use sys::macos::{
-    EncoderInfo, Probe444, PropertyReport, SyntheticSource, VtEncoder, list_encoders, probe_444,
-    supported_properties,
+    DecodedFrame, EncoderInfo, Probe444, PropertyReport, SyntheticSource, VtDecoder, VtEncoder,
+    list_encoders, probe_444, supported_properties,
 };
 
 /// Video codecs Remora can produce.
@@ -172,8 +174,146 @@ pub enum CodecError {
     Unsupported(&'static str),
 }
 
+/// A decoded picture's two NV12 planes, borrowed while the picture is
+/// locked: luma (`width × height` bytes per row used) and interleaved
+/// chroma (`2 × ⌈width/2⌉` bytes per row used, `⌈height/2⌉` rows). Only
+/// [`Nv12::new`] makes one, and it checks that both slices really hold
+/// that many rows at those strides, so a renderer can copy them without
+/// trusting the decoder. `Debug` prints sizes only (INV9).
+#[derive(Clone, Copy)]
+pub struct Nv12<'a> {
+    width: u32,
+    height: u32,
+    y: &'a [u8],
+    y_stride: usize,
+    uv: &'a [u8],
+    uv_stride: usize,
+}
+
+impl<'a> Nv12<'a> {
+    /// Checks the planes against the size and strides; `None` if a slice
+    /// is too short, a stride too small, or a dimension zero.
+    pub fn new(
+        width: u32,
+        height: u32,
+        y: &'a [u8],
+        y_stride: usize,
+        uv: &'a [u8],
+        uv_stride: usize,
+    ) -> Option<Self> {
+        // Bytes a plane needs: every row but the last at `stride`, the last
+        // only its used bytes.
+        let needs = |row_bytes: usize, rows: usize, stride: usize| {
+            (stride >= row_bytes)
+                .then(|| stride.checked_mul(rows - 1)?.checked_add(row_bytes))
+                .flatten()
+        };
+        let (w, h) = (usize::try_from(width).ok()?, usize::try_from(height).ok()?);
+        if w == 0 || h == 0 {
+            return None;
+        }
+        let y_ok = needs(w, h, y_stride).is_some_and(|n| y.len() >= n);
+        let uv_ok =
+            needs(2 * w.div_ceil(2), h.div_ceil(2), uv_stride).is_some_and(|n| uv.len() >= n);
+        (y_ok && uv_ok).then_some(Self {
+            width,
+            height,
+            y,
+            y_stride,
+            uv,
+            uv_stride,
+        })
+    }
+
+    /// Picture width in pixels.
+    pub fn width(&self) -> u32 {
+        self.width
+    }
+
+    /// Picture height in pixels.
+    pub fn height(&self) -> u32 {
+        self.height
+    }
+
+    /// Luma plane and its stride (bytes per row).
+    pub fn y(&self) -> (&'a [u8], usize) {
+        (self.y, self.y_stride)
+    }
+
+    /// Chroma plane (Cb, Cr interleaved) and its stride.
+    pub fn uv(&self) -> (&'a [u8], usize) {
+        (self.uv, self.uv_stride)
+    }
+}
+
+impl std::fmt::Debug for Nv12<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Nv12")
+            .field("width", &self.width)
+            .field("height", &self.height)
+            .field("y_stride", &self.y_stride)
+            .field("uv_stride", &self.uv_stride)
+            .finish()
+    }
+}
+
+/// Why a frame produced no picture. **Every** case means the decoder needs
+/// a keyframe before it can show anything correct again, so the viewer
+/// asks the host for one (phase4-criteria M7).
+#[derive(Debug, thiserror::Error)]
+pub enum DecodeError {
+    /// Refused before decoding (malformed, too large, or waiting for a
+    /// keyframe): no byte of it reached the decoder.
+    #[error("refused: {0}")]
+    Refused(h264::Refusal),
+    /// The decoder could not be configured with the keyframe's SPS/PPS.
+    #[error("decoder configuration failed: {0}")]
+    Configure(CodecError),
+    /// The decoder reported an error for this frame.
+    #[error("decode failed: {0}")]
+    Decode(CodecError),
+    /// The decoder returned no picture, or one larger than the SPS said.
+    #[error("decoder returned no usable picture")]
+    NoPicture,
+}
+
+/// What a decoder did with the frames it was given.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct DecodeStats {
+    /// Frames decoded to a picture.
+    pub decoded: u64,
+    /// Frames refused before decoding ([`DecodeError::Refused`]).
+    pub refused: u64,
+    /// Frames the decoder failed on (configure, decode, no picture).
+    pub failed: u64,
+    /// Decoder sessions created (one per accepted change of SPS/PPS).
+    pub sessions_created: u64,
+    /// Decoder sessions that exist now (0 or 1).
+    pub sessions_alive: u64,
+    /// Decoded pictures that exist now (handed out and not yet dropped).
+    pub pictures_alive: u64,
+}
+
 #[cfg(test)]
 mod tests {
+    /// N4 (phase4-criteria §6, INV9): an encoded frame prints its size,
+    /// never its bytes (compressed screen content).
+    #[test]
+    fn n4_encoded_frame_debug_prints_no_content() {
+        let data: Vec<u8> = (0..4096u32).map(|i| (i * 73 + 151) as u8).collect();
+        let now = std::time::Instant::now();
+        let f = super::EncodedFrame {
+            seq: 5,
+            keyframe: true,
+            data: data.clone(),
+            submitted: now,
+            completed: now,
+        };
+        let leaks = remora_testkit::canary::find_windows(&format!("{f:?}"), "frame", &data, 16);
+        assert!(leaks.is_empty(), "{leaks:?}");
+        assert!(format!("{f:?}").contains("bytes: 4096"));
+    }
+
     use super::*;
 
     #[test]

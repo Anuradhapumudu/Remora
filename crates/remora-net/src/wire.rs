@@ -33,17 +33,19 @@ pub fn close_code_of(err: &quinn::ConnectionError) -> Option<CloseCode> {
     let quinn::ConnectionError::ApplicationClosed(c) = err else {
         return None;
     };
-    [
-        CloseCode::Normal,
-        CloseCode::AuthFailed,
-        CloseCode::ProtocolViolation,
-        CloseCode::VersionUnsupported,
-        CloseCode::Rejected,
-        CloseCode::Timeout,
-        CloseCode::RateLimited,
-    ]
-    .into_iter()
-    .find(|&code| to_varint(code) == c.error_code)
+    CloseCode::ALL
+        .into_iter()
+        .find(|&code| to_varint(code) == c.error_code)
+}
+
+/// Whether `err` means the connection died without a close from either
+/// side: silent for [`crate::IDLE_TIMEOUT`], or reset by a peer that lost
+/// its state. Reported as "lost", never as an orderly close.
+pub(crate) fn is_lost(err: &quinn::ConnectionError) -> bool {
+    matches!(
+        err,
+        quinn::ConnectionError::TimedOut | quinn::ConnectionError::Reset
+    )
 }
 
 /// Stream 0: `u16` big-endian length prefix, then the frame.

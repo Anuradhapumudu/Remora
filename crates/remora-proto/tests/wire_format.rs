@@ -7,8 +7,8 @@ use remora_proto::frame::{FrameDecoder, FrameError, encode_frame};
 use remora_proto::limits::HANDSHAKE_FRAME_MAX;
 use remora_proto::messages::{
     Control, Envelope, HostHello, Input, Key, MediaKeyAnnounce, MessageError, Mode, MouseButton,
-    SasReveal, SessionAccept, SessionReject, ViewerHello, control, decode_envelope,
-    decode_host_hello, decode_viewer_hello, envelope, input,
+    RecoveryRequest, SasReveal, SessionAccept, SessionReject, StreamState, ViewerHello, control,
+    decode_envelope, decode_host_hello, decode_viewer_hello, envelope, input,
 };
 
 // ── framing ──────────────────────────────────────────────────────────────────
@@ -202,6 +202,18 @@ fn invalid_envelopes_are_rejected() {
         key_id: 7,
         key: vec![3; 31]
     }))));
+    // Datagram headers carry key ids as u16: 65 535 is the last valid one.
+    assert!(invalid(ctl(control::Kind::MediaKey(MediaKeyAnnounce {
+        key_id: 65_536,
+        key: vec![3; 32]
+    }))));
+    assert!(
+        decode_envelope(&ctl(control::Kind::MediaKey(MediaKeyAnnounce {
+            key_id: 65_535,
+            key: vec![3; 32]
+        })))
+        .is_ok()
+    );
     assert!(invalid(ctl(control::Kind::Accept(SessionAccept {
         role: 0
     }))));
@@ -301,5 +313,129 @@ fn an_envelope_of_exactly_the_limit_is_not_too_large() {
     assert!(!matches!(
         decode_envelope(&exact),
         Err(MessageError::TooLarge { .. })
+    ));
+}
+
+/// Phase 4 §7: `StreamState` (host → viewer pause / resume). Paused needs a
+/// reason; resumed must carry none and no time left. Unknown reason values
+/// are accepted (a newer host may add reasons; the viewer shows "other").
+/// D-29: the time left is bounded (1 h), so a hostile host cannot make the
+/// viewer show a nonsense countdown.
+#[test]
+fn stream_state_shapes() {
+    use remora_proto::limits::PAUSE_REMAINING_MAX_MS as MAX;
+    let ss = |paused, reason, remaining_ms| {
+        ctl(control::Kind::StreamState(StreamState {
+            paused,
+            reason,
+            remaining_ms,
+        }))
+    };
+    for (paused, reason, left) in [
+        (true, 1, 0),
+        (true, 2, 0),
+        (true, 3, 0),
+        (true, 99, 0),
+        (false, 0, 0),
+        (true, 4, 0),
+        (true, 4, 120_000),
+        (true, 4, MAX),
+    ] {
+        assert!(
+            decode_envelope(&ss(paused, reason, left)).is_ok(),
+            "{paused} {reason} {left}"
+        );
+    }
+    for (paused, reason, left) in [
+        (true, 0, 0),
+        (false, 1, 0),
+        (false, 99, 0),
+        (false, 0, 1),
+        (true, 4, MAX + 1),
+        (true, 4, u32::MAX),
+    ] {
+        assert!(
+            matches!(
+                decode_envelope(&ss(paused, reason, left)),
+                Err(MessageError::Invalid(_))
+            ),
+            "{paused} {reason} {left}"
+        );
+    }
+}
+
+/// protocol.md §5 shows these bytes; fuzz/corpus/messages holds them as a
+/// seed (`d58bc2a5…`). Paused, reason 4 (display removed), 120 000 ms left.
+#[test]
+fn stream_state_display_unavailable_bytes() {
+    let bytes = ctl(control::Kind::StreamState(StreamState {
+        paused: true,
+        reason: 4,
+        remaining_ms: 120_000,
+    }));
+    let hex: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
+    assert_eq!(hex, "0a0b8201080801100418c0a907");
+    assert!(decode_envelope(&bytes).is_ok());
+}
+
+/// D-29 is a minor addition (protocol.md §8): a viewer built before
+/// `remaining_ms` existed decodes the new message, keeps the fields it
+/// knows and ignores the time left (and shows reason 4 as "other").
+#[test]
+fn a_viewer_without_remaining_ms_still_reads_the_pause() {
+    /// `StreamState` exactly as it was before 2026-10-22.
+    #[derive(Clone, PartialEq, prost::Message)]
+    struct StreamStateBefore {
+        #[prost(bool, tag = "1")]
+        paused: bool,
+        #[prost(uint32, tag = "2")]
+        reason: u32,
+    }
+    let new = StreamState {
+        paused: true,
+        reason: 4,
+        remaining_ms: 120_000,
+    }
+    .encode_to_vec();
+    let old = StreamStateBefore::decode(new.as_slice()).unwrap();
+    assert_eq!(
+        old,
+        StreamStateBefore {
+            paused: true,
+            reason: 4
+        }
+    );
+}
+
+#[test]
+fn a_media_key_announcement_never_prints_its_key() {
+    // CLAUDE.md: never log secrets. prost derives Debug by default, which
+    // would print the key bytes - and so would any Envelope holding one.
+    let k = MediaKeyAnnounce {
+        key_id: 9,
+        key: vec![0xAB; 32],
+    };
+    let text = format!("{k:?}");
+    assert_eq!(text, "MediaKeyAnnounce { key_id: 9, key: \"[redacted]\" }");
+    let env = format!(
+        "{:?}",
+        decode_envelope(&ctl(control::Kind::MediaKey(k))).unwrap()
+    );
+    assert!(!env.contains("171"), "{env}");
+    assert!(env.contains("[redacted]"), "{env}");
+}
+
+/// Phase 4 step 5: the keyframe request is control tag 9 (protocol.md §5),
+/// carries no fields, and is decoded like every other control message.
+#[test]
+fn a_recovery_request_is_control_tag_9() {
+    let env = ctl(control::Kind::Recovery(RecoveryRequest {}));
+    // Envelope field 1 (control), then Control field 9, length 0.
+    assert_eq!(env, [0x0A, 0x02, 0x4A, 0x00]);
+    assert!(matches!(
+        decode_envelope(&env).unwrap().msg,
+        Some(envelope::Msg::Control(Control {
+            kind: Some(control::Kind::Recovery(_))
+        }))
     ));
 }

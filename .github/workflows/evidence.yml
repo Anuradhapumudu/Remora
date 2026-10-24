@@ -1,0 +1,34 @@
+# Statistical evidence that must not silently stop: the A04 timing claim
+# rests on one job ("A04 timing" / a04). Checked every 6 hours, on every
+# push to main and on PRs, so a disabled or skipped job turns something red
+# even when nobody is pushing (scripts/ci/check-a04-evidence.sh).
+name: Evidence
+
+on:
+  schedule:
+    - cron: "23 */6 * * *"
+  workflow_dispatch:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  a04:
+    name: A04 timing evidence is present
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Check the A04 timing evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: bash scripts/ci/check-a04-evidence.sh

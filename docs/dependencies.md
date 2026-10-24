@@ -36,7 +36,7 @@ once a workspace member actually uses it.
 
 | Crate | Requirement | Lock to | Used by | Why |
 |---|---|---|---|---|
-| tokio | 1.53 | 1.53.2 (1.53.3 < 14 days) | net, signal, apps | Async runtime; quinn requires it |
+| tokio | 1.53 | 1.53.3 — **security-fix exception** (released 2026-10-13; RUSTSEC-2026-0386 affects 1.53.2) | net, signal, apps | Async runtime; quinn requires it |
 | quinn | 0.11.12 | 0.11.12 (quinn-proto 0.11.19) | net | QUIC: datagrams, streams, migration, pluggable socket + congestion control |
 | rustls | 0.23.46 (`ring`) | 0.23.46 — **security-fix exception** (released 2026-10-14; RUSTSEC-2026-0346/0347/0348/0349 affect ≤ 0.23.45). This table listed it on 2026-10-17 without noticing it was < 14 days old (third slip, found by the crate-age job) | net | quinn's TLS. Newest is 0.24.0-dev (pre-release) — not used |
 | snow | 0.10.0 (`risky-raw-split` only if needed) | 0.10.0 | crypto | Noise Protocol Framework |
@@ -59,12 +59,14 @@ once a workspace member actually uses it.
 | bytes | 1 | — | proto, net | Zero-copy buffers (quinn's buffer type) |
 | rcgen | 0.14.10, default features **off**, `crypto` + `ring` | 0.14.10 (2026-08-28) | net | Throw-away self-signed certificate per QUIC endpoint. TLS is untrusted plumbing (D1): authentication is Noise + the exporter binding, so the certificate only has to exist. From the rustls organisation; no PEM, no aws-lc-rs (D8). Pulls in `time` → `deranged` locked to **0.5.8** and `powerfmt` to **0.2.0** (newer ones < 14 days) |
 | objc2 | 0.6.4 | 0.6.4 (0.6.5 < 14 days) | capture, codec, input (macOS) | Objective-C runtime bindings; `define_class!` implements `SCStreamOutput` |
-| objc2-foundation, -core-foundation, -core-graphics, -screen-capture-kit, -video-toolbox, -core-media, -core-video | 0.3.2, default features **off** | 0.3.2 | capture, codec (macOS) | Generated Apple framework bindings; only the features we call (defaults pull in AVFoundation, Metal, OpenGL) |
+| objc2-foundation, -core-foundation, -core-graphics, -screen-capture-kit, -video-toolbox, -core-media, -core-video | 0.3.2, default features **off** | 0.3.2 | capture, codec (macOS); app (macOS: `-core-video` host clock, P0) | Generated Apple framework bindings; only the features we call (defaults pull in AVFoundation, Metal, OpenGL) |
 | block2 / dispatch2 | 0.6.2 / 0.3.1 | — | capture (macOS) | Objective-C completion blocks; ScreenCaptureKit's dispatch queue |
 | windows | 0.62.2 | — | capture, codec, input (Windows) | Official Microsoft bindings |
 | x11rb | 0.14.0 | — | capture, input (Linux) | Pure-Rust X11 protocol |
 | openh264 | 0.9.8 | 0.9.8 (0.9.9 < 14 days) | codec | Software H.264 fallback |
-| wgpu | 30.0.1 | — | viewer | GPU rendering (Metal / D3D12 / Vulkan) |
+| wgpu | 30.0.1, default features **off**, `std` + `wgsl` + `metal` | 30.0.1 (2026-08-22) | viewer (macOS) | The Phase 4 video window and offscreen P7 rendering (phase4-criteria R1/R2). Metal backend only: the window is macOS-only until Phase 6.5, and every other backend would add code we do not run. Pulls naga 30.0.1 (shader compiler) and objc2-metal / objc2-quartz-core 0.3.2 |
+| winit | 0.30.13, default features **off**, `rwh_06` | 0.30.13 (2026-03-02) | viewer (macOS) | The window and its event loop (R1, R5). No X11/Wayland features. 0.31 is beta only. Uses the older objc2 0.5 / objc2-app-kit 0.2 family itself, so both objc2 generations are in the lock (cargo deny reports the duplicate; it is not a RustCrypto crate, D3 is unaffected) |
+| pollster | 1.0.1 | 1.0.1 (2026-07-10) | viewer (macOS) | Blocks on wgpu's adapter/device futures once at start-up (no async runtime on the window thread) |
 | slint | 1.18.1 (`unstable-wgpu-30`) | — | viewer, host | UI; shares our wgpu 30 device. MSRV 1.92 → workspace MSRV |
 | axum | 0.8.9 | — | signal | WebSocket signaling server |
 | tracing / tracing-subscriber | 0.1.44 / 0.3.23 | — | all | Structured logging (with secret redaction) |
@@ -80,6 +82,14 @@ crates.io release date. Three were < 14 days old and were locked to the
 previous release, in both `Cargo.lock` and `fuzz/Cargo.lock`:
 `cc` 1.8.0 → **1.6.0** (1.7.0 was also < 14 days), `libc` 0.2.191 →
 **0.2.190**, `zeroize` 1.9.1 → **1.9.0**.
+
+**2026-10-21, Phase 4 step 6 (wgpu + winit + pollster):** 123 new
+packages, each checked by `check-crate-age.py`. Nine were < 14 days old and
+were locked to the newest release that is not: `combine` 4.6.9 → **4.6.8**,
+`equivalent` 1.0.3 → **1.0.2**, `litrs` 1.0.1 → **1.0.0**, `redox_syscall`
+0.9.5 → **0.9.4**, `toml_datetime` 1.1.2 → **1.1.1**, `toml_edit` 0.25.17 →
+**0.25.15**, `toml_parser` 1.1.5 → **1.1.3**, `zerocopy` / `zerocopy-derive`
+0.8.63 → **0.8.60**. No version already in the lock changed.
 
 **Security-fix exceptions.** A release younger than 14 days may be adopted
 only when it is the **first patched release** for RustSec advisories that
@@ -100,6 +110,8 @@ fixes bypass the rule" flag.
 | Date | Crate | Version | Advisories fixed | Released | Expires (14 days) | Removed |
 |---|---|---|---|---|---|---|
 | 2026-10-18 | rustls | 0.23.46 | RUSTSEC-2026-0346, -0347, -0348, -0349 | 2026-10-14 | 2026-10-28 | — |
+| 2026-10-21 | rustls-webpki | 0.103.16 (transitive, via rustls/quinn) | RUSTSEC-2026-0382 (distrusted emSign intermediates accepted in certificate paths). **Not reachable here:** our QUIC client accepts any certificate and never builds a path (`remora-net/src/tls.rs` `AnyCertificate`, D1); adopted anyway — the CI advisory check fails on it and staying on a flagged version is the worse habit | 2026-10-20 | 2026-11-03 | — |
+| 2026-10-25 | tokio | 1.53.3 | RUSTSEC-2026-0386 (`AsyncFd`'s safe constructors accept a file descriptor the caller does not own: an I/O-safety violation that can lead to a use-after-free). Our code never calls `AsyncFd`; whether our dependencies do was not checked — adopted either way (owner, 2026-10-25). Found when `cargo deny` failed CI on `1ceef72`. Only tokio's lock entry changed: `cargo update -p tokio` also moved four crates' `windows-sys` 0.61.2 → 0.52.0, which was not part of the fix, so the lock was edited to tokio alone and checked with `--locked` | 2026-10-13 | 2026-10-27 | — |
 
 **Remembering the rule was not enough.** When the check first ran over the
 phase-3 branch it found five more violations that earlier steps had locked
