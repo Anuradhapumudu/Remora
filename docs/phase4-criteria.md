@@ -949,6 +949,20 @@ verdicts), and a tooling check wrote unmarked lines into the owner's
 said the viewer's countdown ends "never early" (wrong: up to ~2 s early;
 corrected); I called the upload copy "D-17" twice when it is D-18.
 
+**Mac permissions after D-9 (2026-10-25).** The owner turned off
+Terminal's **Full Disk Access** and **Accessibility** on 2026-10-25 and
+quit Terminal (new process 52707, started 02:45:43; the old one, 10618,
+had run since 2026-10-20 and still held both — the first attempt did not
+take effect, found from the privacy database before anything was
+recorded). Evidence: Full Disk Access — the read-only read of the system
+privacy database now fails with `authorization denied` (it succeeded
+until then); Accessibility — the owner's check in System Settings (the
+database can no longer be read). **`pmset -g log` works without Full Disk
+Access** (exit 0; the 775 `Entering Sleep state` lines the T3-lid runner
+looks for are all there), so no measuring session needs Full Disk Access;
+Accessibility is used by no script (Phase 6 input injection goes through
+RemoraDev.app, not Terminal). No Remora app holds any privacy grant.
+
 ### 13.5 Known limitations
 
 * **P5 passes by 1 MB** (149 of 150 MB); what holds the 94 MB of GPU memory
