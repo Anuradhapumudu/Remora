@@ -818,9 +818,9 @@ is no automatic reconnect.
 ## 13. Results — the Phase 4 report (2026-10-23, draft for the owner)
 
 **Status:** every Phase 4 criterion passes on the M4, with three caveats
-listed in §13.5. Still to do before Phase 4 is done: **D-9** (remove the
-dev signing identity and the RemoraDev grant — last, after the owner
-reads this report) and the owner's acceptance. Evidence: `results/phase4/`
+listed in §13.5. **D-9 closed 2026-10-25** (dev signing identity and the
+RemoraDev grant removed; evidence in roadmap.md). Still to do before Phase 4
+is done: the owner's acceptance. Evidence: `results/phase4/`
 (raw output of every measured run), the commits named below, CI on
 `6f1d984` (all five workflows green).
 
@@ -926,6 +926,21 @@ type `accept <n>` at the host; the viewer window shows the screen.
 * **The P5 test was flaky on CI's VM** (read memory before the GPU had
   finished); fixed with a bounded wait (6f1d984), plant shown failing on
   the VM.
+* **New tokio advisory during the report** (RUSTSEC-2026-0386, `AsyncFd`
+  I/O safety): `cargo deny` failed CI on `1ceef72`; tokio 1.53.3 adopted as
+  a security-fix exception (`406c23b`, dependencies.md; expires 2026-10-27).
+* **The dev identity test passed on the M4 but not on CI's Mac**: `codesign`
+  on macOS 15.7.9 / 26.6.2 needs the keychain on the search list, macOS
+  27.0.1 does not (roadmap D-9 evidence). Fixed in the test (`5061384`).
+* **Dependabot PRs #7–#12 (checked 2026-10-25): none fixes a published
+  advisory.** `cargo audit` flags none of our locked versions and GitHub
+  shows 0 Dependabot alerts. zeroize 1.9.0, objc2 0.6.4 and hkdf 0.12.4 have
+  no advisories; curve25519-dalek 4.1.3, ed25519-dalek 2.2.0 and blake2
+  0.10.6 are already at or past the fix of their one old advisory each
+  (RUSTSEC-2024-0344, -2022-0093, -2019-0019). Actions: download-artifact's
+  GHSA-cxww-7g56-2vh6 affects 4.0.0–4.1.2, we use 8.0.1; the other two have
+  none. #9–#12 are major versions (a new RustCrypto generation: D3); #8
+  (zeroize 1.9.1) must pass the 14-day check.
 
 **Mistakes of mine this phase, for the record:** the session runner first
 mis-judged occlusion and P3 from running totals (two false INVALID/FAIL
@@ -962,7 +977,7 @@ corrected); I called the upload copy "D-17" twice when it is D-18.
 | D-5 | Unchanged — keychain, v0.1 |
 | D-6, D-7 | Unchanged — v1.0 |
 | D-8 | **Closed** 2026-10-23 — capture restart: T2 twice, T3 lid awake and asleep, display removed |
-| D-9 | **Open — next**, after the owner reads this report |
+| D-9 | **Closed** 2026-10-25 — identity and grant removed after the recreate path was proven on macOS 15.7.9, 26.6.2 and 27.0.1 (`test-dev-identity.sh`, CI green on `5061384`); evidence in roadmap.md |
 | D-10 | **Closed** 2026-10-23 — shown gone (C2 p50 7.06 ms in 3 runs), **not explained**; reopen if it returns. This report's comparison (the interim rule until D-25): C2 p50 **7.06 ms** vs the 7.06 ms baseline — the drift is **not** back |
 | D-11, D-12 | Unchanged — Phase 6.5 |
 | D-13 | Unchanged — first public release |
@@ -986,5 +1001,6 @@ corrected); I called the upload copy "D-17" twice when it is D-18.
 | D-33 | New this phase (2026-10-22) — the countdown overlay, Phase 4.5 |
 | D-34 | **New** 2026-10-23 — the 94 MB of GPU memory, **v0.1 blocker** |
 | D-35 | **New** 2026-10-23 — viewer draws while covered/minimised, Phase 4.5, nice-to-have |
+| D-36 | **New** 2026-10-25 — recreate the dev identity at the start of the next phase that needs screen capture, remove it at that phase's end (owner) |
 
 Gates: G-1 met (Phase 3), **G-2 met** 2026-10-23. Open gates: 0.
