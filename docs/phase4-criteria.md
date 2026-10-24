@@ -815,12 +815,12 @@ is no automatic reconnect.
   captured frames it never sent was not logged, so P1 is run again with
   the capture count. Not a threshold change for P1 or P2.
 
-## 13. Results — the Phase 4 report (2026-10-23, draft for the owner)
+## 13. Results — the Phase 4 report (2026-10-23; accepted by the owner 2026-10-25)
 
 **Status:** every Phase 4 criterion passes on the M4, with three caveats
 listed in §13.5. **D-9 closed 2026-10-25** (dev signing identity and the
 RemoraDev grant removed; evidence in roadmap.md). Still to do before Phase 4
-is done: the owner's acceptance. Evidence: `results/phase4/`
+is done: the owner's acceptance — **given 2026-10-25, after reading this section.** Evidence: `results/phase4/`
 (raw output of every measured run), the commits named below, CI on
 `6f1d984` (all five workflows green).
 
