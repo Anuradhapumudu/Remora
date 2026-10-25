@@ -1,0 +1,5 @@
+Phase 4 p6, 2026-10-23T02:36:07, commit 52873db
+P6: host CPU while streaming a still screen, 60 s, viewer without a window
+processes: host 19394, VTEncoderXPCService [10764, 19400]
+CPU time 0.53 s in 60.0 s; viewer video: 274 frames decoded, 0 refused, 1 waiting for a keyframe, 0 failed, 1 dropped
+==> P6: 0.88 % of one core (limit < 2.0 %) -> PASS

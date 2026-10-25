@@ -210,6 +210,7 @@ where `h` is the final Noise handshake hash. Rationale: threat model §6.3.
 | Any message too large / malformed | Close with `ProtocolViolation`. |
 | Handshake not complete in 10 s | Close with `Timeout`. |
 | Host user does not answer prompt in 60 s | `SessionReject{reason = Timeout}`. |
+| Connection silent for 30 s (no packet at all) | QUIC idle timeout: the connection is dead and both sides report **connection lost** locally (nothing can be sent, so there is no close code). Never reported as an orderly close. Each side sends a QUIC PING after 5 s without sending anything, so a healthy session with nothing to say (prompt waiting, stream paused) never gets there. A dead link is noticed after 30–35 s (`remora_net::IDLE_TIMEOUT`, `KEEP_ALIVE`; owner walkthrough 2026-10-21, architecture.md D37). |
 
 ## 4. Reliable channel framing
 
@@ -261,7 +262,8 @@ message Control {
     IceUpdate         ice        = 13;  // new candidates / ICE restart after network change
     Goodbye           bye        = 14;
     RoleChange        role       = 15;  // reserved for multi-viewer; MVP: owner + controller
-    // 16–63 reserved: clipboard, file transfer, audio, monitors, chat.
+    StreamState       stream_state = 16; // host → viewer: capture paused / resumed (Phase 4)
+    // 17–63 reserved: clipboard, file transfer, audio, monitors, chat.
   }
 }
 
@@ -273,6 +275,7 @@ enum Codec { CODEC_UNSPECIFIED = 0; H264 = 1; H265 = 2; AV1 = 3; }
 enum Role  { ROLE_UNSPECIFIED = 0; OWNER = 1; CONTROLLER = 2; VIEWER = 3; }
 
 message MediaKeyAnnounce { uint32 key_id = 1; bytes key = 2; /* 32 B */ }
+message StreamState      { bool paused = 1; uint32 reason = 2; uint32 remaining_ms = 3; }
 
 message Input {
   oneof kind {
@@ -292,6 +295,49 @@ Notes:
   changes never misplace clicks.
 * **Mouse motion** goes as a media-style datagram (latest-wins, loss harmless);
   buttons/keys go on the reliable channel so a click is never lost.
+* **`RecoveryRequest` (tag 9), Phase 4:** viewer → host, Active only, no
+  fields yet ("send a keyframe"; lost frame ids for LTR recovery come
+  later). Sent when the viewer's decoder cannot continue: a frame refused
+  by the checks below, a decode error, or a gap in frame ids. The viewer
+  sends at most one per 500 ms; the host forces at most one keyframe per
+  500 ms for all viewers together (`KEYFRAME_REQUEST_INTERVAL_MS`). A host
+  sending one is a protocol violation.
+* **`StreamState` (tag 16), Phase 4:** host → viewer, Active only (a
+  viewer sending one is role confusion, A21). Sent to every Active session
+  when screen capture pauses or resumes, and right after `SessionAccept`
+  to a viewer approved while capture is paused. The session stays Active
+  while paused; a resume is followed by a keyframe.
+  * `paused = true` needs `reason ≠ 0`: **1 display asleep** (it stopped
+    delivering frames and is still in the OS's display list, or is not yet
+    known to have left it), 2 access lost, 3 other, **4 display
+    unavailable** (it left the display list: the lid closed with the Mac
+    awake, or disconnected; added 2026-10-22). Names changed 2026-10-23
+    (were "display unavailable" and "display removed": a closed lid also
+    leaves the list, architecture D44); the values did not change. A
+    viewer shows an unknown reason as "other".
+    `paused = false` needs `reason = 0` and `remaining_ms = 0`.
+  * **`remaining_ms` (added 2026-10-22, roadmap D-29):** with reason 4, the
+    milliseconds until the host stops waiting for its unavailable display and
+    ends the session with `CaptureStopped`. The host sends it **once** when
+    the display goes missing, and again only when the deadline changes
+    (the display came back and went missing again). A viewer approved
+    during the wait gets the time actually left, not the full wait. The
+    viewer counts down locally from when the message arrived (no periodic
+    messages). Its countdown reaches 0 later than the host's deadline by
+    the network delay; the host ends the session at its next check of the
+    display list after the deadline (every 2 s while the display is
+    missing), so "0 s left" can show for up to about 2 s before the
+    session ends. 0 with every other reason; at most 3 600 000 (1 h, §7).
+  * Example, paused / display unavailable / 120 s left, as a whole `Envelope`:
+    `0a 0b 82 01 08 08 01 10 04 18 c0 a9 07` (a test and a fuzz seed).
+* **Video bitstream (Phase 4: H.264 only).** Each reassembled frame is an
+  Annex B access unit. The viewer accepts only what Remora's encoder sends
+  and refuses the rest **before the decoder sees it** (§7 limits;
+  `remora_codec::h264`): NAL unit types 1, 5, 6, 7, 8, 9; an IDR keyframe
+  carries exactly one SPS and one PPS, every other frame none; the SPS is
+  8-bit 4:2:0 Baseline/Main/High within the viewer's size limit (displayed
+  **and** coded size). The viewer has no limit to tell the host yet
+  (`Capabilities`, roadmap D-31).
 
 ## 6. Media datagrams
 
@@ -323,6 +369,49 @@ Encrypted body (ChaCha20-Poly1305, 16-byte tag)
   network observers by QUIC's own encryption.
 * **FEC:** Reed–Solomon (reed-solomon-simd) over groups of fragments; repair
   ratio chosen by the rate controller from observed loss.
+* **Video fragment rules** (Phase 4, `remora_proto::video`): `frag_count`
+  1..=8192, `frag_index < frag_count`, at least one data byte; every fragment
+  of a frame carries the same `frag_count`, keyframe flag and
+  `capture_ts_us` (otherwise the frame is dropped); the last-fragment flag is
+  set exactly on `frag_index = frag_count − 1`. `frame_id` strictly increases
+  per stream. **Phase 4 sends no FEC**: `fec_group` must be 0 and `FecRepair`
+  datagrams are ignored (roadmap D-27).
+* **Never wait:** the viewer delivers a frame as soon as it is complete and
+  abandons every older incomplete frame; a frame that does not directly follow
+  the previous one is marked, so a P-frame after a gap waits for a keyframe.
+* **Fragment size** (Phase 4): each datagram is at most 1100 bytes
+  (`VIDEO_DATAGRAM_TARGET`), i.e. 1050 bytes of video data after the clear
+  header, the fragment header and the tag, so with QUIC's own overhead the
+  UDP payload stays under 1200 bytes.
+* **Media keys** (Phase 4, `remora_session::media`; architecture D39):
+  * The host makes a fresh random key **per session** (each viewer has its
+    own) and announces it in `MediaKeyAnnounce` on the Noise channel right
+    after `SessionAccept`, together with the **next** key (`key_id` + 1). A
+    rotation then switches to a key the viewer already holds, and announces
+    a new next key; no frame waits for an announcement.
+  * Rotation: after 2³² packets (the sender refuses the 2³²+1st) or 1 hour
+    of use, whichever comes first.
+  * Viewer: announced `key_id`s must **strictly increase** (a repeat or a
+    lower id ends the session as a protocol violation: it would reuse a
+    nonce space). `key_id` > 65 535 is malformed. At most 4 keys are held;
+    when full, the oldest *superseded* key is forgotten early; if none is
+    superseded, the announcement is a violation.
+  * **Grace window:** when the first packet under a newer key opens, every
+    older key is kept for **2 s** more (`KEY_GRACE_MS`), so reordered late
+    packets still open; after that they are dropped as unknown-key.
+  * The key never leaves the session layer (it is not delivered to the
+    application), and `MediaKeyAnnounce`'s `Debug` prints `[redacted]`.
+* **Datagrams before `Active`** (Phase 4): the host never sends media to a
+  session that is not `Active`. A viewer **waiting for approval** drops
+  datagrams unread and counts them: the host sends `SessionAccept` on the
+  ordered stream and then media as datagrams, and a datagram can overtake
+  the accept when a packet is lost. In any **earlier** state (handshake)
+  no host can have sent media, so a datagram closes the session
+  (`ProtocolViolation`).
+* **Counting, not silence:** every datagram the viewer does not use is
+  counted by reason (`MediaStats`: before-active, bad header, unknown key,
+  replay, too old, authentication, ignored kind/stream, bad fragment, late
+  fragment, frames given up).
 
 ## 7. Limits
 
@@ -340,7 +429,13 @@ Enforced before allocation; violations are `ProtocolViolation` unless noted.
 | Reassembled video frame | 8 MiB (dropped, not fatal) |
 | Fragments per frame | 8192 |
 | Frames in reassembly at once | 16 (oldest evicted) |
-| Video resolution | ≤ negotiated `max_width × max_height`, ≤ 7680×4320 |
+| Bytes held for reassembly, all frames | 32 MiB (oldest frame evicted; Phase 4 addition — 16 × 8 MiB would be 128 MiB) |
+| Media datagram sent by the host | 1100 B (Phase 4) |
+| Media keys a viewer holds at once | 4 (oldest superseded key forgotten first) |
+| Video resolution | ≤ negotiated `max_width × max_height`, ≤ 7680×4320 (Phase 4: the viewer's own limit, not negotiated, roadmap D-31; coded size ≤ the limit rounded up to 16 × 32) — refused before the decoder is configured |
+| NAL units per video frame | 256 |
+| `StreamState.remaining_ms` | 3 600 000 ms (1 h); the host waits 2 min (roadmap D-29), so more is a bug or a hostile host |
+| H.264 SPS / PPS NAL unit | 256 B |
 | Pending handshakes on host | 4 |
 | Handshake attempts per source IP | 10 per minute |
 | Protobuf nesting depth | prost default (100) — our schema never nests > 4 |
@@ -356,3 +451,16 @@ Enforced before allocation; violations are `ProtocolViolation` unless noted.
 * **Minor** additions (new optional protobuf fields, new `Control` variants)
   don't change the major version. Unknown `oneof` variants are ignored if they
   are in the reserved "optional" range (≥ 32) and rejected otherwise.
+
+### Minor additions to v1
+
+The wire carries only the major version. Nothing has shipped yet (v0.1),
+but each addition is listed so a later reader knows which builds lack it.
+
+| Date | Addition | A peer without it |
+|---|---|---|
+| 2026-10-22 | `StreamState.remaining_ms` (field 3) and `reason = 4` (display unavailable; named "display removed" until 2026-10-23), roadmap D-29 | Ignores the field (protobuf skips unknown fields) and shows reason 4 as "other"; the session works, without the countdown. Tested by `a_viewer_without_remaining_ms_still_reads_the_pause` |
+
+Why not a version bump (owner, 2026-10-22): the major version is part of
+every key-derivation label (`remora/1/…`), so bumping it for an optional
+field would change every key, safety code and certificate context.

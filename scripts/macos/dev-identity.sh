@@ -12,6 +12,8 @@
 #   scripts/macos/dev-identity.sh create   # add it to your login keychain
 #   scripts/macos/dev-identity.sh remove   # delete everything `create` added
 #
+# Tested by scripts/macos/test-dev-identity.sh (CI, macOS) on a throwaway keychain.
+#
 # What `create` adds to ~/Library/Keychains/login.keychain-db — exactly two items:
 #   1. a private key   (RSA 2048, label "Remora Local Dev Signing")
 #   2. a certificate   (CN "Remora Local Dev Signing", self-signed, valid 3 years,
@@ -25,7 +27,9 @@ NAME="Remora Local Dev Signing"
 # macOS's own LibreSSL: Homebrew OpenSSL 3+/4 writes .p12 files with algorithms the
 # macOS keychain can't import ("MAC verification failed").
 OPENSSL=/usr/bin/openssl
-KEYCHAIN="$HOME/Library/Keychains/login.keychain-db"
+# REMORA_DEV_KEYCHAIN is for the script's own test (test-dev-identity.sh), which
+# runs create/remove against a throwaway keychain; normal use leaves it unset.
+KEYCHAIN="${REMORA_DEV_KEYCHAIN:-$HOME/Library/Keychains/login.keychain-db}"
 
 exists() { security find-certificate -c "$NAME" "$KEYCHAIN" >/dev/null 2>&1; }
 
@@ -73,5 +77,5 @@ EOF
     echo "  tccutil reset ScreenCapture io.github.anuradhapumudu.Remora.dev"
     ;;
 
-  *) sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
+  *) sed -n '2,23p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
 esac

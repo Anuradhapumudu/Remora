@@ -11,3 +11,6 @@
 *.cer
 *.mobileprovision
 .env
+/spikes/*/target/
+__pycache__/
+/mutants.out*/

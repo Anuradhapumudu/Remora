@@ -1,0 +1,124 @@
+WARNING: this device's identity keys are stored UNENCRYPTED in /Users/pumudu/Library/Application Support/Remora/viewer-identity.key - anyone who can read that file can impersonate this device. Development-stage storage, protected only by file permissions; Remora moves the keys to the OS keychain before v0.1.
+connecting to 127.0.0.1:60447 (host device 8531 422 5411-5)
+media: opened=0 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=0 frames_dropped=0
+safety code: 391 178 - compare it with the host's screen (host "Remora host", device 8531 422 5411-5)
+waiting for the person at the host to accept or deny (nothing to type here)
+SESSION ACTIVE
+media: opened=498 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=47 frames_dropped=0
+media: opened=512 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=51 frames_dropped=0
+media: opened=519 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=53 frames_dropped=0
+media: opened=526 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=55 frames_dropped=0
+media: opened=533 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=57 frames_dropped=0
+stream paused (the host's display is asleep, closed or unavailable) - the session stays open
+stream paused - Display removed. Waiting, 120 s left. The session stays open
+media: opened=539 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=59 frames_dropped=0
+media: opened=539 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=59 frames_dropped=0
+media: opened=539 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=59 frames_dropped=0
+media: opened=539 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=59 frames_dropped=0
+media: opened=539 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=59 frames_dropped=0
+media: opened=539 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=59 frames_dropped=0
+media: opened=539 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=59 frames_dropped=0
+media: opened=539 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=59 frames_dropped=0
+media: opened=539 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=59 frames_dropped=0
+stream paused (the host's display is asleep, closed or unavailable) - the session stays open
+stream resumed
+media: opened=1088 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=116 frames_dropped=0
+media: opened=1351 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=176 frames_dropped=0
+media: opened=1419 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=191 frames_dropped=0
+media: opened=1427 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=193 frames_dropped=0
+media: opened=1449 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=197 frames_dropped=0
+media: opened=1456 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=199 frames_dropped=0
+media: opened=1460 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=200 frames_dropped=0
+media: opened=1467 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=202 frames_dropped=0
+media: opened=1488 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=208 frames_dropped=0
+stream paused (the host's display is asleep, closed or unavailable) - the session stays open
+media: opened=1496 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=210 frames_dropped=0
+stream paused - Display removed. Waiting, 120 s left. The session stays open
+media: opened=1496 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=210 frames_dropped=0
+media: opened=1496 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=210 frames_dropped=0
+media: opened=1496 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=210 frames_dropped=0
+media: opened=1496 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=210 frames_dropped=0
+media: opened=1496 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=210 frames_dropped=0
+media: opened=1496 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=210 frames_dropped=0
+media: opened=1496 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=210 frames_dropped=0
+media: opened=1496 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=210 frames_dropped=0
+stream paused (the host's display is asleep, closed or unavailable) - the session stays open
+stream resumed
+media: opened=1907 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=255 frames_dropped=0
+media: opened=1932 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=263 frames_dropped=0
+media: opened=1938 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=265 frames_dropped=0
+media: opened=1944 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=267 frames_dropped=0
+media: opened=1953 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=269 frames_dropped=0
+media: opened=1962 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=272 frames_dropped=0
+media: opened=1965 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=273 frames_dropped=0
+media: opened=1968 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=274 frames_dropped=0
+media: opened=1971 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=275 frames_dropped=0
+stream paused (the host's display is asleep, closed or unavailable) - the session stays open
+media: opened=1977 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=277 frames_dropped=0
+stream paused - Display removed. Waiting, 120 s left. The session stays open
+media: opened=1977 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=277 frames_dropped=0
+media: opened=1977 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=277 frames_dropped=0
+media: opened=1977 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=277 frames_dropped=0
+media: opened=1977 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=277 frames_dropped=0
+media: opened=1977 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=277 frames_dropped=0
+media: opened=1977 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=277 frames_dropped=0
+media: opened=1977 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=277 frames_dropped=0
+media: opened=1977 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=277 frames_dropped=0
+stream paused (the host's display is asleep, closed or unavailable) - the session stays open
+stream resumed
+media: opened=2362 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=308 frames_dropped=0
+media: opened=2426 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=329 frames_dropped=0
+media: opened=2432 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=331 frames_dropped=0
+media: opened=2441 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=334 frames_dropped=0
+media: opened=2453 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=337 frames_dropped=0
+media: opened=2462 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=340 frames_dropped=0
+media: opened=2468 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=342 frames_dropped=0
+media: opened=2478 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=345 frames_dropped=0
+media: opened=2484 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=347 frames_dropped=0
+stream paused (the host's display is asleep, closed or unavailable) - the session stays open
+media: opened=2490 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=349 frames_dropped=0
+stream paused - Display removed. Waiting, 120 s left. The session stays open
+media: opened=2490 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=349 frames_dropped=0
+media: opened=2490 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=349 frames_dropped=0
+media: opened=2490 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=349 frames_dropped=0
+media: opened=2490 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=349 frames_dropped=0
+media: opened=2490 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=349 frames_dropped=0
+media: opened=2490 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=349 frames_dropped=0
+media: opened=2490 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=349 frames_dropped=0
+media: opened=2490 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=349 frames_dropped=0
+stream paused (the host's display is asleep, closed or unavailable) - the session stays open
+stream resumed
+media: opened=2793 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=368 frames_dropped=0
+media: opened=2955 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=400 frames_dropped=0
+media: opened=2971 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=405 frames_dropped=0
+media: opened=2974 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=406 frames_dropped=0
+media: opened=2980 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=408 frames_dropped=0
+media: opened=2992 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=411 frames_dropped=0
+media: opened=2995 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=412 frames_dropped=0
+media: opened=3004 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=415 frames_dropped=0
+media: opened=3010 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=417 frames_dropped=0
+media: opened=3013 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=418 frames_dropped=0
+stream paused (the host's display is asleep, closed or unavailable) - the session stays open
+stream paused - Display removed. Waiting, 120 s left. The session stays open
+media: opened=3019 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=420 frames_dropped=0
+media: opened=3019 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=420 frames_dropped=0
+media: opened=3019 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=420 frames_dropped=0
+media: opened=3019 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=420 frames_dropped=0
+media: opened=3019 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=420 frames_dropped=0
+media: opened=3019 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=420 frames_dropped=0
+media: opened=3019 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=420 frames_dropped=0
+media: opened=3019 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=420 frames_dropped=0
+stream paused (the host's display is asleep, closed or unavailable) - the session stays open
+stream resumed
+media: opened=3193 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=427 frames_dropped=0
+media: opened=3569 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=470 frames_dropped=0
+media: opened=3583 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=474 frames_dropped=0
+media: opened=3592 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=477 frames_dropped=0
+media: opened=3602 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=480 frames_dropped=0
+media: opened=3617 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=484 frames_dropped=0
+media: opened=3626 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=487 frames_dropped=0
+media: opened=3635 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=490 frames_dropped=0
+media: opened=3641 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=492 frames_dropped=0
+media: opened=3653 auth_failed=0 replayed=0 too_old=0 unknown_key=0 bad_header=0 bad_fragments=0 late_fragments=0 frames=496 frames_dropped=0
+session ended
+video: 496 frames decoded, 0 refused, 1 waiting for a keyframe, 0 failed, 1 dropped

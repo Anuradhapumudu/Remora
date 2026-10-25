@@ -1,0 +1,37 @@
+display: 2940×1912 px → capturing at 1920×1248
+encoder: VideoToolbox H.264 hw, low-latency RC, ExpectedFrameRate=ok, PrioritizeEncodingSpeedOverQuality=REJECTED, AverageBitRate=ok, MaxKeyFrameInterval=ok, ProfileLevel=ok
+machine state (start): thermal state nominal
+  power: Now drawing from 'AC Power' | -InternalBattery-0 (id=22937699)	80%; AC attached; not charging present: true | low power mode: 0
+  thermal/performance: Note: No thermal warning level has been recorded / Note: No performance warning level has been recorded / Note: No CPU power status has been recorded
+  load averages: { 3.94 4.10 3.29 } | uptime: 2:08  up 2 days,  6:05, 3 users, load averages: 3.94 4.10 3.29
+running for 60 s …
+[   0.058s] capture status → Complete
+machine state (end): thermal state nominal
+  power: Now drawing from 'AC Power' | -InternalBattery-0 (id=22937699)	80%; AC attached; not charging present: true | low power mode: 0
+  thermal/performance: Note: No thermal warning level has been recorded / Note: No performance warning level has been recorded / Note: No CPU power status has been recorded
+  load averages: { 3.75 4.07 3.33 } | uptime: 2:09  up 2 days,  6:06, 3 users, load averages: 3.75 4.07 3.33
+
+══════════ Remora Phase 2 bench — 1920×1248 @ 60 fps cap, 60.0 s ══════════
+callbacks by status: {"Complete": 3599}
+complete frames: 3599 (60.0 fps)   dirty rects/frame: 1.2
+per-second complete frames: max 60; seconds with zero new frames: 0/61
+
+latency (ms)                   p50     p95     p99     max    mean  samples
+C1 capture delivery           0.44    0.50    0.55    8.29    0.39     3599
+  C1 = handler − display time, signed (negative = arrived before display time; min -4.19 ms)
+  C1 accounting: 3599 frames with display time (58 early, 3541 on time/late) + 0 without = 3599 complete
+C2 encode                     7.06    7.14    7.21   28.43    7.06     3599
+C12 screen → encoded          7.49    7.61    7.70   24.76    7.46     3599
+
+encoder: submitted 3599  encoded 3599  dropped 0  errors 0 (+0 submit errors)  keyframes 1  avg bitrate 5.17 Mbit/s
+
+verdicts (thresholds from docs/phase2-criteria.md):
+  C12 screen → encoded ≤ 11 ms p95 → PASS
+  (info) C1 capture vs former 4 ms p50 & p95: PASS
+  (info) C2 encode vs former 7 ms p95: FAIL
+  C5 keeps up: encoded == submitted, 0 dropped/errors, ≥ 3528 frames (3599) → PASS
+
+C12 mean per 10 s (ms; thermal state shown when not nominal): 10s:7.39 20s:7.48 30s:7.48 40s:7.48 50s:7.47
+
+events:
+  [   0.058s] capture status → Complete

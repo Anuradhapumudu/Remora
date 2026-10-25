@@ -108,8 +108,8 @@ impl Log {
             }
         }
         for a in &self.viewer {
-            if let ViewerAction::Deliver(msg) = a {
-                log.record(format!("viewer got {msg:?}"));
+            if let ViewerAction::Video(frame) = a {
+                log.record(format!("viewer got {frame:?}"));
             }
         }
         log
@@ -249,7 +249,7 @@ impl Conn {
 
     pub fn approve(&mut self, host: &mut Host) {
         let (id, sas) = self.log.prompt().expect("prompt shown");
-        let acts = host.approve(id, sas).expect("approve");
+        let acts = host.approve(id, sas, T0).expect("approve");
         self.host_actions(host, acts);
     }
 }
@@ -314,6 +314,21 @@ pub fn app_envelopes() -> Vec<(&'static str, Vec<u8>)> {
         (
             "sas reveal",
             control(control::Kind::SasReveal(SasReveal { n_r: vec![1; 32] })),
+        ),
+        // Phase 4 §7: host → viewer, Active only. Appended so the A20/A21
+        // loops put it through every state too.
+        (
+            "stream state",
+            control(control::Kind::StreamState(StreamState {
+                paused: true,
+                reason: 1,
+                remaining_ms: 0,
+            })),
+        ),
+        // Phase 4 step 5: viewer → host keyframe request, Active only.
+        (
+            "recovery request",
+            control(control::Kind::Recovery(RecoveryRequest {})),
         ),
     ]
 }

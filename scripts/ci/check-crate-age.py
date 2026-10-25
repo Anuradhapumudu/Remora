@@ -116,7 +116,9 @@ def exception_holds(name, version, ids, fetch_adv):
         if f'package = "{name}"' not in text:
             return f"{advisory_id} is not an advisory for {name}"
         patched = re.search(r"^patched\s*=\s*\[(.*?)\]", text, re.M | re.S)
-        bounds = re.findall(r'">=\s*([^"]+)"', patched.group(1)) if patched else []
+        # A bound may be a range: ">= 0.103.16, < 0.104.0-alpha.1"
+        # (RUSTSEC-2026-0382). Only the ">=" part is the first patched version.
+        bounds = re.findall(r'">=\s*([^",]+)', patched.group(1)) if patched else []
         if version not in [b.strip() for b in bounds]:
             return f"{advisory_id} does not name {version} as a first patched release ({bounds})"
     return None
@@ -212,6 +214,9 @@ def self_test():
         ("fresh", "RUSTSEC-2026-0001"): 'package = "fresh"\npatched = [">= 2.0.0"]\n',
         ("fresh", "RUSTSEC-2026-0002"): 'package = "other"\npatched = [">= 2.0.0"]\n',
         ("fresh", "RUSTSEC-2026-0003"): 'package = "fresh"\npatched = [">= 1.9.0"]\n',
+        # Compound ranges, shaped like the real RUSTSEC-2026-0382.
+        ("fresh", "RUSTSEC-2026-0004"): 'package = "fresh"\npatched = [">= 2.0.0, < 3.0.0-alpha.1", ">= 3.0.0-alpha.8"]\n',
+        ("fresh", "RUSTSEC-2026-0005"): 'package = "fresh"\npatched = [">= 1.0.0, < 2.0.0", ">= 3.0.0"]\n',
     }
 
     def fake_adv(name, advisory_id):
@@ -227,8 +232,12 @@ def self_test():
 
     ok = sorted(re.match(r"(?:TOO NEW|UNVERIFIED) +(\S+)", f).group(1) for f in run(["RUSTSEC-2026-0001"]))
     assert ok == ["edge-new", "missing"], ok
+    ok = sorted(re.match(r"(?:TOO NEW|UNVERIFIED) +(\S+)", f).group(1) for f in run(["RUSTSEC-2026-0004"]))
+    assert ok == ["edge-new", "missing"], ("compound range rejected", ok)
     for bad_ids in (["RUSTSEC-2026-0002"], ["RUSTSEC-2026-0003"], ["RUSTSEC-2026-0009"],
-                    ["RUSTSEC-2026-0001", "RUSTSEC-2026-0002"]):
+                    ["RUSTSEC-2026-0001", "RUSTSEC-2026-0002"],
+                    # 2.0.0 is only the excluded upper end of a range here
+                    ["RUSTSEC-2026-0005"]):
         assert any(f.startswith("BAD EXCEPTION fresh") for f in run(bad_ids)), bad_ids
     # An exception expires once its release is 14 days old: it must fail
     # (forcing the line's removal), even if that crate is not in the diff.

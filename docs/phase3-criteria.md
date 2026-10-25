@@ -91,7 +91,15 @@ The requirement is therefore per step:
   ever exceeds 150 ms the host logs an anomaly (the floor would stop hiding it).
   Chosen over "measure and prove overlap" because a floor removes the signal by
   construction instead of hoping a measurement is sensitive enough.
-* **Which job carries this claim:** **only** the `A04 timing` workflow
+* **Which job carries this claim — exactly one:** workflow **`A04 timing`**,
+  job **`a04`** (`.github/workflows/timing.yml`). Nothing else may be cited
+  as A04 timing evidence. Its health is **checked, not assumed**
+  (`scripts/ci/check-a04-evidence.sh`, run by CI on every PR and by the
+  `Evidence` workflow every 6 hours and on every push to main): it fails
+  loudly if the workflow is disabled, has no successful run in 48 hours, or
+  the latest merge to main has no successful run of its own after 6 hours.
+  Planted failures for all three were seen failing (2026-10-19).
+* Details of that job: the `A04 timing` workflow
   (`.github/workflows/timing.yml`: 200 samples per type, release build,
   nightly and on PRs touching net/session/crypto). It checks its own output
   has 9 measurements of n = 200 and that the medians were compared. Every
@@ -511,6 +519,9 @@ redundant code; none was excluded for convenience.
 
 ### 10.6 Gaps carried forward
 
+Tracked in **docs/roadmap.md → "Deferred items"** (the one list; D-1…D-7
+are the items below). Summary at the time of writing:
+
 INV2, INV9 (Phase 4), INV10 (Phase 6), the INV11 GUI part (Phase 7; the
 CLI part is now automated), A34's cross-implementation vector (v1.0 list
 2b), the formal model of the commitment scheme (v1.0 list 1), device keys
@@ -521,21 +532,135 @@ adds (real NAT traversal, STUN parser fuzzing, QUIC retry).
 
 1. Terminal 1: `cargo run -p remora-host -- serve` — note `device:`,
    `code:` and `password:` (first run creates the key file in the
-   per-user config directory).
+   per-user config directory). **Every run** prints a `WARNING:` on
+   stderr that the identity keys are stored unencrypted (F-UX2).
 2. Terminal 2: `cargo run -p remora-viewer -- connect '<code>'
    --password <password>` (or omit `--password` to be asked).
 3. Both terminals show the **same** `safety code`. In terminal 1 type
-   `accept <id>` (the id from the `prompt` line): both print `SESSION
-   ACTIVE`. Type `disconnect <id>` to end it.
+   `accept 1` (the **prompt number** from the `prompt 1:` line; numbers
+   count 1, 2, 3 … and are never reused in a run): both print `SESSION
+   ACTIVE 1`. Type `disconnect 1` to end it. Right after the prompt the
+   host prints a `note:` explaining that the code and password were used
+   up, then the new pair for the next viewer (F-UX3).
 4. Wrong password: repeat with a wrong `--password` ⇒ viewer prints
    `failed:` and exits 4; host logs one `handshake_failed` WARN on stderr.
-5. Deny: `deny <id>` ⇒ viewer prints `rejected` and exits 2; a retry needs
+5. Deny: `deny <n>` ⇒ viewer prints `rejected` and exits 2; a retry needs
    the new `code:` / `password:` the host printed.
 6. Trusted mode: `cargo run -p remora-viewer -- identity` prints the
-   viewer's `identity:`; start the host with `serve --trust <that key>`,
-   then connect with `--pin <host identity>` instead of `--password`.
-7. Wrong device: connect with `--device <some other device code>` ⇒
+   viewer's `identity:`; start the host with `serve --trust <that key>`.
+   Connect with `connect '<the host's code: line>' --pin <the host's
+   identity: line>` — no password in trusted mode. Accept on the host,
+   then **stay connected for over a minute** (F-L1: the session must not
+   end by itself). Restart the host: same `identity:` and `device:`;
+   connect again with its **new** `code:` and the **same** `--pin`.
+7. Wrong device: `connect '<the host's code: line>' --device '<the
+   viewer's own device: line>'` (quotes optional since F-UX6) ⇒
    `identity mismatch`, exit 3, and the host never prompts.
+
+
+### 10.8 Owner walkthrough findings (2026-10-20, step 1 of §10.7)
+
+Happy path up to the prompt worked: QUIC on loopback, the safety codes
+matched on both terminals (306 260), device IDs in the approved
+`DDDD DDD DDDD-C` format. Three findings, all **fixed in the Phase 3 CLI**
+(tests first, each test seen failing against a planted regression):
+
+| ID | Finding | Kind | Fix (CLI, now) | Phase 7 GUI consequence |
+|---|---|---|---|---|
+| **F-UX1** | The prompt ID was the protocol's 19-digit random session ID, to be read and retyped | UX | Prompts are numbered `1, 2, 3 …` per run, **never reused** — reuse would let a stale `accept 1` approve a different viewer (security, unit + e2e test, `prompts.rs` in the mutation gate). Every mistyped line gets an explicit answer: unknown number lists the waiting prompts; missing / non-numeric numbers and unknown commands say what to type. (Before: `accept 999` printed "no pending session 999"; `accept abc` printed "unknown command" — not silent, but no help.) | A GUI selects a prompt by clicking it; numbers are not shown. The accept button stays bound to that prompt's safety code (A22) |
+| **F-UX2** | The dev key-storage warning was missing: only a first-run `note:` naming the file, nothing about it being unencrypted | **Missed approval condition** (roadmap "Process slips"), not only UX | Both apps print `WARNING: … identity keys are stored UNENCRYPTED in <path> - anyone who can read that file can impersonate this device …` to stderr on **every** run that loads the key file (`serve`, `connect`, `identity`) | Until D-5 (keychain) closes, the GUI shows the same warning persistently; after D-5 the warning disappears with the file |
+| **F-UX3** | After authentication the host printed a second code and password with no explanation (INV15 working, but it looked like an error) | UX | A `note:` line before every new pair says why: used up by the viewer that proved the password (each works for ONE connection), replaced after 3 failed attempts, or only the code is new and the password is unchanged | Same explanation in the GUI next to the code (and protocol.md's denied-prompt requirement: a retry needs the fresh code) |
+
+**A security find from a usability fix (F-UX1).** Replacing session IDs
+with short numbers created a new way to approve the wrong viewer: if a
+withdrawn prompt's number were handed to the *next* viewer, an `accept 1`
+typed for the old prompt would approve someone else — a **confused-deputy**
+bug, where the host user's authority is applied to a target they never saw.
+It was caught only because the change got its own attack test (number
+never reused, unit + e2e, planted reuse caught, mutation gate). **Rule:** a UX
+change to a security-relevant flow (approval, codes, passwords, identity
+display) is a new attack surface and needs its own attack test, even when
+the underlying protocol check (here A22) is unchanged.
+
+**Walkthrough results (owner, 2026-10-20, screenshots of both terminals):**
+
+| §10.7 step | Result |
+|---|---|
+| 3. Accept | ✅ safety codes matched (854 929); `accept 1` → `SESSION ACTIVE 1` on the host, `SESSION ACTIVE` on the viewer; the F-UX3 note explained the new pair. `disconnect 1` not shown in the screenshots |
+| 4. Wrong password | ✅ viewer `failed: authentication failed (wrong or used password, or not trusted)`; host one `handshake_failed` WARN (`attempt=1/3`), note "the password is unchanged", new code, same password |
+| 5. Deny | ✅ viewer `rejected by the host (a new attempt needs a fresh code and password)`; host `session ended 1 (Rejected)`; the typo `denny 1` got the explicit F-UX1 error |
+| 6. Trusted mode across restart | ✅ **2026-10-21** (after the F-L1 fix, screenshots): `--pin` with the host's identity, no password; safety codes matched (628 577); prompted as required (threat model §4 item 6); `accept 1` → `SESSION ACTIVE` on both; `disconnect 1` → `session ended 1 (Normal)` on the host and `session ended` on the viewer. Host restarted: same `identity:` (`5fdd9140…`) and `device:` (8531 422 5411-5); reconnect with the **new** code and the **same** `--pin` → safety codes matched (814 307), active, normal disconnect. Not visible in the screenshots: how long the session stayed up (F-L1's "over a minute" is covered by `remora-net/tests/liveness.rs`, not by this run). Earlier the same day: first try found **F-L1** and **F-UX5** (below). **Bonus:** reusing the spent code was refused — host `handshake_failed reason=connection code nonce already used`, viewer the generic `authentication failed` (A05/A04 as designed) |
+| 7. Wrong device | ✅ **2026-10-21** (screenshot 12:58, commit 5c8bf6a): `connect '<code>' --device 0539 023 4826-0` (unquoted, the viewer's own code) → `identity mismatch: this code is for device 8531 422 5411-5, not 0539 023 4826-0 which you asked for - not connecting`, `exit code: 3`, no password asked, no prompt on the host. The refusal happened before any contact: the **same** code then connected with the correct `--device 8531 422 5411-5` (prompt 1, safety code 214 762), so the nonce was never spent. Earlier attempts stopped at argument parsing (F-UX6, fixed; `echo $?` pasted onto the command line) or used the host's own code. Also covered by `a16_viewer_asking_for_device_x_refuses_a_code_for_device_y` |
+
+**F-UX4** (found in the deny run): the owner typed `deny 1` into the
+**viewer's** terminal — nothing there said that the decision is made at the
+host, so the line sat unread until the viewer exited and the shell ran it.
+Fixed: after the safety code the viewer prints `waiting for the person at
+the host to accept or deny (nothing to type here)` (e2e test
+`f_ux4_viewer_says_the_host_decides`, planted weaker wording caught).
+Phase 7 GUI: the viewer shows a "waiting for the host" state with no input
+that looks actionable.
+
+**F-L1** (2026-10-21, step 6) — **correctness bug, not UX.** The trusted
+session ended on its own ~30 s after `SESSION ACTIVE`; the host printed
+`session ended 1 (Normal)` and the viewer `failed: connection closed
+(None)`. Reproduced by script (27 s after accept, identical output).
+Cause: nothing is sent once a Phase 3 session is active, and quinn's
+default is a 30 s idle timeout with no keepalive, so QUIC declared the
+healthy connection dead; the host then reported the dead connection
+through the user-disconnect path, hence "Normal". The same silence cut
+the 60 s prompt (§3.4) to 30 s, and would end any Phase 4 session whose
+stream is paused. Fixed (architecture.md D37): 5 s keepalive + explicit
+30 s idle timeout on both sides; a dead connection is reported as
+**connection lost** on both sides. Tests in `remora-net/tests/liveness.rs`
+were seen failing first (RED commit), a planted removal of the keepalive
+is caught, 4/4 mutants caught. **Why the e2e tests missed it:** every
+session test ended within a few seconds, far below the 30 s timeout —
+no test ever held a silent session open. Same lesson as T3 in
+phase4-criteria §12: ask what a test would still pass with; here, any
+timer longer than the test.
+
+**F-UX5** (2026-10-21, steps 6–7): every connect attempt in the first
+step-6 try was refused before reaching the host, with values in the wrong
+places (the password as the code, the code or the host's identity as
+`--pin`, an unquoted device code). The instructions given by Claude said
+`<code>` and `<host identity>` without naming the host's output lines;
+the errors (`not a Remora connection code`, `--pin: an identity key is
+64 hexadecimal digits`) did not say which line to copy either. Fix: the
+errors name the host line to copy, and say what the value looks like
+when it is another field's (`connection code: not a Remora connection
+code - that looks like a password (a 'password:' line) - copy the host's
+'code:' line`); the value itself is never repeated (it may be the
+password). `--help` names the host line for each argument. Tests: unit
+(shape recognition on the walkthrough's real values, a planted echo of
+the value is caught) and e2e with the three real mistakes (refused
+before any traffic, the host never prompts); mutation run on the new
+functions 14 caught, 1 unviable, 0 missed — run by hand, since
+`cli.rs` is not in the CI mutation gate. Steps 6–7 above now name the
+host lines and the quoting.
+
+**F-UX6** (2026-10-21, step 7, twice): `--device 8531 422 5411-5`
+without quotes failed with clap's `unexpected argument '422'` — the code is
+*printed* in three groups, so it gets typed that way. Fixed: the viewer
+rejoins up to two digit-and-dash words after `--device` before parsing
+(`remora_app::cli::join_device_words`), so a connection code or another
+option is never taken, and the joined text is still checked in full
+(check digit, A16). A first attempt (clap `num_args = 1..=3`) was
+rejected before commit: it swallowed the host code when the device code
+came first. Tests: unit (both orders, quoted, stops at options, at most
+three words) and e2e (unquoted wrong device → identity mismatch, exit 3,
+no prompt); mutation run 22 caught, 1 unviable, 0 missed (by hand).
+
+**Observation, no change:** in the step-6 run the owner typed `accept 1`
+into the **viewer** terminal as well, after it printed `waiting for the
+person at the host to accept or deny (nothing to type here)` (F-UX4); the
+line ran as a shell command after the viewer exited (`zsh: command not
+found: accept`). Harmless; noted as input for the Phase 4.5 GUI, where
+the viewer shows a waiting state with nothing to type.
+The step-7 run repeated it with `quit` (typed into the viewer during an
+active session; `zsh: command not found: quit` after the host quit and
+the viewer exited). Same cause, same answer: the Phase 4 viewer window
+and the 4.5 GUI take keyboard input away from the shell.
 
 ## 11. Changes to criteria
 

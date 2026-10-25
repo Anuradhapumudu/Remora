@@ -1,0 +1,69 @@
+- 2026-10-23 01:18 check: AC True, Low Power Mode off, session decoded 176 frames -> PASS
+- 2026-10-23 01:19 check: AC False, Low Power Mode off, session decoded 177 frames -> FAIL
+- 2026-10-23 01:20 check: AC False, Low Power Mode on, session decoded 175 frames -> FAIL
+- 2026-10-23 01:21 check: AC True, Low Power Mode off, session decoded 176 frames -> PASS
+- 2026-10-23 01:23 P1 run 1: p95 19.25 ms (limit < 20.0) -> INVALID (not counted)
+- 2026-10-23 01:23 P2 run 1: p95 11.41 ms (limit <= 11.9) -> INVALID (not counted)
+- 2026-10-23 01:23 P3 run 1: drawn 2012 (limit >= 3528), failed 0, refused 0, dropped 9 -> INVALID (not counted)
+- 2026-10-23 01:27 P1 run 1: p95 15.37 ms (limit < 20.0) -> INVALID (not counted)
+- 2026-10-23 01:27 P2 run 1: p95 6.21 ms (limit <= 11.9) -> INVALID (not counted)
+- 2026-10-23 01:27 P3 run 1: drawn 3001 (limit >= 3528), failed 0, refused 0, dropped 45 -> INVALID (not counted)
+- 2026-10-23 01:28 P1 run 2: p95 14.87 ms (limit < 20.0) -> INVALID (not counted)
+- 2026-10-23 01:28 P2 run 2: p95 5.78 ms (limit <= 11.9) -> INVALID (not counted)
+- 2026-10-23 01:28 P3 run 2: drawn 3279 (limit >= 3528), failed 0, refused 0, dropped 5 -> INVALID (not counted)
+- 2026-10-23 01:29 P1 run 3: p95 15.10 ms (limit < 20.0) -> INVALID (not counted)
+- 2026-10-23 01:29 P2 run 3: p95 5.91 ms (limit <= 11.9) -> INVALID (not counted)
+- 2026-10-23 01:29 P3 run 3: drawn 3254 (limit >= 3528), failed 0, refused 0, dropped 5 -> INVALID (not counted)
+- 2026-10-23 01:36 P1 run 1: p95 16.67 ms (limit < 20.0) -> PASS
+- 2026-10-23 01:36 P2 run 1: p95 6.72 ms (limit <= 11.9) -> PASS
+- 2026-10-23 01:36 P3 run 1: drawn 3546 (limit >= 3528), failed 0, refused 0, dropped 8 -> FAIL
+- 2026-10-23 01:36 P1 worst run: p95 16.67 ms -> PASS
+- 2026-10-23 01:36 P2 worst run: p95 6.72 ms -> PASS
+- 2026-10-23 01:41 P1 run 1: p95 16.65 ms (limit < 20.0) -> PASS
+- 2026-10-23 01:41 P2 run 1: p95 6.77 ms (limit <= 11.9) -> PASS
+- 2026-10-23 01:41 P3 run 1: drawn 3376 (limit >= 3528), failed 0, refused 0, dropped 0 -> FAIL
+- 2026-10-23 01:43 P1 run 2: p95 16.61 ms (limit < 20.0) -> PASS
+- 2026-10-23 01:43 P2 run 2: p95 6.60 ms (limit <= 11.9) -> PASS
+- 2026-10-23 01:43 P3 run 2: drawn 3551 (limit >= 3528), failed 0, refused 0, dropped 0 -> PASS
+- 2026-10-23 01:44 P1 run 3: p95 16.62 ms (limit < 20.0) -> PASS
+- 2026-10-23 01:44 P2 run 3: p95 6.66 ms (limit <= 11.9) -> PASS
+- 2026-10-23 01:44 P3 run 3: drawn 3568 (limit >= 3528), failed 0, refused 0, dropped 0 -> PASS
+- 2026-10-23 01:44 P1 worst run: p95 16.65 ms -> PASS
+- 2026-10-23 01:44 P2 worst run: p95 6.77 ms -> PASS
+- 2026-10-23 02:07 P8 run 1: C12 p95 7.64 ms, p50 7.51 ms (limit p95 <= 11.0) -> PASS
+- 2026-10-23 02:08 P8 run 2: C12 p95 7.61 ms, p50 7.50 ms (limit p95 <= 11.0) -> PASS
+- 2026-10-23 02:09 P8 run 3: C12 p95 7.61 ms, p50 7.49 ms (limit p95 <= 11.0) -> PASS
+- 2026-10-23 02:09 P8 worst run: C12 p95 7.64 ms -> PASS
+- 2026-10-23 02:17 P1 run 1: p95 13.63 ms (limit < 20.0) -> PASS
+- 2026-10-23 02:17 P2 run 1: p95 4.16 ms (limit <= 11.9) -> PASS
+- 2026-10-23 02:17 P3 run 1: drawn 3600 of 3600 captured = 100.00 % (limit >= 98 %), source 60.0 fps (floor 55), decode failed 0, refused 0, AEAD failures 0, reassembly drops 0 -> PASS
+- 2026-10-23 02:18 P1 run 2: p95 14.00 ms (limit < 20.0) -> PASS
+- 2026-10-23 02:18 P2 run 2: p95 4.65 ms (limit <= 11.9) -> PASS
+- 2026-10-23 02:18 P3 run 2: drawn 3501 of 3501 captured = 100.00 % (limit >= 98 %), source 58.4 fps (floor 55), decode failed 0, refused 0, AEAD failures 0, reassembly drops 0 -> PASS
+- 2026-10-23 02:20 P1 run 3: p95 13.67 ms (limit < 20.0) -> PASS
+- 2026-10-23 02:20 P2 run 3: p95 4.25 ms (limit <= 11.9) -> PASS
+- 2026-10-23 02:20 P3 run 3: drawn 3591 of 3591 captured = 100.00 % (limit >= 98 %), source 59.9 fps (floor 55), decode failed 0, refused 0, AEAD failures 0, reassembly drops 0 -> PASS
+- 2026-10-23 02:20 P1 worst run: p95 14.00 ms -> PASS
+- 2026-10-23 02:20 P2 worst run: p95 4.65 ms -> PASS
+- 2026-10-23 02:34 P5: peak 148.0 MB (limit < 150.0), growth min 1 -> end +0.00 MB (limit <= 2.0), slope -0.008 MB/min (limit <= 0.1) -> PASS
+- 2026-10-23 02:37 P6: 0.88 % of one core (limit < 2.0 %) -> PASS
+- 2026-10-23 02:38 M7 memory limit: M7 memory limit: checked (+0.0 MB, limit +8 MB); live decoder sessions and pictures checked (test exit 0) -> PASS
+- 2026-10-23 02:42 T2: pause <= 1.0 s, resume <= 2.0 s, keyframe after every resume: yes; same session: yes; host memory +0.00 MB (limit <= 2.0) -> PASS
+- 2026-10-23 02:52 T3 lid: resumed 1.7 s after the display came on (limit 2.0 s, +1 s log resolution), keyframe first: True, same session: yes -> PASS
+- 2026-10-23 18:08 check: AC True, Low Power Mode off, session decoded 178 frames -> PASS
+- 2026-10-23 18:10 T3 lid, Mac sleeps: resumed 1.1 s after the display came on (limit 2.0 s, +1 s log resolution), keyframe first: True, same session: yes -> PASS
+- 2026-10-23 18:13 P1 run 1: p95 14.53 ms (limit < 20.0) -> PASS
+- 2026-10-23 18:13 P2 run 1: p95 4.54 ms (limit <= 11.9) -> PASS
+- 2026-10-23 18:13 P3 run 1: drawn 3600 of 3600 captured = 100.00 % (limit >= 98 %), source 60.0 fps (floor 55), decode failed 0, refused 0, AEAD failures 0, reassembly drops 0 -> PASS
+- 2026-10-23 18:14 P1 run 2: p95 13.42 ms (limit < 20.0) -> PASS
+- 2026-10-23 18:14 P2 run 2: p95 4.01 ms (limit <= 11.9) -> PASS
+- 2026-10-23 18:14 P3 run 2: drawn 3600 of 3600 captured = 100.00 % (limit >= 98 %), source 60.0 fps (floor 55), decode failed 0, refused 0, AEAD failures 0, reassembly drops 0 -> PASS
+- 2026-10-23 18:16 P1 run 3: p95 13.30 ms (limit < 20.0) -> PASS
+- 2026-10-23 18:16 P2 run 3: p95 3.95 ms (limit <= 11.9) -> PASS
+- 2026-10-23 18:16 P3 run 3: drawn 3593 of 3593 captured = 100.00 % (limit >= 98 %), source 59.9 fps (floor 55), decode failed 0, refused 0, AEAD failures 0, reassembly drops 0 -> PASS
+- 2026-10-23 18:16 P1 worst run: p95 14.53 ms -> PASS
+- 2026-10-23 18:16 P2 worst run: p95 4.54 ms -> PASS
+- 2026-10-23 18:27 P5: peak 149.0 MB (limit < 150.0), growth min 1 -> end +0.00 MB (limit <= 2.0), slope -0.022 MB/min (limit <= 0.1) -> PASS
+- 2026-10-23 18:39 P5 covered: peak 143.0 MB (limit < 150.0), growth min 1 -> end +2.00 MB (limit <= 2.0), slope +0.153 MB/min (limit <= 0.1) -> INVALID (not counted)
+- 2026-10-23 18:51 P5 covered: peak 144.0 MB (limit < 150.0), growth min 1 -> end +1.00 MB (limit <= 2.0), slope +0.150 MB/min (limit <= 0.1) -> INVALID (not counted)
+- 2026-10-23 19:03 P5 covered: peak 144.0 MB (limit < 150.0), growth min 1 -> end +1.00 MB (limit <= 2.0), slope -0.007 MB/min (limit <= 0.1) -> INVALID (not counted)

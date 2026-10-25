@@ -68,6 +68,72 @@ pub enum MediaDrop {
     Auth,
 }
 
+/// A media datagram that went through [`MediaSender::seal`]: clear header,
+/// ciphertext, tag. `seal` is the **only** way to make one (no public
+/// constructor, no `From`), and the network layer's one media send function
+/// takes this type, so plaintext cannot be sent as media by mistake
+/// (phase4-criteria M2, INV2).
+///
+/// Sealing is how you get one:
+///
+/// ```
+/// use remora_crypto::media::{MediaSender, SealedDatagram};
+/// use remora_crypto::secret::MediaKey;
+/// use remora_proto::datagram::{DatagramHeader, DatagramKind};
+///
+/// let mut sender = MediaSender::new(0, MediaKey::from_bytes([7; 32]));
+/// let header = DatagramHeader {
+///     kind: DatagramKind::VideoFragment,
+///     flags: 0,
+///     key_id: 0,
+///     counter: 0,
+///     stream_id: 0,
+///     layer_id: 0,
+/// };
+/// let d: SealedDatagram = sender.seal(header, b"frame bytes").unwrap();
+/// assert_eq!(d.len(), 16 + 11 + 16);
+/// ```
+///
+/// Plain bytes do not convert:
+///
+/// ```compile_fail
+/// use remora_crypto::media::SealedDatagram;
+/// let d: SealedDatagram = vec![0u8; 64].into();
+/// ```
+///
+/// and cannot be wrapped by hand:
+///
+/// ```compile_fail
+/// use remora_crypto::media::SealedDatagram;
+/// let d = SealedDatagram(vec![0u8; 64]);
+/// ```
+#[derive(Clone, PartialEq, Eq)]
+pub struct SealedDatagram(Vec<u8>);
+
+impl SealedDatagram {
+    /// The datagram bytes, for handing to the transport. (To read them in
+    /// place, a `SealedDatagram` dereferences to `[u8]`.)
+    pub fn into_bytes(self) -> Vec<u8> {
+        self.0
+    }
+}
+
+impl std::ops::Deref for SealedDatagram {
+    type Target = [u8];
+    fn deref(&self) -> &[u8] {
+        &self.0
+    }
+}
+
+impl std::fmt::Debug for SealedDatagram {
+    // Ciphertext is not secret, but there is nothing useful in printing it.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SealedDatagram")
+            .field("bytes", &self.0.len())
+            .finish()
+    }
+}
+
 /// Encrypts datagrams under one key.
 pub struct MediaSender {
     pub(crate) key_id: u16,
@@ -102,7 +168,11 @@ impl MediaSender {
     /// Encrypts one datagram. `header.key_id` and `header.counter` are
     /// **overwritten** with this sender's values; the caller cannot choose
     /// the counter.
-    pub fn seal(&mut self, header: DatagramHeader, body: &[u8]) -> Result<Vec<u8>, MediaError> {
+    pub fn seal(
+        &mut self,
+        header: DatagramHeader,
+        body: &[u8],
+    ) -> Result<SealedDatagram, MediaError> {
         if body.len() > DATAGRAM_MAX - DATAGRAM_HEADER_LEN - AEAD_TAG_LEN {
             return Err(MediaError::BodyTooLarge);
         }
@@ -130,7 +200,7 @@ impl MediaSender {
         let mut out = Vec::with_capacity(aad.len() + ct.len());
         out.extend_from_slice(&aad);
         out.extend_from_slice(&ct);
-        Ok(out)
+        Ok(SealedDatagram(out))
     }
 }
 

@@ -15,14 +15,14 @@ use remora_crypto::sas::Sas;
 use remora_crypto::secret::{Exporter, Otp};
 
 use remora_proto::messages::{
-    Control, Envelope, Goodbye, Mode, ViewerHello, control, decode_host_hello, envelope,
+    Control, Envelope, Goodbye, Mode, RecoveryRequest, ViewerHello, control, decode_host_hello,
+    envelope,
 };
 
 use crate::fail::Violation;
 use crate::host::{Identity, decrypt_envelope};
-use crate::{
-    AppMessage, CloseCode, FailReason, HANDSHAKE_TIMEOUT_MS, Millis, PROTOCOL_VERSION, State, Step,
-};
+use crate::media::{KEYFRAME_REQUEST_INTERVAL_MS, MediaIn, MediaStats};
+use crate::{CloseCode, FailReason, HANDSHAKE_TIMEOUT_MS, Millis, PROTOCOL_VERSION, State, Step};
 
 /// How the viewer authenticates.
 #[derive(Debug, Clone)]
@@ -67,8 +67,14 @@ pub enum ViewerAction {
     },
     /// The host approved: the session is active.
     Active,
-    /// Deliver an application message (Active only).
-    Deliver(AppMessage),
+    /// The host's screen capture paused: keep the session, show "paused"
+    /// with this reason (Active only).
+    StreamPaused(crate::PauseReason),
+    /// The stream resumed; a keyframe follows.
+    StreamResumed,
+    /// A complete video frame for the decoder (Active only; it came only
+    /// from datagrams that opened under an announced media key).
+    Video(remora_proto::video::VideoFrame),
     /// The session failed (log it, tell the user).
     Failed {
         /// Precise local reason.
@@ -106,6 +112,9 @@ pub struct ViewerSession {
     pub(crate) exporter: Exporter,
     pub(crate) state: ViewerState,
     pub(crate) deadline: Millis,
+    pub(crate) media: MediaIn,
+    /// When the last keyframe request was sent.
+    pub(crate) keyframe_requested: Option<Millis>,
 }
 
 impl std::fmt::Debug for ViewerSession {
@@ -142,6 +151,8 @@ impl ViewerSession {
                 exporter,
                 state: ViewerState::Hello { vh, nonce },
                 deadline: now.plus(HANDSHAKE_TIMEOUT_MS),
+                media: MediaIn::default(),
+                keyframe_requested: None,
             },
             first,
         )
@@ -179,7 +190,7 @@ impl ViewerSession {
                 Err(e) => Err(Some(reveal_failure(e))),
             },
             ViewerState::Pending(est) => on_pending(frame, est, &mut out),
-            ViewerState::Active(est) => on_active(frame, est, &mut out),
+            ViewerState::Active(est) => on_active(frame, est, &mut self.media, &mut out),
         };
         match result {
             Ok(next) => self.state = next,
@@ -189,12 +200,27 @@ impl ViewerSession {
         out
     }
 
-    /// A datagram arrived. Before `Active` it closes the session.
-    pub fn on_datagram(&mut self, datagram: &[u8]) -> Vec<ViewerAction> {
-        let _ = datagram;
+    /// A datagram arrived.
+    ///
+    /// * `Active`: opened, and complete frames are delivered as
+    ///   [`ViewerAction::Video`]; anything else is counted
+    ///   ([`ViewerSession::media_stats`]) and the session goes on (M5).
+    /// * Waiting for approval: dropped unread and counted. The host sends
+    ///   `SessionAccept` on the ordered stream and media as datagrams, which
+    ///   can overtake it when a packet is lost (M3).
+    /// * Earlier (handshake): no host can have sent media yet, so the
+    ///   session closes (A20).
+    pub fn on_datagram(&mut self, datagram: &[u8], now: Millis) -> Vec<ViewerAction> {
         let mut out = Vec::new();
         match self.state() {
-            State::Closed | State::Active => {}
+            State::Closed => {}
+            State::Active => out.extend(
+                self.media
+                    .datagram(datagram, now)
+                    .into_iter()
+                    .map(ViewerAction::Video),
+            ),
+            State::PendingApproval => self.media.stats.before_active += 1,
             _ => {
                 let step = step_of(&self.state);
                 self.state = ViewerState::Closed;
@@ -212,6 +238,7 @@ impl ViewerSession {
     /// safety code is shown — the host's 60 s prompt limit takes over).
     pub fn tick(&mut self, now: Millis) -> Vec<ViewerAction> {
         let mut out = Vec::new();
+        self.media.tick(now);
         let waiting = matches!(
             self.state,
             ViewerState::Hello { .. }
@@ -237,6 +264,30 @@ impl ViewerSession {
         }
         .encode_to_vec();
         est.encrypt(&env).ok().map(ViewerAction::Send)
+    }
+
+    /// The decoder needs a keyframe (a frame was refused or failed to
+    /// decode, phase4-criteria M7): asks the host for one. Active only, and
+    /// at most once per [`KEYFRAME_REQUEST_INTERVAL_MS`](crate::media::KEYFRAME_REQUEST_INTERVAL_MS).
+    pub fn request_keyframe(&mut self, now: Millis) -> Option<ViewerAction> {
+        let ViewerState::Active(est) = &mut self.state else {
+            return None;
+        };
+        if self
+            .keyframe_requested
+            .is_some_and(|t| now.0 < t.0.saturating_add(KEYFRAME_REQUEST_INTERVAL_MS))
+        {
+            return None;
+        }
+        let env = Envelope {
+            msg: Some(envelope::Msg::Control(Control {
+                kind: Some(control::Kind::Recovery(RecoveryRequest {})),
+            })),
+        }
+        .encode_to_vec();
+        let frame = est.encrypt(&env).ok()?;
+        self.keyframe_requested = Some(now);
+        Some(ViewerAction::Send(frame))
     }
 
     /// One-click disconnect from any state.
@@ -357,6 +408,11 @@ impl ViewerSession {
         Ok(ViewerState::Reveal(hs))
     }
 
+    /// What happened to the media datagrams received so far.
+    pub fn media_stats(&self) -> MediaStats {
+        self.media.stats
+    }
+
     /// Current state.
     pub fn state(&self) -> State {
         match self.state {
@@ -409,10 +465,11 @@ fn on_pending(
             }
             control::Kind::Reject(_) => Err(Some(FailReason::Rejected)),
             control::Kind::Bye(_) => Err(None),
-            control::Kind::MediaKey(_) => {
+            control::Kind::MediaKey(_) | control::Kind::StreamState(_) => {
                 Err(Some(FailReason::ProtocolViolation(Violation::BeforeActive)))
             }
-            control::Kind::SasReveal(_) => {
+            // A keyframe request is viewer → host only.
+            control::Kind::SasReveal(_) | control::Kind::Recovery(_) => {
                 Err(Some(FailReason::ProtocolViolation(Violation::WrongRole)))
             }
         },
@@ -422,10 +479,12 @@ fn on_pending(
 }
 
 /// Active: the host may send media keys and `Goodbye`; input from the host
-/// is role confusion (A21).
+/// is role confusion (A21). A media key is installed here and never leaves
+/// the session.
 fn on_active(
     frame: &[u8],
     mut est: Established,
+    media: &mut MediaIn,
     out: &mut Vec<ViewerAction>,
 ) -> Result<ViewerState, Option<FailReason>> {
     let env = decrypt_envelope(&mut est, frame).map_err(Some)?;
@@ -433,12 +492,30 @@ fn on_active(
         Some(envelope::Msg::Control(Control {
             kind: Some(control::Kind::MediaKey(k)),
         })) => {
-            out.push(ViewerAction::Deliver(AppMessage::MediaKey(k)));
+            media
+                .announce(&k)
+                .map_err(|v| Some(FailReason::ProtocolViolation(v)))?;
             Ok(ViewerState::Active(est))
         }
         Some(envelope::Msg::Control(Control {
             kind: Some(control::Kind::Bye(_)),
         })) => Err(None),
+        Some(envelope::Msg::Control(Control {
+            kind: Some(control::Kind::StreamState(st)),
+        })) => {
+            // Shape (paused <=> reason != 0, time left bounded) is checked
+            // by the envelope validator; an unknown reason is a newer
+            // host's: "other".
+            out.push(if st.paused {
+                ViewerAction::StreamPaused(crate::PauseReason::from_wire(
+                    st.reason,
+                    st.remaining_ms,
+                ))
+            } else {
+                ViewerAction::StreamResumed
+            });
+            Ok(ViewerState::Active(est))
+        }
         _ => Err(Some(FailReason::ProtocolViolation(Violation::WrongRole))),
     }
 }

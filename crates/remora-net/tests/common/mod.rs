@@ -317,3 +317,50 @@ pub fn pass() -> Tap {
 pub fn median(xs: &mut [f64]) -> f64 {
     remora_testkit::stats::median(xs).unwrap()
 }
+
+/// A UDP relay between one viewer and `upstream`, with a switch that makes
+/// it drop everything in both directions - a network that goes silent
+/// without closing anything (Wi-Fi gone, a machine asleep). QUIC is
+/// end-to-end encrypted through it; it only forwards or drops datagrams.
+pub struct Relay {
+    pub addr: SocketAddr,
+    cut: Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl Relay {
+    pub async fn start(upstream: SocketAddr) -> Relay {
+        use std::sync::atomic::Ordering;
+        let front = Arc::new(tokio::net::UdpSocket::bind(loopback()).await.unwrap());
+        let back = Arc::new(tokio::net::UdpSocket::bind(loopback()).await.unwrap());
+        back.connect(upstream).await.unwrap();
+        let addr = front.local_addr().unwrap();
+        let cut = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let client: Arc<Mutex<Option<SocketAddr>>> = Arc::new(Mutex::new(None));
+        let (f, b, c, k) = (front.clone(), back.clone(), client.clone(), cut.clone());
+        tokio::spawn(async move {
+            let mut buf = vec![0u8; 65_535];
+            while let Ok((n, from)) = f.recv_from(&mut buf).await {
+                *c.lock().unwrap() = Some(from);
+                if !k.load(Ordering::SeqCst) {
+                    let _ = b.send(&buf[..n]).await;
+                }
+            }
+        });
+        let (f, b, k) = (front, back, cut.clone());
+        tokio::spawn(async move {
+            let mut buf = vec![0u8; 65_535];
+            while let Ok(n) = b.recv(&mut buf).await {
+                let to = *client.lock().unwrap();
+                if let (Some(to), false) = (to, k.load(Ordering::SeqCst)) {
+                    let _ = f.send_to(&buf[..n], to).await;
+                }
+            }
+        });
+        Relay { addr, cut }
+    }
+
+    /// From now on, nothing gets through in either direction.
+    pub fn cut(&self) {
+        self.cut.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+}

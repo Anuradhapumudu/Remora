@@ -8,6 +8,10 @@ on:
   schedule:
     - cron: "53 3 * * *"
   workflow_dispatch:
+  # Every merge to main gets its own timing evidence (checked by
+  # scripts/ci/check-a04-evidence.sh).
+  push:
+    branches: [main]
   pull_request:
     paths:
       - "crates/remora-net/**"

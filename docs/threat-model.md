@@ -274,7 +274,7 @@ Legend — **M** = mitigation, **T** = test that proves it, **R** = residual ris
 
 | STRIDE | Threat | Mitigation / Test / Residual |
 |---|---|---|
-| T/E | Malicious host sends crafted video bitstream to exploit the decoder | M: OS/hardware decoders (on macOS VideoToolbox *may* decode out of process — **unverified**, checked in Phase 4; crypto-claims-audit C12); frame size limits; resolution limits negotiated and enforced; software decoder (openh264) is a C library — R: **decoder bugs are a real residual risk**; we keep decoders updated and fuzz our own depacketizer. |
+| T/E | Malicious host sends crafted video bitstream to exploit the decoder | M: OS/hardware decoders (on macOS VideoToolbox *may* decode out of process — **unverified**, checked in Phase 4; crypto-claims-audit C12); frame size limits; resolution limits enforced before the decoder is configured, and only the H.264 subset our encoder produces accepted (Phase 4 M7, architecture D40; negotiation with the host: roadmap D-31); software decoder (openh264) is a C library — R: **decoder bugs are a real residual risk**; we keep decoders updated and fuzz our own depacketizer. |
 | T/E | Crafted cursor image / protocol messages | M: cursor ≤ 256×256 RGBA, validated; all messages size-limited and fuzzed. |
 | S | Viewer connects to the wrong host | M: device ID ↔ key binding, safety code, trusted-device pinning. |
 | I | Host learns viewer's IP | R: inherent to P2P. |

@@ -15,6 +15,7 @@ libfuzzer-sys = "=0.4.13"
 remora-proto = { path = "../crates/remora-proto" }
 remora-crypto = { path = "../crates/remora-crypto" }
 remora-session = { path = "../crates/remora-session" }
+remora-codec = { path = "../crates/remora-codec" }
 rand_core = { version = "0.6", features = ["getrandom"] }
 
 [workspace]
@@ -79,6 +80,20 @@ bench = false
 [[bin]]
 name = "session_host"
 path = "fuzz_targets/session_host.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "video_reassembly"
+path = "fuzz_targets/video_reassembly.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "h264_frame"
+path = "fuzz_targets/h264_frame.rs"
 test = false
 doc = false
 bench = false

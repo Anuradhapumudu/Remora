@@ -21,12 +21,19 @@ tokio = { workspace = true, features = ["rt", "sync", "time", "macros", "net"] }
 rand_core = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
+bytes = { workspace = true }
+
+[features]
+# Records every media datagram handed to quinn (phase4-criteria M1a). Only
+# this crate's own tests turn it on (the dev-dependency on itself below);
+# it sees sealed bytes only, never plaintext.
+test-tap = []
 
 [dev-dependencies]
+remora-net = { path = ".", features = ["test-tap"] }
 remora-testkit = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time", "net", "sync"] }
 prost = { workspace = true }
-bytes = { workspace = true }
 
 [lints]
 workspace = true

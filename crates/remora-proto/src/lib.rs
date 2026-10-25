@@ -1,5 +1,6 @@
 //! Remora wire protocol (docs/protocol.md): length-prefixed frames, protobuf
-//! messages, connection codes and the clear media-datagram header.
+//! messages, connection codes, the clear media-datagram header and video
+//! fragmentation / reassembly.
 //!
 //! Every parser here receives attacker-controlled bytes. Each one checks its
 //! size limit **before** allocating anything proportional to the input
@@ -13,3 +14,4 @@ pub mod datagram;
 pub mod frame;
 pub mod limits;
 pub mod messages;
+pub mod video;

@@ -54,6 +54,45 @@ jobs:
 
       - name: Test
         run: cargo test --workspace --locked
+      # Phase 4 steps 1 and 5: can this runner's VideoToolbox encode and
+      # decode? The answer decides which codec the Phase 4 media tests use
+      # in CI (phase4-criteria §8). "unavailable" passes; broken fails.
+      - name: VideoToolbox probe (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          set -o pipefail
+          cargo test -p remora-codec --test vt_probe --locked -- --ignored --nocapture 2>&1 | tee vt_probe.log
+          echo "### VideoToolbox probe" >> "$GITHUB_STEP_SUMMARY"
+          # One line each for encode (step 1) and decode (step 5); a missing
+          # line is a probe that did not run, never a pass.
+          for what in encode decode; do
+            line=$(grep -m1 "^VT_PROBE $what=" vt_probe.log || true)
+            if [ -z "$line" ]; then echo "::error::the probe printed no VT_PROBE $what= line"; exit 1; fi
+            echo "$line"
+            echo "\`$line\`" >> "$GITHUB_STEP_SUMMARY"
+          done
+      # M7 memory (phase4-criteria §12, owner 2026-10-22): the +8 MB limit
+      # is checked on real Macs only; on a VM the test checks the decoder's
+      # live sessions and pictures and says the limit was NOT checked. A
+      # run that prints neither line did not check anything: it fails.
+      - name: M7 memory (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          set -o pipefail
+          cargo test -p remora-codec --test m7_decode_memory --locked -- --nocapture 2>&1 | tee m7_memory.log
+          line=$(grep -m1 "^M7 memory limit: " m7_memory.log || true)
+          if [ -z "$line" ]; then echo "::error::the M7 memory test printed no 'M7 memory limit:' line"; exit 1; fi
+          {
+            echo "### M7 memory"
+            echo "\`$line\`"
+            grep "^M7 memory after\|^M7 memory: " m7_memory.log | sed 's/^/    /'
+          } >> "$GITHUB_STEP_SUMMARY"
+      # Roadmap D-9: the dev signing identity is deleted at the end of a phase
+      # and recreated when capture work needs it again, so `create` and
+      # `remove` must keep working. Uses a throwaway keychain only.
+      - name: Dev identity script (macOS)
+        if: runner.os == 'macOS'
+        run: bash scripts/macos/test-dev-identity.sh
 
       - name: Install cargo-deny and cargo-audit
         uses: taiki-e/install-action@861a07ce7084f55488e375df125cdc99bba60eb7 # v2.87.23
@@ -99,31 +138,54 @@ jobs:
             python3 -I scripts/ci/check-crate-age.py --all Cargo.lock fuzz/Cargo.lock
           fi
 
+  # docs/roadmap.md's deferred-items list and progress log are what every
+  # phase is judged against, and they are hand-edited. On 2026-10-19 a
+  # scripted edit silently cut off everything after one row; this guard
+  # makes that, a deleted deferred item, or a malformed row fail CI.
+  roadmap:
+    name: roadmap tables intact
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Self-test (planted breakages must be caught)
+        run: python3 -I scripts/ci/check-roadmap.py --self-test
+      - name: Compare with the base version
+        env:
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          if [ "$EVENT" = "pull_request" ]; then
+            base=$(git merge-base HEAD "origin/$BASE_REF")
+          elif [ "$EVENT" = "push" ] && git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            base="$BEFORE"
+          else
+            base="HEAD~1"
+          fi
+          python3 -I scripts/ci/check-roadmap.py "$base"
+
   # The A04 timing claim rests ONLY on the 200-sample "A04 timing" workflow
-  # (phase3-criteria §3.1a); the 3-sample run inside the mutation gate checks
-  # the floor exists but proves nothing statistical. If the 200-sample job
-  # is skipped, disabled or broken, everything else stays green - so this
-  # job turns CI red when that workflow has no successful run in 48 hours.
+  # (phase3-criteria §3.1a). Every other A04 run checks only that the floor
+  # exists. This fails loudly if that workflow is disabled, has no success
+  # in 48 h, or skipped the latest merge to main (6 h grace). Also runs
+  # every 6 hours from the Evidence workflow.
   a04-evidence-fresh:
-    name: A04 timing evidence is fresh (< 48 h)
+    name: A04 timing evidence is present
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
       actions: read
+      contents: read
     steps:
-      - name: Latest successful 200-sample A04 run
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Check the A04 timing evidence
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
-        run: |
-          last=$(gh run list --repo "$REPO" --workflow timing.yml --status success --limit 1 --json createdAt --jq '.[0].createdAt // empty')
-          if [ -z "$last" ]; then
-            echo "::error::no successful A04 timing run at all"
-            exit 1
-          fi
-          age_h=$(( ( $(date -u +%s) - $(date -u -d "$last" +%s) ) / 3600 ))
-          echo "last successful A04 timing run: $last ($age_h h ago)"
-          if [ "$age_h" -ge 48 ]; then
-            echo "::error::A04 timing evidence is $age_h h old (>= 48 h): the statistical job is not running"
-            exit 1
-          fi
+        run: bash scripts/ci/check-a04-evidence.sh

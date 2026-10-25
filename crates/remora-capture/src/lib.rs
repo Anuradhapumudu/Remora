@@ -31,6 +31,9 @@ pub struct CaptureConfig {
     pub show_cursor: bool,
     /// Number of surfaces the OS may have in flight (ScreenCaptureKit: 3..=8).
     pub queue_depth: u32,
+    /// How long an interrupted capture waits for an **unavailable** display
+    /// (not in the OS's display list) to come back before it stops ([`DISPLAY_GONE_LIMIT`]; shorter in tests).
+    pub display_gone_limit: Duration,
 }
 
 impl Default for CaptureConfig {
@@ -41,7 +44,84 @@ impl Default for CaptureConfig {
             max_fps: 60,
             show_cursor: false,
             queue_depth: 3,
+            display_gone_limit: DISPLAY_GONE_LIMIT,
         }
+    }
+}
+
+/// How long capture waits for an unavailable display to come back, then
+/// stops with [`CaptureError::DisplayUnavailable`] (roadmap D-29,
+/// architecture D38, D44: a loose cable, a dock reconnect, a lid closed
+/// for a moment — not days later).
+pub const DISPLAY_GONE_LIMIT: Duration = Duration::from_secs(120);
+
+/// Times how long the captured display has been **missing** while an
+/// interrupted capture retries (D-29). Two cases, told apart by the OS's
+/// list of displays (architecture D44 corrects D38 here):
+///
+/// * **Display sleep** (`pmset displaysleepnow`, idle sleep): the display
+///   stays **listed**. No countdown, never expires; capture resumes when
+///   the display wakes (T2, 2026-10-23: 5 cycles, listed throughout).
+/// * **Lid closed with the Mac awake** (AC power and something preventing
+///   sleep, or an external monitor), or **disconnected**: the display
+///   **leaves the list**. That is "unavailable": a 2-minute countdown,
+///   then capture stops and the session ends. Evidence for the lid case:
+///   the owner's T3 run of 2026-10-23, power log "Entering DarkWake state
+///   due to 'Clamshell Sleep'", both sides counting down from 120 s.
+///
+/// When the Mac itself sleeps the processes stop, and the session's
+/// liveness check ends it on the viewer (D37).
+#[derive(Debug, Clone, Copy)]
+pub struct GoneTimer {
+    limit: Duration,
+    since: Option<Instant>,
+}
+
+/// What one [`GoneTimer::observe`] means for the people watching (D-29).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Gone {
+    /// The display is listed, as it was: nothing to report.
+    Listed,
+    /// The display just went missing: report "unavailable" with this much
+    /// time left (a new deadline).
+    WentMissing(Duration),
+    /// Still missing, time not up: nothing new to report.
+    StillMissing,
+    /// Listed again after being missing: the deadline is gone (report the
+    /// display as asleep until frames flow again).
+    Back,
+    /// Missing for the limit: capture must stop.
+    Expired,
+}
+
+impl GoneTimer {
+    /// A timer that expires after the display was missing for `limit`.
+    pub fn new(limit: Duration) -> Self {
+        Self { limit, since: None }
+    }
+
+    /// One retry's observation at `now`: is the display listed?
+    pub fn observe(&mut self, listed: bool, now: Instant) -> Gone {
+        if listed {
+            return match self.since.take() {
+                Some(_) => Gone::Back,
+                None => Gone::Listed,
+            };
+        }
+        let Some(since) = self.since else {
+            self.since = Some(now);
+            return Gone::WentMissing(self.limit);
+        };
+        if now.saturating_duration_since(since) >= self.limit {
+            Gone::Expired
+        } else {
+            Gone::StillMissing
+        }
+    }
+
+    /// [`observe`](Self::observe), reduced to "must capture stop?".
+    pub fn expired(&mut self, listed: bool, now: Instant) -> bool {
+        self.observe(listed, now) == Gone::Expired
     }
 }
 
@@ -139,12 +219,42 @@ impl std::fmt::Debug for CapturedFrame {
     }
 }
 
+/// Why capture paused (OS-neutral; each backend maps its own errors here,
+/// so nothing above the trait needs to know the OS — architecture D17).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum InterruptReason {
+    /// The display stopped delivering frames: asleep, or not yet known to
+    /// be gone (the restart loop then checks the display list and reports
+    /// [`InterruptReason::DisplayUnavailable`] if it is missing).
+    DisplayAsleep,
+    /// The OS took the capture surface away (Windows: ACCESS_LOST).
+    AccessLost,
+    /// Another interruption the backend expects to recover from.
+    Other,
+    /// The captured display left the OS's list of displays (lid closed with
+    /// the Mac awake, or disconnected). Capture stops with [`CaptureError::DisplayUnavailable`]
+    /// after `remaining` unless it comes back (roadmap D-29). Reported each
+    /// time the display goes missing: every report is a new deadline.
+    DisplayUnavailable {
+        /// Time left, from this report, until capture gives up.
+        remaining: Duration,
+    },
+}
+
 /// Something the capture backend reports.
 #[derive(Debug)]
 pub enum CaptureEvent {
     /// A frame callback.
     Frame(CapturedFrame),
-    /// The OS stopped the stream (display unplugged, permission revoked, …).
+    /// Capture paused but is expected to come back: the backend keeps
+    /// retrying on its own and sends [`CaptureEvent::Resumed`] when frames
+    /// flow again.
+    Interrupted(InterruptReason),
+    /// Frames flow again after [`CaptureEvent::Interrupted`]. The next
+    /// encoded frame must be a keyframe.
+    Resumed,
+    /// Capture will not come back without user action (permission revoked,
+    /// the user stopped it from the system UI, …).
     Stopped(CaptureError),
 }
 
@@ -162,6 +272,12 @@ pub enum CaptureError {
     /// No display to capture.
     #[error("no display found")]
     NoDisplay,
+    /// The captured display stayed unavailable (lid closed or disconnected)
+    /// for [`DISPLAY_GONE_LIMIT`]. Capture never moves to another display.
+    #[error(
+        "the captured display stayed unavailable (lid closed or disconnected) and did not come back"
+    )]
+    DisplayUnavailable,
     /// The capture is already running / not running.
     #[error("invalid state: {0}")]
     InvalidState(&'static str),
@@ -195,6 +311,84 @@ pub trait ScreenCapture: Send {
 
 #[cfg(test)]
 mod tests {
+    /// D-29: missing for the limit (and only then) stops capture; the
+    /// display coming back resets the wait.
+    #[test]
+    fn d29_a_missing_display_is_waited_for_then_given_up() {
+        let t0 = Instant::now();
+        let s = |secs: u64| t0 + Duration::from_secs(secs);
+        let mut t = GoneTimer::new(Duration::from_secs(120));
+        assert!(!t.expired(true, s(0)), "listed: nothing to time");
+        assert!(!t.expired(false, s(10)), "missing from 10 s");
+        assert!(!t.expired(false, s(129)), "119 s missing");
+        assert!(t.expired(false, s(130)), "120 s missing: give up");
+        // Back in time: the wait starts again from the next absence.
+        let mut t = GoneTimer::new(Duration::from_secs(120));
+        assert!(!t.expired(false, s(0)));
+        assert!(!t.expired(true, s(100)), "back after 100 s");
+        assert!(!t.expired(false, s(200)), "missing again from 200 s");
+        assert!(!t.expired(false, s(319)));
+        assert!(t.expired(false, s(320)));
+    }
+
+    /// What the people watching are told: once when the display goes
+    /// missing (with the full wait), once when it is back, nothing while
+    /// it stays the same; a second absence is a new full wait.
+    #[test]
+    fn d29_missing_and_back_are_reported_once_each() {
+        let t0 = Instant::now();
+        let s = |secs: u64| t0 + Duration::from_secs(secs);
+        let limit = Duration::from_secs(120);
+        let mut t = GoneTimer::new(limit);
+        assert_eq!(t.observe(true, s(0)), Gone::Listed);
+        assert_eq!(t.observe(false, s(1)), Gone::WentMissing(limit));
+        assert_eq!(t.observe(false, s(3)), Gone::StillMissing);
+        assert_eq!(t.observe(false, s(120)), Gone::StillMissing);
+        assert_eq!(t.observe(true, s(121)), Gone::Back);
+        assert_eq!(t.observe(true, s(122)), Gone::Listed);
+        assert_eq!(t.observe(false, s(200)), Gone::WentMissing(limit));
+        assert_eq!(t.observe(false, s(319)), Gone::StillMissing);
+        assert_eq!(t.observe(false, s(320)), Gone::Expired);
+    }
+
+    #[test]
+    fn d29_a_listed_but_sleeping_display_never_expires() {
+        let t0 = Instant::now();
+        let mut t = GoneTimer::new(Duration::from_secs(120));
+        for h in 0..24 {
+            assert!(!t.expired(true, t0 + Duration::from_secs(h * 3600)));
+        }
+        assert_eq!(
+            CaptureConfig::default().display_gone_limit,
+            DISPLAY_GONE_LIMIT
+        );
+        assert_eq!(DISPLAY_GONE_LIMIT, Duration::from_secs(120));
+    }
+
+    /// N4 (phase4-criteria §6, INV9): a captured frame's `Debug` names
+    /// exactly these fields — the image is never among them.
+    #[test]
+    fn n4_captured_frame_debug_never_shows_the_image() {
+        let f = CapturedFrame {
+            seq: 3,
+            status: FrameStatus::Complete,
+            arrival: Instant::now(),
+            delivery_ns: Some(5),
+            dirty_rects: vec![Rect {
+                x: 1.0,
+                y: 2.0,
+                w: 3.0,
+                h: 4.0,
+            }],
+            #[cfg(target_os = "macos")]
+            image: None,
+        };
+        assert_eq!(
+            format!("{f:?}"),
+            "CapturedFrame { seq: 3, status: Complete, delivery_ns: Some(5), dirty_rects: 1, .. }"
+        );
+    }
+
     use super::*;
 
     fn cfg(width: u32, height: u32) -> CaptureConfig {

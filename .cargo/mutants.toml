@@ -8,6 +8,7 @@ examine_globs = [
     "crates/remora-testkit/src/policy.rs",
     # remora-proto validators (phase3-criteria §7): every parser of untrusted bytes.
     "crates/remora-proto/src/code.rs",
+    "crates/remora-proto/src/video.rs",
     "crates/remora-proto/src/crc32.rs",
     "crates/remora-proto/src/datagram.rs",
     "crates/remora-proto/src/frame.rs",
@@ -22,10 +23,15 @@ examine_globs = [
     # exporter / close codes, and the A04 timing floor. TLS setup and the
     # viewer driver are plumbing whose failures the session layer catches.
     "crates/remora-net/src/host.rs",
+    # The only media send path (phase4-criteria M2).
+    "crates/remora-net/src/media.rs",
     "crates/remora-net/src/wire.rs",
     "crates/remora-net/src/lib.rs",
+    # Checks on every H.264 frame before the decoder (phase4-criteria M7).
+    "crates/remora-codec/src/h264.rs",
     # Device key file: owner-only creation and refusal rules are a control.
     "crates/remora-app/src/keystore.rs",
+    "crates/remora-app/src/prompts.rs",
 ]
 
 # Test-only modules inside src/ (they ARE the tests; mutating them is noise).
@@ -42,4 +48,18 @@ exclude_re = [
     # EQUIVALENT: in ReplayWindow::shift, `hi = w << bits` and
     # `lo = w' >> (64 - bits)` never share a set bit, so `|` and `^` agree.
     'replace \| with \^ in ReplayWindow::shift',
+    # EQUIVALENT: in packetize, `key | last` combines FLAG_KEYFRAME (bit 0) and
+    # FLAG_LAST (bit 1) - different bits, so `|` and `^` give the same flags.
+    'replace \| with \^ in packetize',
+    # EQUIVALENT: in Reassembler::abandon_older, open frame IDs are unique and
+    # the completed frame already left `open`, so no open ID equals
+    # `completed`: `<` == `<=`. It is that function's only comparison, so
+    # this pattern cannot hide any other mutant.
+    'replace < with <= in Reassembler::abandon_older',
+    # EQUIVALENT: in MediaIn::datagram, `key_id > newest` vs `>=`: when equal,
+    # the loop that follows only retires keys below key_id that are not yet
+    # retiring, and those were all retired when key_id first opened a packet
+    # (key ids are announced strictly increasing). It is that function's
+    # only `>`, so this pattern cannot hide any other mutant.
+    'replace > with >= in MediaIn::datagram',
 ]

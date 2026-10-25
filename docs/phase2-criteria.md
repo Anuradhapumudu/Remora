@@ -301,11 +301,24 @@ render**. If the full pipeline exceeds 20 ms, work stops and is reported; the
   Screen Recording permission while development continues; **revisit at the end
   of Phase 4.** Until then RemoraDev (`io.github.anuradhapumudu.Remora.dev`) can
   record the screen, and Terminal still cannot. When cleaning up:
-  - [ ] `tccutil reset ScreenCapture io.github.anuradhapumudu.Remora.dev` (dev app)
-  - [ ] `tccutil reset ScreenCapture io.github.anuradhapumudu.Remora` (release app, if it was ever granted)
-  - [ ] `scripts/macos/dev-identity.sh remove` (deletes the dev certificate **and** its private key),
+  **Done 2026-10-25 (roadmap D-9, closed; evidence there). Re-run at the end of
+  every phase that recreates the identity (roadmap D-36).**
+  - [x] `tccutil reset ScreenCapture io.github.anuradhapumudu.Remora.dev` (dev app)
+  - [x] `tccutil reset ScreenCapture io.github.anuradhapumudu.Remora` (release app) —
+        **only if Remora.app is installed** (`mdfind "kMDItemCFBundleIdentifier == 'io.github.anuradhapumudu.Remora'"`
+        prints a path). Without it, `tccutil` exits 64 with `No such bundle identifier …
+        (OSStatus error -10814)` = kLSApplicationNotFoundErr: no app with that ID is
+        installed, so there is nothing to reset — not a failure. What matters is the
+        check below.
+  - [x] `scripts/macos/dev-identity.sh remove` (deletes the dev certificate **and** its private key),
         then `scripts/macos/dev-identity.sh status` shows "not present"
-  - [ ] Confirm **Terminal** is not in System Settings → Privacy & Security →
-        Screen & System Audio Recording (it was never granted; verify it stayed that way)
+  - [x] No Remora grant left: the system privacy database
+        (`/Library/Application Support/com.apple.TCC/TCC.db`, read-only; needs Full Disk
+        Access) has no Remora rows, and System Settings → Privacy & Security →
+        Screen & System Audio Recording lists neither RemoraDev nor Remora. The per-user
+        database (`~/Library/Application Support/com.apple.TCC/TCC.db`) is not present
+        on macOS 27.0.1.
+  - [x] Confirm **Terminal** is not in Screen & System Audio Recording (it was never
+        granted; the system database has no Terminal Screen Recording row, 2026-10-24)
 - [x] Known gaps carried into docs/roadmap.md ("Known gaps before v0.1")
 - [ ] Phase 2 report: commands, numbers vs criteria, limitations

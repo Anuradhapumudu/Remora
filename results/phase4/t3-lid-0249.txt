@@ -1,0 +1,5 @@
+Phase 4 t3-lid, 2026-10-23T02:49:56, commit 52873db
+T3 lid: close the lid when asked, wait about 30 s, open it
+display on (power log, 1 s resolution): 02:52:07; capture resumed 02:52:08.704
+viewer video: 219 frames decoded, 0 refused, 0 waiting for a keyframe, 0 failed, 0 dropped
+==> T3 lid: resumed 1.7 s after the display came on (limit 2.0 s, +1 s log resolution), keyframe first: True, same session: yes -> PASS

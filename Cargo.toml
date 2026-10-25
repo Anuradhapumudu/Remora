@@ -1,6 +1,8 @@
 [workspace]
 resolver = "3"
 members = ["crates/*", "spikes/*"]
+# Throwaway spikes with heavy dependencies keep their own workspace and lockfile.
+exclude = ["spikes/slint-wgpu"]
 
 [workspace.package]
 version = "0.0.1"
@@ -79,8 +81,12 @@ windows = "0.62.2"
 x11rb = "0.14.0"
 openh264 = "0.9.8"
 
-# UI / rendering
-wgpu = "30.0.1"
+# UI / rendering — the Phase 4 video window (phase4-criteria R1, R5):
+# wgpu with the Metal backend only, winit with no Linux backends (the
+# viewer window is macOS-only until Phase 6.5).
+wgpu = { version = "30.0.1", default-features = false, features = ["std", "wgsl", "metal"] }
+winit = { version = "0.30.13", default-features = false, features = ["rwh_06"] }
+pollster = "1.0.1"
 slint = { version = "1.18.1", features = ["unstable-wgpu-30"] }
 
 # server
