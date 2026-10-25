@@ -1,8 +1,7 @@
 # Phase 4.5 acceptance criteria — small GUI (host Accept/Deny, viewer connect form)
 
-Status: **DRAFT 2026-10-25, waiting for the owner's approval (roadmap gate
-G-3).** No code, and no spike, until the owner approves; the decisions the
-owner has to make are collected in §1.
+Status: **APPROVED by the owner 2026-10-25 (gate G-3 MET), with the
+answers and additions in §1.** Drafted the same day (`9277f8c`).
 
 Same gate rule as Phases 2–4:
 
@@ -58,18 +57,19 @@ Anything not checked there is marked **unverified**.
 | UI drawn **over** the video (one window, two layers: D-17 option A) | Phase 7 design |
 | Drawn stats overlay (stats stay in the title + stderr, R3) | Phase 7 |
 | Quality modes, Advanced panel, settings screens | Phase 7 |
-| Choosing another display at the host (D-30) | proposed: Phase 7 (§1 Q1) |
+| Choosing another display at the host (D-30) | Phase 7 (§1 Q1) |
 | Trusted-device management UI, "remember this device" button (pinning stays the CLI `--pin`) | Phase 8 / v0.1 |
 | Device-ID connect, signaling | Phase 8 |
 | One combined Remora app with a start screen | Phase 7 |
-| OS notification on connect (threat-model §7.5) | proposed: Phase 7 (§1 Q10) |
+| OS notification on connect (threat-model §7.5) | Phase 7 (roadmap D-40) |
 | Windows/Linux GUI | Phase 6.5 / 9 (the GUI code stays OS-neutral above the trait) |
 | Zero-copy (D-18), what holds the 94 MB (D-34) | their own rows — unless §3 pulls D-34 in |
 | Session log, themes, localisation, onboarding | later |
 
-## 1. Decisions the owner needs to make
+## 1. Decisions (answered by the owner 2026-10-25)
 
-Recommendation first. Nothing below is built until the owner answers.
+The table is the draft as sent; the owner's answers follow it and win
+wherever they differ.
 
 | # | Question | Recommendation | Why |
 |---|---|---|---|
@@ -84,8 +84,25 @@ Recommendation first. Nothing below is built until the owner answers.
 | **Q9** | How the GUI launches: `RemoraDev.app` becomes a normal app (Dock icon, can take focus) running the host GUI; the viewer GUI runs from a second unsigned dev bundle (it needs no capture permission). **PR #6 (Phase 4) is merged with a merge commit before 4.5 code starts**; the criteria live on branch `phase-4.5` | Yes | The host dialog must be able to come to the front, which `LSUIElement` forbids today (`dev-app.sh`). Merging first keeps 4.5's history separate |
 | **Q10** | While a session is `Active`, the host window **hides the code and password** ("hidden while someone is connected — Show"). The OS notification on connect moves to Phase 7 as a new row | Yes | The host's screen is being streamed: a visible fresh code and password would reach the connected viewer (§4 H10) |
 
-Possible later decision (only if S1 finds it): **an `unsafe` AppKit call for
-the indicator** — see §5 I3.
+**Owner's answers (2026-10-25):**
+
+| # | Answer |
+|---|---|
+| Q1 | Yes. D-30 moves to Phase 7 |
+| Q2 | Yes. If S1 shows C′ does not work: stop and bring the options |
+| Q3 | Yes, < 150 MB with the GUI open as it really is in a session. If it does not fit with 5 MB to spare: D-34's Instruments investigation comes into 4.5, **time-boxed like S1** (3 h). If it still does not fit: stop and bring the options, **including changing the limit with a reason — that decision stays with the owner** |
+| Q4 | Yes, plus: **a click counts only if both the press and the release happen after the 1 s delay** (H4). Known limitation: keyboard-only users (Full Keyboard Access without VoiceOver) cannot accept (§11b) |
+| Q5 | Yes, and: **refuse before the handshake**, so a refused attempt never gets a password guess; **log each refused attempt on the host** (H9) |
+| Q6 | Yes |
+| Q7 | **Per phase**, as the D-36 row says ("per session" was a wording mistake). Check: if straightforward on macOS 27, make `codesign` **ask for confirmation** when it uses the dev key instead of having silent access, so nothing can sign as RemoraDev unnoticed between sessions; if not straightforward, skip it and note why (§11, D-36) |
+| Q8 | Yes |
+| Q9 | Yes to all three; PR #6 merged with a **merge commit**, not squash, so the hashes cited in the Phase 4 evidence stay in main's history |
+| Q10 | Yes to both (code and password hidden while active; OS notification → Phase 7, roadmap D-40) |
+
+The limitations stated in the draft are recorded in §11b. **The `unsafe`
+AppKit call for the indicator** (§5 I3), if S1 shows it is needed: the owner
+gets the exact code, why it is needed and how it is isolated, and decides
+then.
 
 ## 2. D-17 first: how Slint and our video window share the app
 
@@ -192,12 +209,12 @@ a planted failure unless marked manual.
 | **H1** | Shows the **safety code** (6 digits, large, the `123 456` format), the viewer's **device ID**, its **trust status** (pinned / new) and its **name**, labelled "name chosen by the other computer, not checked" | GUI test reads the dialog's text; plant: dialog bound to another session's code → caught |
 | **H2** | Accept is **bound to this dialog's session ID and safety code** (A22 at the GUI level). With two dialogs open, Accept on B activates only B; a dialog whose session has ended (viewer left, timed out) closes and **can never accept** anything | Two pending sessions, click B; plant "accept the newest" → caught. Viewer disconnects while the dialog is open → dialog gone, session never `Active` |
 | **H3** | **Deny is the default.** Return, Space and Escape deny; no key accepts (§1 Q4) | Send every key event to the dialog; plant: Return bound to Accept → caught |
-| **H4** | **Accept is armed after 1 s**, again after any change (a second dialog appearing on top restarts it) | Click at 0.5 s → nothing; plant: no delay → caught |
+| **H4** | **Accept is armed after 1 s**, again after any change (a second dialog appearing on top restarts it). **A click counts only if both the press and the release happen after the delay** (owner, Q4): a press that started before the delay ran out can never accept, even if released later | Click at 0.5 s → nothing; press at 0.9 s + release at 1.2 s → nothing; plants: no delay, and checking only the release → both caught |
 | **H5** | **No answer in 60 s means deny.** The dialog shows the time left; at 0 it closes and the session ends `Rejected` (`PROMPT_TIMEOUT_MS` = 60 000, `remora-session/src/lib.rs:56`; A24) — the GUI adds no timer of its own that could disagree | Session-level clock test as A24 + GUI test that the dialog closes; plant: GUI ignores the timeout → caught |
 | **H6** | **The viewer's name cannot fake the dialog:** control characters, bidi overrides (U+202A–U+202E, U+2066–U+2069) and zero-width characters are shown as visible escapes; length is already ≤ 64 bytes (`DEVICE_NAME_MAX`). The name never appears in the buttons or the title | Names with `\n`, RLO + "Accept", zero-width joiners; plant: raw name → caught |
 | **H7** | The dialog **comes to the front** when a prompt arrives (the app activates), so it is not hidden behind other windows; it cannot be minimised while waiting | Manual (M2) |
 | **H8** | After **Deny or timeout**, the host shows the new code and password with the F-UX3 note; the viewer says "The host declined. Ask for a new code to try again." (D-21, protocol.md §handshake outcomes) | e2e GUI test both sides; plant: old code still shown → caught |
-| **H9** | **One active session** (§1 Q5): while a session is `Active`, a new connection gets **no dialog**, is refused as "host busy", and the one-time password is **not** consumed (INV15 untouched). How the refusal travels on the wire is checked against protocol.md and the limiter before implementing (not yet read) | e2e: second viewer during a session; plant: dialog shown → caught |
+| **H9** | **One active session** (§1 Q5): while a session is `Active`, a new connection is refused as "host busy" **before the handshake** (owner): it gets no dialog and never reaches the password check, so it is **not a password guess**, does not count toward INV12 and does not consume the one-time password (INV15 untouched). **Each refused attempt is logged on the host** (time, source address — no secrets) and shown in the host window, so repeated tries are visible. How the refusal travels on the wire is checked against protocol.md and the limiter before implementing (not yet read) | e2e: second viewer during a session → refused, no dialog, the password still works afterwards, one log line per attempt; plants: dialog shown, handshake run before refusing, no log line → each caught |
 | **H10** | While a session is `Active`, the host window **hides the code and password** (the screen is streamed to the viewer); "Show" reveals them | GUI test; plant: shown while active → caught |
 | **H11** | INV1 unchanged: nothing reaches the renderer before Accept (A20 stays; the GUI cannot call anything that skips the state machine — it sends the same `approve(session, sas)` command the CLI sends) | Existing A20–A24 + a check that the GUI module only uses the session API |
 | **H12** | The dialog and every host window: **no screen content, password or key in logs** (INV8, INV9); the password is shown, never logged | N-style log scan over a GUI session (as phase4 N1) |
@@ -314,9 +331,26 @@ still over, stop and report — it is a regression to explain even though the
 | **D-21** (BLOCKER) denied → fresh code | H8, V5 + F-UX3 note in the GUI | e2e GUI test |
 | **D-33** (GUI part of D-29) countdown | V6 (viewer) + host session window shows the same | GUI test + manual M5 |
 | **D-35** (nice-to-have) covered window | O1, O2 | test + `o2-*` |
-| **D-36** (BLOCKER) dev identity | recreated at the start of 4.5's first capture step, removed at its end (or per work session, §1 Q7), with the D-9 checks | as D-9 |
+| **D-36** (BLOCKER) dev identity | recreated at the start of 4.5's first capture step, removed at the **end of the phase** (§1 Q7), with the D-9 checks. At the recreate, the Q7 check: can `codesign` be made to ask for confirmation instead of the silent access `dev-identity.sh` grants today (`security import … -T /usr/bin/codesign`)? Done if straightforward on macOS 27, otherwise skipped with the reason | as D-9 |
 | **D-26** (the phase itself) | this document's rows pass | the phase report |
-| D-30 | not in 4.5 → Phase 7 (§1 Q1) | row moved |
+| D-30 | not in 4.5 → Phase 7 (§1 Q1) | row moved 2026-10-25 |
+
+## 11b. Known limitations (recorded with the owner's approval, 2026-10-25)
+
+* **The password stays in Slint's memory.** Slint keeps its own copy of the
+  typed text in its own string type, which does not zeroize, and the
+  accessibility tree may hold it too (V2). Our copy is zeroized; Slint's is
+  not, until the process exits.
+* **Apps with Accessibility permission can press Accept** through the
+  accessibility API. Such an app can already control the whole Mac; it is
+  outside the threat model's attacker list (§4).
+* **The indicator over a full-screen app on another Space is unverified**
+  (I3): winit 0.30.13 has no "all Spaces" setting. If S1 shows it is hidden
+  there, the AppKit call needs `unsafe` and comes to the owner as exact code
+  (§1); until then this is a limitation.
+* **Keyboard-only users cannot accept** (Q4): Accept is not in the keyboard
+  focus chain, so Full Keyboard Access without VoiceOver cannot reach it.
+  Deny stays reachable by keyboard.
 
 ## 12. Housekeeping (owner, 2026-10-25)
 
@@ -328,12 +362,17 @@ still over, stop and report — it is a regression to explain even though the
 
 ## 13. Build order
 
-1. Owner approves this document (gate G-3). Merge PR #6 (§1 Q9).
+1. Owner approves this document (gate G-3: MET 2026-10-25). Merge PR #6
+   with a merge commit once CI on its last commit is green (§1 Q9).
 2. On/after 2026-10-27: D-37 (tokio line) first.
-3. D-36 recreate (if per phase) — S1 needs no capture, so it can come first.
+3. D-36 recreate (per phase) when the first step needs capture — S1 needs
+   none, so it comes first. The recreate needs the owner at the Mac (the
+   Screen Recording grant): the owner is told before.
 4. **Spike S1** (§3) → report to the owner: memory per configuration, C′,
    testing backend, `Occluded`, always-on-top. **Stop for the owner's answer
-   if anything fails** (P5 fit, C′, D-4 automation).
+   if anything fails** (P5 fit, C′, D-4 automation). If P5 does not fit:
+   D-34's Instruments investigation, time-boxed (3 h), then measure again;
+   still no fit → the owner decides (§1 Q3).
 5. Decision module (no Slint) test-first: H2–H6, H9, H10, I1, I2, V4 logic,
    plants, mutants.
 6. Host GUI (dialog, main window, session window), then viewer GUI (form,
@@ -349,4 +388,6 @@ sides from Finder, no terminal.
 
 ## 14. Changes to criteria
 
-None yet.
+| Date | Change | Owner's words / reason |
+|---|---|---|
+| 2026-10-25 | Approved with the answers in §1: H4 press **and** release after the delay; H9 refuse before the handshake and log every refused attempt; Q3's time-boxed D-34 step, the limit decision staying with the owner; D-36 per phase plus the `codesign` confirmation check; §11b known limitations | "G-3: approved with these answers. Update the criteria and push." |
