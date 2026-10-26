@@ -1,0 +1,13 @@
+P5 re-check, 2026-10-26T16:17:21, commit 9b054a4
+viewer memory, synthetic picture 1920 wide, window in front, sampled every 10 s
+machine state (start): thermal state nominal; Now drawing from 'Battery Power'
+    min  footprint  IOS virt  IOS res  IOS dirty   counted  (MB)
+   0.18      143.0      22.4     16.2       16.2     149.2
+   0.36      143.0      22.4     16.2       16.2     149.2
+   0.54      144.0      22.4     16.2       16.2     150.2
+video: 1866 frames decoded, 0 refused, 2 waiting for a keyframe, 0 failed, 76 dropped
+drawing check: 0 of 0 stats lines after minute 1 drew frames
+machine state (end): thermal state nominal; Now drawing from 'Battery Power'
+==> footprint only (as P5 counted): peak 144.0 MB (limit < 150.0), growth min 1 -> end +nan MB, slope +0.000 MB/min -> under the limit
+==> footprint + IOSurfaces not in it: peak 150.2 MB (limit < 150.0), growth min 1 -> end +nan MB, slope +0.000 MB/min -> OVER the limit
+INVALID (display turned off, not on AC power, or the window did not draw)
