@@ -121,6 +121,16 @@ by hand without noticing: `arbitrary` 1.5.0 → **1.4.2** (fuzz only),
 build-time / proc-macro crates). All locked to the newest release that was
 ≥ 14 days old on 2026-10-18.
 
+## Spike lockfiles (outside the checks above)
+
+Throwaway spikes keep their own workspace and lockfile (root `Cargo.toml`
+`exclude`). `cargo deny`, `cargo audit` and the crate-age check read only the
+main workspace, so nothing of ours checks these lockfiles; Dependabot does.
+
+| Date | Spike | Change | Why |
+|---|---|---|---|
+| 2026-10-26 | `spikes/slint-wgpu` | tokio 1.54.0 → **1.53.3** (`cargo update -p tokio --precise 1.53.3`; only tokio's entry changed; `cargo build --locked --release` passes) | Dependabot alert #1, GHSA-5wjr-9356-4wc8 / CVE-2026-115567 (race condition in `tokio::time::Interval`), affects 1.54.0 only, patched in 1.54.1. 1.53.3 is the version the main workspace already locks and checks, so the 14-day rule is not touched. `cargo tree -i tokio --target all` shows tokio comes only through `wasm-bindgen-futures` (wgpu's WebAssembly path) and is not built for macOS (`cargo tree -i tokio` without `--target all`: nothing). Removed rather than dismissed (owner, 2026-10-26). The spike itself goes at the end of Phase 4.5 (roadmap D-41) |
+
 ## Known duplicate versions (accepted)
 
 From a scratch resolve of the network + crypto set:
