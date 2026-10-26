@@ -1,0 +1,105 @@
+== s0 22:01:12
+  machine state (start): thermal state nominal; Now drawing from 'AC Power'
+  t=   5s footprint   153.0 MB  graphics  101.2 MB
+  t=  15s footprint   150.0 MB  graphics  101.2 MB
+  t=  25s footprint   150.0 MB  graphics  101.2 MB
+  t=  35s footprint   150.0 MB  graphics  101.2 MB
+  t=  45s footprint   150.0 MB  graphics  101.2 MB
+  t=  55s footprint   150.0 MB  graphics  101.2 MB
+  t=  65s footprint   150.0 MB  graphics  101.2 MB
+  t=  75s footprint   150.0 MB  graphics  101.2 MB
+  t=  85s footprint   150.0 MB  graphics  101.2 MB
+  t=  95s footprint   150.0 MB  graphics  101.2 MB
+  t= 105s footprint   150.0 MB  graphics  101.2 MB
+  t= 115s footprint   150.0 MB  graphics  101.2 MB
+  t= 125s footprint   150.0 MB  graphics  101.2 MB
+  t= 135s footprint   150.0 MB  graphics  101.2 MB
+  t= 145s footprint   150.0 MB  graphics  101.2 MB
+  t= 155s footprint   150.0 MB  graphics  101.2 MB
+  t= 165s footprint   150.0 MB  graphics  101.2 MB
+  t= 175s footprint   150.0 MB  graphics  101.2 MB
+  video window: present mode Immediate, format Bgra8Unorm
+  [    0.0 s] video window Occluded(false)
+  RESULT s0: draws 10795 in 180.0 s (60.0 fps); interval p50 16.66 p95 19.03 ms; handoff p50 0.070 p95 0.082 ms; no drawable 2; skipped while occluded 0; occluded events [(0.046704708, false)]
+  machine state (end): thermal state nominal; Now drawing from 'AC Power'
+VALIDITY display stayed on: yes; on AC power: yes
+SUMMARY s0 --seconds 180: peak 153.0 MB, after 60 s min 150.0 max 150.0 MB, graphics peak 101.2 MB, samples 18
+== s1 22:04:30
+  machine state (start): thermal state nominal; Now drawing from 'AC Power'
+  t=   5s footprint   190.0 MB  graphics  122.0 MB
+  t=  15s footprint   185.0 MB  graphics  122.0 MB
+  t=  25s footprint   186.0 MB  graphics  122.0 MB
+  t=  35s footprint   186.0 MB  graphics  122.6 MB
+  t=  45s footprint   186.0 MB  graphics  122.0 MB
+  t=  55s footprint   186.0 MB  graphics  122.0 MB
+  t=  65s footprint   186.0 MB  graphics  122.0 MB
+  t=  75s footprint   186.0 MB  graphics  122.0 MB
+  t=  85s footprint   186.0 MB  graphics  122.0 MB
+  t=  95s footprint   188.0 MB  graphics  125.0 MB
+  t= 105s footprint   189.0 MB  graphics  122.0 MB
+  t= 115s footprint   189.0 MB  graphics  122.0 MB
+  t= 125s footprint   189.0 MB  graphics  122.7 MB
+  t= 135s footprint   186.0 MB  graphics  122.0 MB
+  t= 145s footprint   186.0 MB  graphics  122.0 MB
+  t= 155s footprint   188.0 MB  graphics  125.0 MB
+  t= 165s footprint   186.0 MB  graphics  122.0 MB
+  t= 175s footprint   186.0 MB  graphics  122.0 MB
+  video window: present mode Immediate, format Bgra8Unorm
+  [    0.0 s] video window Occluded(false)
+  RESULT s1: draws 10790 in 179.9 s (60.0 fps); interval p50 16.66 p95 21.12 ms; handoff p50 0.063 p95 0.086 ms; no drawable 4; skipped while occluded 0; occluded events [(0.030497292, false)]
+  machine state (end): thermal state nominal; Now drawing from 'AC Power'
+VALIDITY display stayed on: yes; on AC power: yes
+SUMMARY s1 --seconds 180: peak 190.0 MB, after 60 s min 186.0 max 189.0 MB, graphics peak 125.0 MB, samples 18
+== s2 22:07:48
+  machine state (start): thermal state nominal; Now drawing from 'AC Power'
+  t=   5s footprint   185.0 MB  graphics  120.4 MB
+  t=  15s footprint   185.0 MB  graphics  121.0 MB
+  t=  25s footprint   185.0 MB  graphics  121.0 MB
+  t=  35s footprint   185.0 MB  graphics  121.0 MB
+  t=  45s footprint   185.0 MB  graphics  121.0 MB
+  t=  55s footprint   185.0 MB  graphics  120.4 MB
+  t=  65s footprint   185.0 MB  graphics  121.0 MB
+  t=  75s footprint   185.0 MB  graphics  121.0 MB
+  t=  85s footprint   185.0 MB  graphics  121.0 MB
+  t=  95s footprint   185.0 MB  graphics  121.0 MB
+  t= 105s footprint   185.0 MB  graphics  121.0 MB
+  t= 115s footprint   185.0 MB  graphics  121.0 MB
+  t= 125s footprint   187.0 MB  graphics  123.0 MB
+  t= 135s footprint   185.0 MB  graphics  120.4 MB
+  t= 145s footprint   185.0 MB  graphics  121.0 MB
+  t= 155s footprint   189.0 MB  graphics  124.0 MB
+  t= 165s footprint   185.0 MB  graphics  121.0 MB
+  t= 175s footprint   185.0 MB  graphics  121.0 MB
+  video window: present mode Immediate, format Bgra8Unorm
+  [    0.0 s] video window Occluded(false)
+  RESULT s2: draws 10792 in 179.9 s (60.0 fps); interval p50 16.66 p95 22.61 ms; handoff p50 0.062 p95 0.086 ms; no drawable 4; skipped while occluded 0; occluded events [(0.030021791, false)]
+  machine state (end): thermal state nominal; Now drawing from 'AC Power'
+VALIDITY display stayed on: yes; on AC power: yes
+SUMMARY s2 --seconds 180: peak 189.0 MB, after 60 s min 185.0 max 189.0 MB, graphics peak 124.0 MB, samples 18
+== s3 22:11:06
+  machine state (start): thermal state nominal; Now drawing from 'AC Power'
+  t=   5s footprint   168.0 MB  graphics  101.2 MB
+  t=  15s footprint   165.0 MB  graphics  101.2 MB
+  t=  25s footprint   165.0 MB  graphics  101.2 MB
+  t=  35s footprint   170.0 MB  graphics  104.2 MB
+  t=  45s footprint   167.0 MB  graphics  101.2 MB
+  t=  55s footprint   167.0 MB  graphics  101.2 MB
+  t=  65s footprint   167.0 MB  graphics  101.2 MB
+  t=  75s footprint   167.0 MB  graphics  101.2 MB
+  t=  85s footprint   167.0 MB  graphics  101.2 MB
+  t=  95s footprint   167.0 MB  graphics  101.2 MB
+  t= 105s footprint   167.0 MB  graphics  101.2 MB
+  t= 115s footprint   167.0 MB  graphics  101.2 MB
+  t= 125s footprint   167.0 MB  graphics  101.2 MB
+  t= 135s footprint   167.0 MB  graphics  101.2 MB
+  t= 145s footprint   167.0 MB  graphics  101.2 MB
+  t= 155s footprint   167.0 MB  graphics  101.2 MB
+  t= 165s footprint   167.0 MB  graphics  101.2 MB
+  t= 175s footprint   167.0 MB  graphics  101.2 MB
+  video window: present mode Immediate, format Bgra8Unorm
+  [    0.0 s] video window Occluded(false)
+  RESULT s3: draws 10791 in 179.9 s (60.0 fps); interval p50 16.67 p95 18.93 ms; handoff p50 0.061 p95 0.085 ms; no drawable 5; skipped while occluded 0; occluded events [(0.041672041, false)]
+  machine state (end): thermal state nominal; Now drawing from 'AC Power'
+VALIDITY display stayed on: yes; on AC power: yes
+SUMMARY s3 --seconds 180: peak 170.0 MB, after 60 s min 167.0 max 167.0 MB, graphics peak 104.2 MB, samples 18
+ALL RUNS VALID
