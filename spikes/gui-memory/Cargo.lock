@@ -2009,6 +2009,7 @@ name = "gui-memory-spike"
 version = "0.0.0"
 dependencies = [
  "i-slint-backend-testing",
+ "objc2-foundation 0.3.2",
  "pollster",
  "remora-codec",
  "remora-viewer",

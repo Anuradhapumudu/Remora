@@ -19,6 +19,8 @@ slint = { version = "=1.18.1", default-features = false, features = ["std", "com
 wgpu = { version = "=30.0.1", default-features = false, features = ["std", "wgsl", "metal"] }
 winit = { version = "=0.30.13", default-features = false, features = ["rwh_06"] }
 pollster = "1.0.1"
+# `thermal` mode: ProcessInfo.thermalState, as bench-capture (remora-host sysmon.rs).
+objc2-foundation = { version = "=0.3.2", default-features = false, features = ["std", "NSProcessInfo"] }
 
 [dev-dependencies]
 i-slint-backend-testing = "=1.18.1"

@@ -4,7 +4,7 @@
 
     python3 -I measure.py s0 [--seconds 180] [--close-ui-after 30]
 """
-import re, subprocess, sys, time
+import datetime, re, subprocess, sys, time
 
 BIN = "target/release/gui-memory-spike"
 
@@ -26,10 +26,32 @@ def sample(pid):
     return total, gfx
 
 
+def machine(when):
+    """Thermal state (ProcessInfo, via the spike's `thermal` mode, so the
+    measured process is untouched) and power source, as bench-capture prints."""
+    t = subprocess.run([BIN, "thermal"], capture_output=True, text=True).stdout.strip()
+    batt = subprocess.run(["pmset", "-g", "batt"], capture_output=True, text=True).stdout.splitlines()
+    power = batt[0].strip() if batt else "?"
+    print(f"  machine state ({when}): thermal state {t}; {power}", flush=True)
+    return power
+
+
+def display_events(since):
+    """'Display is turned off/on' lines in the power log since `since`. macOS
+    does not report a window as occluded while the display is off (seen
+    2026-10-26: display off 15:46:40-15:48:46, Occluded never fired), so a
+    run is only valid if the display stayed on the whole time."""
+    out = subprocess.run(["pmset", "-g", "log"], capture_output=True, text=True).stdout
+    return [l.strip() for l in out.splitlines()
+            if "Display is turned" in l and l[:19] >= since]
+
+
 def main():
     args = sys.argv[1:]
     mode = args[0]
     seconds = float(args[args.index("--seconds") + 1]) if "--seconds" in args else 180.0
+    since = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    power_start = machine("start")
     p = subprocess.Popen([BIN, *args], stderr=subprocess.PIPE, text=True)
     start = time.monotonic()
     rows = []
@@ -47,6 +69,12 @@ def main():
     for line in err.splitlines():
         if line.startswith(("RESULT", "video window:", "Slint window", "[")):
             print("  " + line)
+    power_end = machine("end")
+    disp = display_events(since)
+    for l in disp:
+        print("  power log: " + " ".join(l.split()))
+    on_ac = "AC Power" in power_start and "AC Power" in power_end
+    print(f"VALIDITY display stayed on: {'yes' if not disp else 'NO'}; on AC power: {'yes' if on_ac else 'NO'}")
     tot = [r[1] for r in rows]
     late = [r[1] for r in rows if r[0] >= 60] or tot
     print(f"SUMMARY {' '.join(args)}: peak {max(tot):.1f} MB, after 60 s min {min(late):.1f} "

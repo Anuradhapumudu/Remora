@@ -7,6 +7,8 @@
 //!   s1  + Slint, femtovg on wgpu, Slint's OWN wgpu device
 //!   s2  + Slint, femtovg on wgpu, sharing OUR wgpu device (Manual)
 //!   s3  + Slint, software renderer
+//!   thermal  print ProcessInfo.thermalState and exit (measure.py calls it
+//!            before and after each run, outside the measured process)
 //!
 //! s1–s3 run option C′: Slint owns the event loop, our window is created
 //! with `invoke_from_active_event_loop` and its events arrive through a
@@ -321,6 +323,18 @@ impl slint::winit_030::CustomApplicationHandler for Hook {
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let mode_name = args.get(1).cloned().unwrap_or_else(|| "s0".into());
+    if mode_name == "thermal" {
+        use objc2_foundation::{NSProcessInfo, NSProcessInfoThermalState as T};
+        let t = match NSProcessInfo::processInfo().thermalState() {
+            T::Nominal => "nominal",
+            T::Fair => "fair",
+            T::Serious => "serious",
+            T::Critical => "critical",
+            _ => "unknown",
+        };
+        println!("{t}");
+        return;
+    }
     let mode = match mode_name.as_str() {
         "s0" => Mode::S0,
         "s1" => Mode::S1,
