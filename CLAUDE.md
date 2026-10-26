@@ -24,7 +24,13 @@ cargo deny check                                         # licenses, bans, sourc
 cargo audit                                              # RustSec advisories
 actionlint && zizmor .github/workflows                   # lint GitHub workflows
 scripts/macos/bundle.sh --help                           # build Remora.app + .dmg locally
+scripts/ci/pre-push.sh                                   # main-workspace checks; run before EVERY push
 ```
+
+**Before every push** run `scripts/ci/pre-push.sh` (fmt, clippy, tests, deny,
+audit, roadmap on the main workspace), even when only a spike or docs changed;
+a spike's own build is not enough (`fac428a` broke CI that way). Enable it as
+a git hook once per clone: `git config core.hooksPath scripts/githooks`.
 
 Toolchain is pinned in `rust-toolchain.toml` (rustup installs it automatically).
 Local tools: `brew install cargo-deny cargo-audit actionlint zizmor`;
