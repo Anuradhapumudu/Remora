@@ -1018,3 +1018,144 @@ RemoraDev.app, not Terminal). No Remora app holds any privacy grant.
 | D-36 | **New** 2026-10-25 — recreate the dev identity at the start of the next phase that needs screen capture, remove it at that phase's end (owner) |
 
 Gates: G-1 met (Phase 3), **G-2 met** 2026-10-23. Open gates: 0.
+
+## 14. Correction 2026-10-27: P5 counted footprint only (added after the accepted report; §13 is unchanged)
+
+**What was wrong.** §13 records P5 as PASS at 149 MB of 150. P5 measured
+`phys_footprint` only. Decoded pictures are IOSurfaces that VideoToolbox
+creates, and `footprint` does not count them. §11b step 5 (line 697,
+2026-10-21) required: "P5 (viewer memory, step 7) must count IOSurfaces the
+same way" as M7. That was never done.
+
+**Method, proven before measuring** (owner, 2026-10-26; plant program
+`spikes/gui-memory/src/bin/iosurface-plant.rs`, `d076640`, M4):
+
+| Planted allocation | footprint | vmmap IOSurface row |
+|---|---|---|
+| 95 MB of IOSurfaces our process creates | +95.1 MB | +95.0 MB, dirty = virtual |
+| 96 MB of pictures decoded by VideoToolbox | +0.4 MB | +96.2 MB, dirty = 0 |
+| 100 MiB heap | +100.2 MB | +0.0 MB |
+
+Simply adding the two would count our own IOSurfaces twice. The sum that
+counts each byte once is **footprint + (IOSurface virtual − IOSurface dirty)**.
+**Limit of the proof:** the formula was shown on fully dirty (A) and fully
+clean (C) IOSurfaces only. The viewer's real mix (22.2 MB virtual, 16.2 MB
+dirty) is **assumed** to behave the same way, partly dirty surfaces
+included; that is not shown.
+
+**Re-measured** (`scripts/macos/p5-recheck.py`;
+`results/phase4.5/p5-recheck-20261026-2144.txt`, `0cb67be`):
+- Same session shape as P5: loopback, window in front, 1920 wide, 10 min, every 10 s.
+- Conditions: mains power, display on, window drawing (534 of 539 s), thermal nominal at start and end.
+- Difference from P5: the host's synthetic picture instead of the screen. Screen capture needs the dev identity (D-36). The footprint-only numbers match P5's (144 vs 145 MB steady).
+
+| Measure | Steady | Peak | Limit | Result |
+|---|---|---|---|---|
+| footprint only (as §13) | 144 MB | 147 MB | < 150 | under |
+| footprint + decoded pictures (+6.0 MB) | **150.0 MB** | **≥ 153.0 MB** | < 150 | **FAIL** |
+
+**The 153 MB peak is a lower bound.** Reading vmmap paused the viewer every
+10 s: about 20 frames dropped and a keyframe lost at each sample, in step
+with the sampling (`results/phase4.5/logs/20261026-2144-p5-recheck-viewer.log`).
+A paused viewer holds fewer pictures in flight, never more, so the real peak
+may be higher. Growth +1.0 MB and slope +0.023 MB/min stay within P5's limits.
+
+**P5 reopens:** FAIL, at least 3 MB over at peak and no margin at steady
+state. The rest of the Phase 4 acceptance is not affected by this correction.
+**The 150 MB limit stays** until D-34's investigation reports; then the
+owner decides (owner, 2026-10-27).
+
+**Why the requirement never reached the runner** (git history):
+- The P5 table row (§4, "`phys_footprint` < 150 MB") was written 2026-10-19 (`438273a`) and never changed.
+- The IOSurface requirement arrived 2026-10-21 (`49e14e9`) as one sentence inside the M7 findings of step 5. The P5 row was not updated, and no roadmap row, criteria item or test was added.
+- The runner (`6636969`, 2026-10-22) implemented P5 from the table row, so it measured what the row said.
+- A requirement written only in prose, with no check that reads it, is the same failure as the process slips (roadmap).
+
+**D-34 comes into Phase 4.5 now** (owner, 2026-10-27, under §1 Q3 of the
+4.5 criteria: the condition is met, because no GUI can fit with 5 MB spare
+when the video path alone is at 150 MB).
+
+**Checks so this cannot recur:**
+
+a. **One memory function.** Every viewer-memory measurement (P5, S1, M7)
+   uses footprint + (IOSurface virtual − dirty), computed like this:
+   - `F(t)`: `footprint -p`, every 10 s.
+   - `U(t)`: IOSurface virtual − dirty from `vmmap --summary`, **once a
+     minute**. The frames vmmap drops are counted and reported with the run.
+   - Combined value at each 10 s sample: `C(t) = F(t) + U(last vmmap at or
+     before t)`, so each `U` is carried forward until the next vmmap.
+   - **Peak** = the largest `C(t)`. Growth and slope are computed from `C`,
+     as P5 does from `F`.
+   - Known gap: a spike in decoded pictures that starts and ends between two
+     vmmap readings is missed.
+
+   **Proposed better measure:** the viewer counts its own decoded pictures
+   in flight (count × bytes per picture) and prints it with the stats line
+   every second. Then `C(t) = F(t) + own count(t)` every 10 s, and nothing
+   outside pauses the viewer. vmmap runs **once per session** only to check
+   that the viewer's count agrees with vmmap's clean IOSurface size (within
+   one picture). That fits phase2-criteria §6a lesson 3 ("the instrument
+   must not change what it measures") better than sampling vmmap at all.
+
+b. **The plant test, split by where it can run.** CI's macOS runner is a
+   virtual machine. VideoToolbox decodes there, but **its decoded pictures
+   are not IOSurfaces** (§11b 2026-10-21: "IOSurfaces 0 → 0 MB … no picture
+   is an IOSurface: its VideoToolbox path is not the M4's"). So:
+   - **Plants A and B run in CI** (macOS job): the function must count A
+     once and B once.
+   - **Plant C is a manual check at the start of every measuring session**
+     on the M4. A session whose plant C fails is not run.
+
+c. **No requirement only in prose.** Every requirement in a criteria
+   document is a row in a requirements table that names the check enforcing
+   it: a test, a script step, a CI job, or "manual: <step>". A script runs in
+   CI and pre-push (`check-roadmap.py` style) and does two things:
+   1. **Fails** if a row names a check that does not exist.
+   2. **Warns** about requirements that never got a row, which is what
+      actually happened with line 697. It scans the prose of every criteria
+      document (not tables, not code) for *must, shall, never, always,
+      required, "to be checked"* in sentences that cite no row ID (H1, R3,
+      D-34, …), and prints each with its file and line.
+
+   (2) starts as a warning until we see how noisy it is (owner, 2026-10-27).
+   Applied to the Phase 4.5 criteria now (phase4.5-criteria §15). Phases 2–4 are closed; the
+   sweep lists what it found there, with the owner's decisions.
+
+### One-time sweep (owner, 2026-10-26): requirements only in prose, Phases 2–4
+
+**Time-boxed to 1 hour; about 50 minutes used.**
+
+**Method:**
+- Searched every non-table line of phase2-, phase3- and phase4-criteria
+  (about 2,000 lines) for *must, shall, required, needs to, should, never,
+  always, every, from now on, to be checked, follow-up, later phase*.
+- Read each hit in context and looked for the row, test or script that
+  carries it.
+- This was **not** a line-by-line read, so a requirement phrased without
+  those words can be missed.
+
+**Not fixed; each needs the owner's decision.**
+
+| # | Requirement (where) | Carried by a check? | What happened |
+|---|---|---|---|
+| W1 | P5 must count IOSurfaces (phase4 §11b step 5, line 697) | no | **This correction** |
+| W2 | Every benchmark run records machine state (thermal, power, Low Power Mode, load) at start and end (phase2 §6b, line 274) | only `bench-capture` (P8) | The Phase 4 runner's **P1, P5 and P6 recorded none** (0 lines in `results/phase4/p1-*.txt`, `p5-*.txt`). The owner had to ask for it again on 2026-10-26 |
+| W3 | Long tests keep the display awake (phase2 §6a lesson 4) | in the Phase 2 and Phase 4 runners (`caffeinate`), not as a rule for new instruments | **Recurred 2026-10-26:** S1's first runs had no caffeinate; the display slept for 2 min mid-run, and the occlusion check could not see it |
+| W4 | The instrument must not change what it measures (phase2 §6a lesson 3) | no | **Recurred 2026-10-26:** the P5 re-check's vmmap sampling paused the viewer every 10 s |
+| W5 | "unverified which [stateless reset or idle timeout]; to be checked in Phase 5" (phase4 §11c, line 617) | no roadmap row | Would be lost when Phase 5 starts |
+| W6 | OTP-rotation DoS: "Revisit in Phase 8" (phase3 §3.1a, line 131; threat-model §9 item 1b) | in threat-model's residual-risk list only, not in the roadmap's deferred list ("the one tracked list") | No row |
+| W7 | "D-34 … needs the dev identity anyway (D-36)" (phase4.5 §3) | an assertion, not a requirement | Likely wrong (phase4.5-criteria §3a, the D-34 time-box); corrected there |
+
+**Checked and found carried:**
+- phase4 §11b "first frame after resume is a keyframe": D-8's evidence.
+- phase4 line 309 "step 7 must measure decoded → drawn": done in step 7d.
+- phase2 line 195 "< 20 ms end-to-end": P1's threshold.
+- phase3 line 528 keychain before v0.1: roadmap D-5.
+
+**Owner's decisions (2026-10-27):**
+- **W1, W7:** covered by this correction.
+- **W2–W4:** one shared measuring helper for every runner, in its own
+  commit, not folded into the D-34 work. It covers machine state, display
+  awake, AC power, and no instrument that pauses the viewer.
+- **W5, W6:** roadmap rows now (D-44, D-45). The checks themselves wait for
+  Phase 5 and Phase 8.

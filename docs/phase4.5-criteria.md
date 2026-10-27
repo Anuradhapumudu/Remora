@@ -197,6 +197,81 @@ The host gets the same treatment in the final runs: host memory with the GUI
 is **reported** (no host memory gate exists today), and P6 (host CPU, static
 screen, < 2 %) is **re-gated** with the host GUI open (§9).
 
+## 3a. Correction 2026-10-27: the memory measure, the baseline, and D-34 (phase4-criteria §14)
+
+- **The measure** for P5, S1 and the final runs is **footprint + (IOSurface virtual − dirty)**, computed as in phase4-criteria §14 (a). Plant C runs first in every measuring session.
+- **The baseline** is no longer "149 MB" but **150.0 MB steady, peak ≥ 153 MB**. With the measure corrected, the video path alone fails P5.
+- **S1 numbers** (footprint; the stand-in decodes nothing, so nothing is missed). Added over S1-0:
+
+| Config | Added |
+|---|---|
+| Slint GPU renderer (own device, or ours) | +35–39 MB |
+| Slint software renderer | +17 MB |
+| Software renderer, form closed | about +7–10 MB, still held about 2 min after closing |
+
+**D-34 time-box** (Q3 condition met; owner, 2026-10-27).
+
+**Time-box: 3 hours of investigation** (as §13 step 4 already sets), plus
+the owner's measuring time.
+
+**Goal.** Say, with evidence, what holds the viewer's memory: the ~94 MB of
+GPU memory and the ~6 MB of decoded pictures. For each holder, test one
+change that could reduce it and measure the result. Candidates, none of them
+verified:
+- the window's drawable count;
+- wgpu's NV12 textures and staging buffers;
+- the decoder's picture pool;
+- D-18 zero-copy import.
+
+**What it needs from the owner:**
+
+1. **At the Mac for about 30 minutes**, in two or three hands-off runs of
+   10 minutes (same setup as today: charger, apps closed, pointer in the
+   middle).
+2. **Developer tools access:** Instruments (`xctrace` 27.1 is installed)
+   attaches to the viewer. On this Mac "Developer mode is currently
+   disabled" (`DevToolsSecurity -status`), so macOS will likely ask for an
+   administrator password at the first attach (unverified). That is the
+   owner's to enter. Changing `DevToolsSecurity` permanently is a security
+   setting and is not done without the owner's yes.
+3. **No D-36 (dev identity).** The viewer and the synthetic host need no
+   Screen Recording, and the P5 re-check ran without it. This corrects §3's
+   "it needs the dev identity anyway", which was asserted, not checked.
+
+**What lets the owner decide about the limit.** A table "holder → MB →
+change tried → MB after", and from it two numbers:
+- **(i)** the lowest viewer memory reached with changes that are safe to
+  keep;
+- **(ii)** (i) plus the GUI's cost (+17 MB software renderer, from S1).
+
+| Outcome | Decision |
+|---|---|
+| (ii) < 145 MB (5 MB spare) | the limit stands, and 4.5 builds |
+| (ii) ≥ 145 MB, or nothing could be explained in the time-box | the owner decides, with these numbers, on any change to the limit |
+
+The 145 MB bar stays (owner, 2026-10-27: "I want real headroom, not a
+just-fits pass").
+
+**Where the 150 MB limit came from, and what it protects.** It first appears
+as a target in `docs/quality.md` §1 ("Viewer memory < 150 MB"), design v1,
+2026-10-17 (`ede6e3d`). Phase 4's P5 took it over unchanged (`438273a`).
+**No reason was recorded:** no device budget, comparison or calculation is
+written anywhere in docs/ or the commit messages (searched 2026-10-27). So
+what it was meant to protect is not documented, only inferred:
+- It is a **resource-efficiency** target, the fifth of six priorities
+  (SECURITY > CORRECTNESS > LOW LATENCY > IMAGE CLARITY > RESOURCE
+  EFFICIENCY > FEATURES). A viewer should run next to the user's other
+  apps without becoming a burden.
+- The **security** side of memory, a hostile or leaking stream growing
+  memory without bound, is guarded separately: by P5's growth and slope
+  limits (unchanged, passing) and by M7 (bounded memory under a hostile
+  bitstream). The absolute level is not what protects against that.
+
+**Before deciding on the limit, the owner states its purpose** (for example a
+target Mac and how much memory the viewer may take on it). The D-34 numbers
+are then judged against that purpose, and the purpose is recorded in
+quality.md with the decision.
+
 ## 4. Host Accept/Deny dialog — who sees the screen
 
 The dialog is the control that decides who sees the owner's screen
@@ -399,3 +474,26 @@ visible, and the result is recorded with how it was checked.
 |---|---|---|
 | 2026-10-25 | Approved with the answers in §1: H4 press **and** release after the delay; H9 refuse before the handshake and log every refused attempt; Q3's time-boxed D-34 step, the limit decision staying with the owner; D-36 per phase plus the `codesign` confirmation check; §11b known limitations | "G-3: approved with these answers. Update the criteria and push." |
 | 2026-10-27 | I3: S1 result recorded (always-on-top is occluded over a full-screen app); Stage Manager becomes manual step **M7** on the real indicator. §12/§13: D-37 timed to the exact UTC expiry, D-42/D-43 added | Owner: "I'll do it later with the real indicator, not the spike windows … Make it a 4.5 check against the real session indicator (I1–I3)." and "(a) Yes. D-37 after 2026-10-28 02:22 local … do both after 15:24 local on the 28th" |
+| 2026-10-27 | §3a added: P5 measured as footprint + decoded pictures (phase4-criteria §14), baseline 150 MB steady / ≥ 153 MB peak, D-34 brought into 4.5 with a 3 h time-box and the 145 MB bar; the 150 MB limit unchanged until D-34 reports. §15 added: requirements and the checks that enforce them (check (c)) | Owner: "Approve with these changes" (five changes, 2026-10-27); "Keep the 145 MB bar in the D-34 rule. I want real headroom, not a just-fits pass."; "The 150 MB limit stays as it is until D-34's investigation reports. Then I'll decide." |
+
+## 15. Requirements and the checks that enforce them (check (c), 2026-10-27)
+
+
+Requirements written in prose in phase4.5-criteria (not already H/I/V/O
+table rows).
+
+| # | Requirement (where) | Enforced by | Status |
+|---|---|---|---|
+| R1 | The 20 ms end-to-end budget is never raised (§0) | P1 threshold in the session runner (`P1_P95_MS`), and §9 ≤ 15.53 ms | exists |
+| R2 | The CLI stays and keeps every Phase 3/4 test (§0 item 8) | none: a deleted test would pass CI | **to build** (owner, 2026-10-27): CI compares the list of test names with the base, as the roadmap check does for IDs |
+| R3 | P5 < 150 MB with the GUI as in a session, ≥ 5 MB spare, corrected measure (§3) | `p5-recheck.py` extended to the GUI viewer; plant C at session start | to build (step 7) |
+| R4 | ≤ 4 pending handshakes means at most 4 dialogs, never more (§4) | none yet | test in the decision module (step 5), with a plant of a 5th dialog |
+| R5 | The dialog says "Accept only if the other person reads you the same code" (§4) | none yet | GUI test (step 6) |
+| R6 | A P1/P2 regression > 1 ms is flagged, never averaged; if over: cool, rerun, then stop (§9) | D-25: no check (tracked) | stays manual until D-25 |
+| R7 | Every row with "plant" is seen failing once (§10) | commit messages only | **to build** (owner, 2026-10-27): each plant recorded in a results file the script can find |
+| R8 | Every new transitive crate in dependencies.md; licence check (§10) | `cargo deny` (licences), crate-age (CI); dependencies.md coverage: none | **to build** (owner, 2026-10-27): a script compares Cargo.lock's crates with dependencies.md |
+| R9 | Measuring runs: display awake, on AC, machine state at start and end, validity gates, no instrument that pauses the viewer (phase2 §6a/§6b, applies here) | S1 `measure.py` VALIDITY and `p5-recheck.py` VALIDITY; the Phase 4 runner's P1/P6 record no machine state | **to build** (owner, 2026-10-27): one shared measuring helper for every runner (= W2–W4), its own commit |
+| R10 | Indicator with Stage Manager on (M7, owner 2026-10-27) | manual M7 | manual |
+| R11 | Remote input never reaches Remora's controls (§8) | D-38 (Phase 6) | tracked |
+
+R2, R7, R8 and R9 are built in their own commits, not folded into D-34.
