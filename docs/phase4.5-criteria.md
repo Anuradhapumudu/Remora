@@ -236,7 +236,7 @@ attacker list; noted in threat-model §9 by this phase).
 |---|---|---|
 | **I1** | From `Active` until `Closed`, the host shows a **session window**: "<device> is viewing your screen", the time since it started, and **End session**. It has no close or minimise button while a session is active | **Automated GUI test (D-4):** for every session event the indicator is visible exactly while the state is `Active`; plant: hidden after 5 s → caught |
 | **I2** | **End session** is one click and reaches `Closed` within **1 s**, the viewer is told (`Goodbye`), capture stops | Automated: click → `Closed` ≤ 1 s; plant: button not wired → caught |
-| **I3** | The indicator is visible **whatever else is on screen**: `always-on-top` (Slint sets winit `WindowLevel::AlwaysOnTop`, `winitwindowadapter.rs:1898`), and the menu bar shows that a session is active. **Unverified:** whether an always-on-top window shows over a full-screen app on another Space — winit 0.30.13's macOS extensions have no "all Spaces" setting (`platform/macos.rs`), so if S1 shows it does not, the options come to the owner: accept and document the gap, or one AppKit call (`unsafe`, an unsafe-policy decision) | Manual M3 + S1 |
+| **I3** | The indicator is visible **whatever else is on screen**: `always-on-top` (Slint sets winit `WindowLevel::AlwaysOnTop`, `winitwindowadapter.rs:1898`), and the menu bar shows that a session is active. **Unverified:** whether an always-on-top window shows over a full-screen app on another Space — winit 0.30.13's macOS extensions have no "all Spaces" setting (`platform/macos.rs`), so if S1 shows it does not, the options come to the owner: accept and document the gap, or one AppKit call (`unsafe`, an unsafe-policy decision). **S1 (2026-10-27): it does not** — the window is reported occluded while the owner is on a full-screen app (two runs, `spikes/gui-memory/results/i3-checks.txt`); the options go to the owner with the S1 report. **Stage Manager** (owner, 2026-10-27): checked on the **real** session indicator, not the spike windows — the spike is not a proper indicator (no session, not the indicator's window), so a result on it would not mean much; the S1 attempt also could not turn Stage Manager on | Manual M3 + S1; **M7** (Stage Manager) |
 
 **How D-4 closes:** I1 and I2 run as Rust tests through Slint's testing
 backend. `i-slint-backend-testing` 1.18.1 exists (crates.io; licence
@@ -356,7 +356,11 @@ still over, stop and report — it is a regression to explain even though the
 
 * **On or after 2026-10-27, the first task is removing the tokio line** from
   `.cargo/crate-age-exceptions.txt` (tokio 1.53.3 is then 14 days old), before
-  CI fails on it. Roadmap **D-37**.
+  CI fails on it. Roadmap **D-37**. **Corrected 2026-10-27:** tokio 1.53.3
+  turns 14 days old at 2026-10-27 20:51 UTC, not at the start of the day;
+  D-37 and the rustls line (**D-42**, 2026-10-28 09:54 UTC) are done together
+  after 15:24 local on 2026-10-28; rustls-webpki (**D-43**) after 2026-11-03
+  08:58 UTC. The exact expiry now comes from `check-crate-age.py`.
 * **D-13** (is v0.1 public?) and the **Dependabot PRs #7–#12** wait until
   before v0.1. Roadmap D-13 (decision due before the v0.1 gate) and **D-39**.
 
@@ -364,7 +368,7 @@ still over, stop and report — it is a regression to explain even though the
 
 1. Owner approves this document (gate G-3: MET 2026-10-25). Merge PR #6
    with a merge commit once CI on its last commit is green (§1 Q9).
-2. On/after 2026-10-27: D-37 (tokio line) first.
+2. D-37 (tokio) and D-42 (rustls) after 2026-10-28 15:24 local, first task then; D-43 after 2026-11-03 14:28 local.
 3. D-36 recreate (per phase) when the first step needs capture — S1 needs
    none, so it comes first. The recreate needs the owner at the Mac (the
    Screen Recording grant): the owner is told before.
@@ -384,10 +388,14 @@ Manual steps, written in full in the report: M1 accept through the GUI with
 codes compared; M2 dialog comes to the front over another app; M3 indicator
 over a full-screen app; M4 deny and retry with the fresh code; M5 display
 unavailable countdown on both sides (virtual display, as T3); M6 launch both
-sides from Finder, no terminal.
+sides from Finder, no terminal; **M7 the session indicator with Stage
+Manager on** (owner, 2026-10-27): a session active, Stage Manager on (check
+the strip is visible), another app brought forward — the indicator must stay
+visible, and the result is recorded with how it was checked.
 
 ## 14. Changes to criteria
 
 | Date | Change | Owner's words / reason |
 |---|---|---|
 | 2026-10-25 | Approved with the answers in §1: H4 press **and** release after the delay; H9 refuse before the handshake and log every refused attempt; Q3's time-boxed D-34 step, the limit decision staying with the owner; D-36 per phase plus the `codesign` confirmation check; §11b known limitations | "G-3: approved with these answers. Update the criteria and push." |
+| 2026-10-27 | I3: S1 result recorded (always-on-top is occluded over a full-screen app); Stage Manager becomes manual step **M7** on the real indicator. §12/§13: D-37 timed to the exact UTC expiry, D-42/D-43 added | Owner: "I'll do it later with the real indicator, not the spike windows … Make it a 4.5 check against the real session indicator (I1–I3)." and "(a) Yes. D-37 after 2026-10-28 02:22 local … do both after 15:24 local on the 28th" |
