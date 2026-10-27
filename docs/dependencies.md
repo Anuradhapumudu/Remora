@@ -104,6 +104,10 @@ line is deleted, and it validates every exception on every run, not only
 crates in the current diff. Owner-approved 2026-10-18 (D30) on exactly these
 terms: per crate, per version, per advisory ID; never a standing "security
 fixes bypass the rule" flag.
+The check prints every exception's **exact expiry** (release time + 14
+days, UTC) and a **warning when one is under 48 hours away**, in CI (a
+GitHub annotation) and in `scripts/ci/pre-push.sh`: a removal date counted
+by hand was wrong once (roadmap D-37, 2026-10-27).
 
 **Exception log** (every use, auditable):
 

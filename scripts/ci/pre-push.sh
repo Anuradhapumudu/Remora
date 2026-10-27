@@ -23,6 +23,9 @@ step "cargo deny --locked check"
 cargo deny --locked check
 step "cargo audit"
 cargo audit
+step "crate-age exceptions (validity, exact expiry, warning under 48 h)"
+python3 -I scripts/ci/check-crate-age.py --self-test > /dev/null
+python3 -I scripts/ci/check-crate-age.py --exceptions-only
 step "roadmap tables"
 python3 -I scripts/ci/check-roadmap.py
 
