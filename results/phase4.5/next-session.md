@@ -8,7 +8,7 @@ but it lives only as long as that session, so this file is the record.
 
 | When (local, +0530) | What | Row |
 |---|---|---|
-| **After 2026-10-28 15:24** | Remove the `tokio 1.53.3` line from `.cargo/crate-age-exceptions.txt` (own commit, `scripts/ci/pre-push.sh` first) | D-37 |
+| ~~After 2026-10-28 15:24~~ **Done 2026-10-30** | Remove the `tokio 1.53.3` line from `.cargo/crate-age-exceptions.txt` (own commit, `scripts/ci/pre-push.sh` first) | D-37 |
 | **After 2026-10-28 15:24** | Remove the `rustls 0.23.46` line (own commit, pre-push first) | D-42 |
 | After 2026-11-03 14:28 | Remove the `rustls-webpki 0.103.16` line (own commit, pre-push first) | D-43 |
 

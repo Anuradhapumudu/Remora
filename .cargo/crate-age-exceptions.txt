@@ -11,8 +11,3 @@ rustls 0.23.46 RUSTSEC-2026-0346 RUSTSEC-2026-0347 RUSTSEC-2026-0348 RUSTSEC-202
 # distrusted emSign intermediates. Not reachable in Remora (our client never
 # builds certificate paths: tls.rs AnyCertificate, D1), adopted per policy.
 rustls-webpki 0.103.16 RUSTSEC-2026-0382
-
-# 2026-10-25: RUSTSEC-2026-0386, tokio's safe AsyncFd constructors accept a
-# file descriptor the caller does not own (I/O-safety violation that can lead
-# to a use-after-free). 1.53.3 is the first patched release on our 1.53 line.
-tokio 1.53.3 RUSTSEC-2026-0386
