@@ -8,6 +8,7 @@ checking a lockfile, so this script does it.
 
 Usage:
     check-crate-age.py [--base REF] [--all] LOCKFILE...
+    check-crate-age.py --exceptions-only      # only the exceptions (fast; pre-push)
     check-crate-age.py --self-test
 
 * With --base, only (name, version) pairs that are new in LOCKFILE compared
@@ -23,6 +24,11 @@ Usage:
   advisory is fetched from the RustSec advisory database and must name the
   same package with `">= <version>"` among its patched bounds. An exception
   whose version is already >= 14 days old is reported as stale (remove it).
+* Every exception's exact expiry (release time + 14 days, UTC) is printed,
+  and one that expires in under 48 hours is a WARNING (a GitHub annotation
+  in CI), so its removal is scheduled from the check, not from a date
+  counted by hand: D-37 was written as "2026-10-27" for a release that
+  turned 14 days old at 20:51 UTC that day (owner, 2026-10-27).
 
 Stdlib only (runs on the runners' system Python 3.10, so no tomllib).
 """
@@ -30,6 +36,7 @@ Stdlib only (runs on the runners' system Python 3.10, so no tomllib).
 import argparse
 import datetime as dt
 import json
+import os
 import re
 import subprocess
 import sys
@@ -38,6 +45,7 @@ import urllib.error
 import urllib.request
 
 MIN_AGE = dt.timedelta(days=14)
+WARN_BEFORE = dt.timedelta(hours=48)
 USER_AGENT = "Remora-CI crate-age check (https://github.com/Anuradhapumudu/Remora)"
 REGISTRY = "registry+https://github.com/rust-lang/crates.io-index"
 ENTRY = re.compile(
@@ -124,11 +132,14 @@ def exception_holds(name, version, ids, fetch_adv):
     return None
 
 
-def check_exceptions(exceptions, fetch, now, fetch_adv=None, pause=1.0):
+def check_exceptions(exceptions, fetch, now, fetch_adv=None, pause=1.0, warnings=None, annotate=True):
     """Validate EVERY exception line, whether or not its crate changed in
     this diff (owner condition, D28): each one applies to exactly one crate,
     one version and its listed advisories, and EXPIRES once that release is
-    14 days old - then the line must be deleted, so none can linger."""
+    14 days old - then the line must be deleted, so none can linger.
+    Prints each exception's expiry; one expiring within WARN_BEFORE is
+    appended to `warnings` (if given) and printed as a warning; with
+    `annotate` (never in the self-test) it is also a GitHub annotation."""
     failures = []
     for i, ((name, version), ids) in enumerate(sorted(exceptions.items())):
         if i and pause:
@@ -148,6 +159,22 @@ def check_exceptions(exceptions, fetch, now, fetch_adv=None, pause=1.0):
         why_not = exception_holds(name, version, ids, fetch_adv or fetch_advisory)
         if why_not is not None:
             failures.append(f"BAD EXCEPTION {name} {version}: {why_not}")
+            continue
+        expires = created + MIN_AGE
+        left = expires - now
+        mins = int(left.total_seconds() // 60)
+        span = f"{mins // 60} h {mins % 60:02d} min"
+        print(f"EXCEPTION {name} {version}: released {created:%Y-%m-%d %H:%M} UTC, "
+              f"expires {expires:%Y-%m-%d %H:%M} UTC (in {span})")
+        if left < WARN_BEFORE:
+            msg = (f"exception {name} {version} expires {expires:%Y-%m-%d %H:%M} UTC "
+                   f"(in {span}): delete its line from .cargo/crate-age-exceptions.txt "
+                   f"AFTER that time, not before (until then {name} {version} is under 14 days old)")
+            if warnings is not None:
+                warnings.append(msg)
+            print(f"WARNING   {msg}")
+            if annotate and os.environ.get("GITHUB_ACTIONS") == "true":
+                print(f"::warning title=crate-age exception expiring::{msg}")
     return failures
 
 
@@ -226,7 +253,7 @@ def self_test():
 
     def run(ids):
         exc = {("fresh", "2.0.0"): ids}
-        return check_exceptions(exc, fake, now, fetch_adv=fake_adv, pause=0) + check(
+        return check_exceptions(exc, fake, now, fetch_adv=fake_adv, pause=0, annotate=False) + check(
             entries, fake, now, pause=0, exceptions=exc, fetch_adv=fake_adv
         )
 
@@ -241,8 +268,34 @@ def self_test():
         assert any(f.startswith("BAD EXCEPTION fresh") for f in run(bad_ids)), bad_ids
     # An exception expires once its release is 14 days old: it must fail
     # (forcing the line's removal), even if that crate is not in the diff.
-    expired = check_exceptions({("old", "1.0.0"): ["RUSTSEC-2026-0001"]}, fake, now, fetch_adv=fake_adv, pause=0)
+    expired = check_exceptions({("old", "1.0.0"): ["RUSTSEC-2026-0001"]}, fake, now, fetch_adv=fake_adv, pause=0,
+                               annotate=False)
     assert len(expired) == 1 and expired[0].startswith("EXPIRED"), expired
+    # Expiry warning: under 48 h left warns; 13 days left (fresh) and exactly
+    # 48 h left (edge) do not.
+    for left, warns in ((dt.timedelta(hours=23), True), (dt.timedelta(hours=47, minutes=59), True),
+                        (dt.timedelta(hours=48), False), (dt.timedelta(days=13), False)):
+        created = now - MIN_AGE + left
+        w = []
+        f = check_exceptions({("soon", "1.0.0"): ["RUSTSEC-2026-0001"]}, lambda n, v: created, now,
+                             fetch_adv=lambda n, i: 'package = "soon"\npatched = [">= 1.0.0"]\n', pause=0,
+                             warnings=w, annotate=False)
+        assert f == [], f
+        assert bool(w) == warns, (left, w)
+        assert not w or "expires 2026-10-" in w[0], w
+    # The self-test never writes GitHub annotations, even in CI: its fake
+    # exceptions must not show up next to the real ones (seen in CI 2026-10-27).
+    import contextlib, io
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        os.environ["GITHUB_ACTIONS"] = "true"
+        try:
+            check_exceptions({("soon", "1.0.0"): ["RUSTSEC-2026-0001"]}, lambda n, v: now - MIN_AGE + dt.timedelta(hours=1),
+                             now, fetch_adv=lambda n, i: 'package = "soon"\npatched = [">= 1.0.0"]\n', pause=0,
+                             annotate=False)
+        finally:
+            os.environ.pop("GITHUB_ACTIONS")
+    assert "WARNING" in out.getvalue() and "::warning" not in out.getvalue(), out.getvalue()
     # An exception only covers its own version: the same crate at another
     # version is still TOO NEW.
     other = check({("fresh", "2.0.1")}, lambda n, v: now - dt.timedelta(days=1), now, pause=0,
@@ -251,19 +304,29 @@ def self_test():
     # Diffing: an entry present at the base is not re-checked.
     base = lock.split("[[package]]\nname = \"fresh\"")[0]
     assert ("fresh", "2.0.0") in registry_entries(lock) - registry_entries(base)
-    print("self-test: ok (planted too-new, edge, unverifiable entries, bad, expired and wrong-version exceptions all caught)")
+    print("self-test: ok (planted too-new, edge, unverifiable entries, bad, expired and wrong-version exceptions all caught; "
+          "expiry warnings under 48 h, none at 48 h or 13 days)")
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--base", help="git ref to diff against (only new entries are checked)")
     ap.add_argument("--all", action="store_true", help="check every entry")
+    ap.add_argument("--exceptions-only", action="store_true",
+                    help="check only the exceptions file (validity, expiry, 48 h warning)")
     ap.add_argument("--self-test", action="store_true")
     ap.add_argument("lockfiles", nargs="*")
     args = ap.parse_args()
     if args.self_test:
         self_test()
         return 0
+    if args.exceptions_only:
+        exceptions = load_exceptions(".cargo/crate-age-exceptions.txt")
+        failures = check_exceptions(exceptions, fetch_created_at, dt.datetime.now(dt.timezone.utc))
+        for f in failures:
+            print(f, file=sys.stderr)
+        print(f"{len(exceptions)} exception(s) checked, {len(failures)} failure(s)")
+        return 1 if failures else 0
     if not args.lockfiles:
         ap.error("no lockfiles given")
     entries = set()

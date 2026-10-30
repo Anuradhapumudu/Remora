@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# Git pre-push hook: refuse the push unless the main-workspace checks pass.
+# Enable once per clone: git config core.hooksPath scripts/githooks
+exec "$(git rev-parse --show-toplevel)/scripts/ci/pre-push.sh"

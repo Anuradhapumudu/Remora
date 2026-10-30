@@ -104,14 +104,18 @@ line is deleted, and it validates every exception on every run, not only
 crates in the current diff. Owner-approved 2026-10-18 (D30) on exactly these
 terms: per crate, per version, per advisory ID; never a standing "security
 fixes bypass the rule" flag.
+The check prints every exception's **exact expiry** (release time + 14
+days, UTC) and a **warning when one is under 48 hours away**, in CI (a
+GitHub annotation) and in `scripts/ci/pre-push.sh`: a removal date counted
+by hand was wrong once (roadmap D-37, 2026-10-27).
 
 **Exception log** (every use, auditable):
 
 | Date | Crate | Version | Advisories fixed | Released | Expires (14 days) | Removed |
 |---|---|---|---|---|---|---|
-| 2026-10-18 | rustls | 0.23.46 | RUSTSEC-2026-0346, -0347, -0348, -0349 | 2026-10-14 | 2026-10-28 | — |
+| 2026-10-18 | rustls | 0.23.46 | RUSTSEC-2026-0346, -0347, -0348, -0349 | 2026-10-14 | 2026-10-28 | 2026-10-30 (roadmap D-42) |
 | 2026-10-21 | rustls-webpki | 0.103.16 (transitive, via rustls/quinn) | RUSTSEC-2026-0382 (distrusted emSign intermediates accepted in certificate paths). **Not reachable here:** our QUIC client accepts any certificate and never builds a path (`remora-net/src/tls.rs` `AnyCertificate`, D1); adopted anyway — the CI advisory check fails on it and staying on a flagged version is the worse habit | 2026-10-20 | 2026-11-03 | — |
-| 2026-10-25 | tokio | 1.53.3 | RUSTSEC-2026-0386 (`AsyncFd`'s safe constructors accept a file descriptor the caller does not own: an I/O-safety violation that can lead to a use-after-free). Our code never calls `AsyncFd`; whether our dependencies do was not checked — adopted either way (owner, 2026-10-25). Found when `cargo deny` failed CI on `1ceef72`. Only tokio's lock entry changed: `cargo update -p tokio` also moved four crates' `windows-sys` 0.61.2 → 0.52.0, which was not part of the fix, so the lock was edited to tokio alone and checked with `--locked` | 2026-10-13 | 2026-10-27 | — |
+| 2026-10-25 | tokio | 1.53.3 | RUSTSEC-2026-0386 (`AsyncFd`'s safe constructors accept a file descriptor the caller does not own: an I/O-safety violation that can lead to a use-after-free). Our code never calls `AsyncFd`; whether our dependencies do was not checked — adopted either way (owner, 2026-10-25). Found when `cargo deny` failed CI on `1ceef72`. Only tokio's lock entry changed: `cargo update -p tokio` also moved four crates' `windows-sys` 0.61.2 → 0.52.0, which was not part of the fix, so the lock was edited to tokio alone and checked with `--locked` | 2026-10-13 | 2026-10-27 | 2026-10-30 (roadmap D-37) |
 
 **Remembering the rule was not enough.** When the check first ran over the
 phase-3 branch it found five more violations that earlier steps had locked
@@ -120,6 +124,16 @@ by hand without noticing: `arbitrary` 1.5.0 → **1.4.2** (fuzz only),
 **3.0.6**, `unicode-ident` 1.0.27 → **1.0.26** (the latter three are
 build-time / proc-macro crates). All locked to the newest release that was
 ≥ 14 days old on 2026-10-18.
+
+## Spike lockfiles (outside the checks above)
+
+Throwaway spikes keep their own workspace and lockfile (root `Cargo.toml`
+`exclude`). `cargo deny`, `cargo audit` and the crate-age check read only the
+main workspace, so nothing of ours checks these lockfiles; Dependabot does.
+
+| Date | Spike | Change | Why |
+|---|---|---|---|
+| 2026-10-26 | `spikes/slint-wgpu` | tokio 1.54.0 → **1.53.3** (`cargo update -p tokio --precise 1.53.3`; only tokio's entry changed; `cargo build --locked --release` passes) | Dependabot alert #1, GHSA-5wjr-9356-4wc8 / CVE-2026-115567 (race condition in `tokio::time::Interval`), affects 1.54.0 only, patched in 1.54.1. 1.53.3 is the version the main workspace already locks and checks, so the 14-day rule is not touched. `cargo tree -i tokio --target all` shows tokio comes only through `wasm-bindgen-futures` (wgpu's WebAssembly path) and is not built for macOS (`cargo tree -i tokio` without `--target all`: nothing). Removed rather than dismissed (owner, 2026-10-26). The spike itself goes at the end of Phase 4.5 (roadmap D-41) |
 
 ## Known duplicate versions (accepted)
 

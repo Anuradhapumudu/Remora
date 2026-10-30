@@ -1,0 +1,42 @@
+== I3 full-screen check 2026-10-27 10:40:31
+[    0.1 s] video window Occluded(false)
+[   64.8 s] video window Occluded(true)
+[   76.8 s] video window Occluded(false)
+RESULT s3: draws 4663 in 89.9 s (51.9 fps); interval p50 16.66 p95 19.40 ms; handoff p50 0.081 p95 0.094 ms; no drawable 7; skipped while occluded 724; occluded events [(0.076816084, false), (64.757155292, true), (76.828208459, false)]
+== I3 full-screen check, repeat, start 2026-10-27 10:42:43
+[    0.0 s] video window Occluded(false)
+[   14.8 s] video window Occluded(true)
+[   18.4 s] video window Occluded(false)
+[   20.8 s] video window Occluded(true)
+[   22.1 s] video window Occluded(false)
+[   22.9 s] video window Occluded(true)
+[   24.2 s] video window Occluded(false)
+[   26.5 s] video window Occluded(true)
+[   27.9 s] video window Occluded(false)
+[   65.4 s] video window Occluded(true)
+RESULT s3: draws 3421 in 120.0 s (28.5 fps); interval p50 16.66 p95 20.01 ms; handoff p50 0.081 p95 0.115 ms; no drawable 5; skipped while occluded 3074; occluded events [(0.045017833, false), (14.84475, true), (18.396087583, false), (20.81265275, true), (22.1461045, false), (22.862403583, true), (24.213210375, false), (26.461697583, true), (27.880117542, false), (65.379671542, true)]
+== I3 Stage Manager check, start 2026-10-27 10:45:27, Stage Manager setting 0
+[    0.0 s] video window Occluded(false)
+[   64.4 s] video window Occluded(true)
+[   71.2 s] video window Occluded(false)
+[   78.0 s] video window Occluded(true)
+RESULT s3: draws 4278 in 89.9 s (47.6 fps); interval p50 16.66 p95 20.03 ms; handoff p50 0.103 p95 3.320 ms; no drawable 5; skipped while occluded 1111; occluded events [(0.047211458, false), (64.449646125, true), (71.151201375, false), (78.04989475, true)]
+StageManager setting at end: 0
+== I3 Stage Manager check (2nd, owner sees the strip), start 2026-10-27 10:49:59, GloballyEnabled 0
+[    0.0 s] video window Occluded(false)
+[   29.0 s] video window Occluded(true)
+[   32.1 s] video window Occluded(false)
+[   58.7 s] video window Occluded(true)
+[   80.6 s] video window Occluded(false)
+[   82.2 s] video window Occluded(true)
+RESULT s3: draws 3416 in 89.9 s (38.0 fps); interval p50 16.66 p95 19.35 ms; handoff p50 0.062 p95 0.092 ms; no drawable 4; skipped while occluded 1955; occluded events [(0.029545459, false), (28.9966515, true), (32.050340584, false), (58.716994792, true), (80.596822125, false), (82.246721292, true)]
+# Owner's observations (2026-10-27):
+# - Full-screen runs (both): the log reports the video window occluded
+#   whenever the owner switched to full-screen TextEdit; the owner's second
+#   run followed the switches (14.8 s ...). Always-on-top does NOT show over a
+#   full-screen app.
+# - Stage Manager runs (10:4x and 10:5x): NOT a Stage Manager test. The owner
+#   saw no Stage Manager strip either time (screenshot 10:51: no strip; both
+#   spike windows stay above ordinary TextEdit/Finder windows), and
+#   `defaults read com.apple.WindowManager GloballyEnabled` read 0 throughout.
+#   The occlusions in those runs are the owner switching windows/Spaces.
