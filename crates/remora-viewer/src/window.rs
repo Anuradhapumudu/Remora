@@ -148,6 +148,11 @@ impl VideoWindow {
         }
     }
 
+    /// Whether `id` is this window.
+    pub(crate) fn is(&self, id: WindowId) -> bool {
+        self.window.as_ref().is_some_and(|w| w.id() == id)
+    }
+
     /// The decoder's counters, for the stats line.
     pub(crate) fn set_counters(&mut self, c: Arc<Counters>) {
         self.counters = Some(c);

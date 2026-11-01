@@ -48,3 +48,20 @@ plant for the same row is still to come with the GUI (D-46).
 | H9 | A refusal during connect returned as an error, not the host's close (the CI race of 2026-11-01) | `crates/remora-net/tests/h9_host_busy.rs::h9_a_refusal_during_connect_is_the_hosts_close_not_an_error` | 2026-11-01 |
 | R8 | A newly locked crate missing from dependencies.md | `scripts/ci/check-dep-docs.py: a new undocumented crate is caught` | 2026-11-01 |
 | R8 | A crate name only in prose counted as documented | `scripts/ci/check-dep-docs.py: a name only in prose does not count` | 2026-11-01 |
+| H1 | Dialog bound to another session's code (GUI) | `crates/remora-host/src/gui.rs::h1_dialog_shows_code_device_trust_and_escaped_name` | 2026-11-01 |
+| H3 | Return bound to Accept in the dialog markup | `crates/remora-host/src/gui.rs::h3_return_space_and_escape_deny` | 2026-11-01 |
+| H4 | Only the release checked: the real Accept button pressed before 1 s | `crates/remora-host/src/gui.rs::h4_the_real_accept_button_needs_press_and_release_after_one_second` | 2026-11-01 |
+| I1 | Session window hidden after 5 s (GUI) | `crates/remora-host/src/gui.rs::i1_session_window_shown_exactly_while_active_and_code_hidden` | 2026-11-01 |
+| I1 | Session window closable while a session is active | `crates/remora-host/src/gui.rs::i1_the_session_window_cannot_be_closed_while_active` | 2026-11-01 |
+| I2 | End session button not wired (GUI) | `crates/remora-host/src/gui.rs::i2_end_session_is_one_click` | 2026-11-01 |
+| H10 | Code and password shown while active (GUI) | `crates/remora-host/src/gui.rs::i1_session_window_shown_exactly_while_active_and_code_hidden` | 2026-11-01 |
+| H9 | Waiting dialogs left open when one becomes active (GUI) | `crates/remora-host/src/gui.rs::h9_waiting_dialogs_are_denied_when_one_becomes_active` | 2026-11-01 |
+| H8 | No F-UX3 note with the new code after a prompt (GUI) | `crates/remora-host/src/gui.rs::a_new_prompt_shows_a_new_code_with_the_note` | 2026-11-01 |
+| V1 | Host device not shown for a pasted code (GUI) | `crates/remora-viewer/src/gui.rs::v1_the_code_shows_whose_it_is_before_connecting_and_rubbish_says_why` | 2026-11-01 |
+| V2 | Password field not cleared at Connect (GUI) | `crates/remora-viewer/src/gui.rs::v2_connect_clears_the_password_field_even_when_it_is_refused` | 2026-11-01 |
+| V3 | Verified shown before confirmation (GUI) | `crates/remora-viewer/src/gui.rs::v3_v4_the_code_is_unverified_until_the_person_says_it_matches` | 2026-11-01 |
+| V4 | Verified when the host accepts (GUI) | `crates/remora-viewer/src/gui.rs::v3_v4_the_code_is_unverified_until_the_person_says_it_matches` | 2026-11-01 |
+| V4 | They don't match not wired in the markup | `crates/remora-viewer/src/gui.rs::v4_they_dont_match_ends_the_session_and_says_why` | 2026-11-01 |
+| V5 | End reason not shown (GUI) | `crates/remora-viewer/src/gui.rs::v5_declined_says_ask_for_a_new_code` | 2026-11-01 |
+| V6 | Countdown not shown (GUI) | `crates/remora-viewer/src/gui.rs::v6_display_unavailable_countdown_and_disconnect` | 2026-11-01 |
+| V6 | Disconnect not wired in the markup | `crates/remora-viewer/src/gui.rs::v6_display_unavailable_countdown_and_disconnect` | 2026-11-01 |

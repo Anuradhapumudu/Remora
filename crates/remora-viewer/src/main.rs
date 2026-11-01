@@ -15,6 +15,8 @@
 
 mod decode;
 #[cfg(target_os = "macos")]
+mod gui;
+#[cfg(target_os = "macos")]
 mod window;
 
 use std::path::PathBuf;
@@ -45,6 +47,17 @@ struct Cli {
 enum Command {
     /// Phase 3: connect to a host with its connection code (loopback).
     Connect(ConnectArgs),
+    /// Phase 4.5: connect with a window: paste the code, type the
+    /// password, compare the safety code.
+    #[cfg(target_os = "macos")]
+    Gui {
+        /// Key file (default: the per-user config directory).
+        #[arg(long)]
+        identity_file: Option<PathBuf>,
+        /// Name shown to the host (untrusted text, ≤ 64 bytes).
+        #[arg(long, default_value = "Remora viewer")]
+        name: String,
+    },
     /// Print this viewer's identity key and device code (created if needed).
     Identity {
         /// Key file (default: the per-user config directory).
@@ -103,6 +116,14 @@ fn main() -> ExitCode {
         }
         Some(Command::Identity { identity_file }) => identity(identity_file).map(|()| exit::OK),
         Some(Command::Connect(args)) => connect_command(args),
+        #[cfg(target_os = "macos")]
+        Some(Command::Gui {
+            identity_file,
+            name,
+        }) => gui::run_gui(gui::Options {
+            identity_file,
+            name,
+        }),
     };
     ExitCode::from(exit_code(result))
 }
@@ -194,7 +215,7 @@ pub(crate) struct Pause {
 }
 
 impl Pause {
-    fn of(reason: remora_session::PauseReason) -> Self {
+    pub(crate) fn of(reason: remora_session::PauseReason) -> Self {
         let deadline = match reason {
             remora_session::PauseReason::DisplayUnavailable { remaining_ms } => Some(
                 std::time::Instant::now()
