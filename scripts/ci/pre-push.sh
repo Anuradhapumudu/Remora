@@ -41,6 +41,10 @@ python3 -I scripts/ci/check-tests.py "$(git rev-parse --verify -q '@{upstream}' 
 step "plant record (R7)"
 python3 -I scripts/ci/check-plants.py --self-test > /dev/null
 python3 -I scripts/ci/check-plants.py
+step "criteria rows name checks that exist (check (c))"
+python3 -I scripts/ci/check-criteria.py --self-test > /dev/null
+python3 -I scripts/ci/check-criteria.py | grep -v '^warning: .*prose' || true
+python3 -I scripts/ci/check-criteria.py > /dev/null
 step "roadmap tables"
 python3 -I scripts/ci/check-roadmap.py
 

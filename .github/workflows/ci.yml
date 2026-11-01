@@ -187,6 +187,10 @@ jobs:
         run: python3 -I scripts/ci/check-plants.py --self-test
       - name: Every recorded plant points at a real row and test (R7)
         run: python3 -I scripts/ci/check-plants.py
+      - name: Self-test of check (c) (planted missing checks must be caught)
+        run: python3 -I scripts/ci/check-criteria.py --self-test
+      - name: Criteria rows name checks that exist; prose requirements warned (check (c))
+        run: python3 -I scripts/ci/check-criteria.py
 
   # Measuring runs (R9, phase4.5-criteria §15): the shared helper decides
   # whether a run counts (AC power, no sleep, display on, no pausing

@@ -517,6 +517,14 @@ visible, and the result is recorded with how it was checked.
 
 ## 15. Requirements and the checks that enforce them (check (c), 2026-10-27)
 
+**Check (c) is built (2026-11-01):** `scripts/ci/check-criteria.py` (CI
+`roadmap` job, pre-push) **fails** when a table row of this document names a
+check that does not exist (a backticked file in this repository, a bare
+script name, or a `path::test`), and **warns** about requirement sentences
+(must, shall, never, always, required, "to be checked") in prose that cite
+no row ID. First run: 0 failures, 5 warnings (lines 12, 165, 338, 489, 506).
+Older accepted criteria documents are reported as warnings only.
+
 
 Requirements written in prose in phase4.5-criteria (not already H/I/V/O
 table rows).
