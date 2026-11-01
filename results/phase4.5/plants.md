@@ -58,7 +58,7 @@ plant for the same row is still to come with the GUI (D-46).
 | H9 | Waiting dialogs left open when one becomes active (GUI) | `crates/remora-host/src/gui.rs::h9_waiting_dialogs_are_denied_when_one_becomes_active` | 2026-11-01 |
 | H8 | No F-UX3 note with the new code after a prompt (GUI) | `crates/remora-host/src/gui.rs::a_new_prompt_shows_a_new_code_with_the_note` | 2026-11-01 |
 | V1 | Host device not shown for a pasted code (GUI) | `crates/remora-viewer/src/gui.rs::v1_the_code_shows_whose_it_is_before_connecting_and_rubbish_says_why` | 2026-11-01 |
-| V2 | Password field not cleared at Connect (GUI) | `crates/remora-viewer/src/gui.rs::v2_connect_clears_the_password_field_even_when_it_is_refused` | 2026-11-01 |
+| V2 | Password field not cleared at Connect (GUI). Caught under the old name `…_even_when_it_is_refused`; the §16 UI pass (`5146680`) renamed it, as Connect is now disabled for an invalid code or password | `crates/remora-viewer/src/gui.rs::v2_connect_clears_the_password_field` | 2026-11-01 |
 | V3 | Verified shown before confirmation (GUI) | `crates/remora-viewer/src/gui.rs::v3_v4_the_code_is_unverified_until_the_person_says_it_matches` | 2026-11-01 |
 | V4 | Verified when the host accepts (GUI) | `crates/remora-viewer/src/gui.rs::v3_v4_the_code_is_unverified_until_the_person_says_it_matches` | 2026-11-01 |
 | V4 | They don't match not wired in the markup | `crates/remora-viewer/src/gui.rs::v4_they_dont_match_ends_the_session_and_says_why` | 2026-11-01 |
