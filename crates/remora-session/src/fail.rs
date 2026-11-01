@@ -31,13 +31,16 @@ pub enum CloseCode {
     /// Screen capture stopped and will not come back without user action
     /// (phase4-criteria §7; an interruption only pauses the stream).
     CaptureStopped = 0x16,
+    /// Another session is active: the host serves one at a time and refused
+    /// this connection before the handshake (phase4.5-criteria H9).
+    HostBusy = 0x17,
 }
 
 impl CloseCode {
     /// Every close code, for decoding a code received from the peer. Kept
     /// complete by [`CloseCode::index`], whose `match` stops compiling when a
     /// variant is added and not listed.
-    pub const ALL: [CloseCode; 8] = [
+    pub const ALL: [CloseCode; 9] = [
         CloseCode::Normal,
         CloseCode::AuthFailed,
         CloseCode::ProtocolViolation,
@@ -46,6 +49,7 @@ impl CloseCode {
         CloseCode::Timeout,
         CloseCode::RateLimited,
         CloseCode::CaptureStopped,
+        CloseCode::HostBusy,
     ];
 
     /// This code's position in [`CloseCode::ALL`]. Exhaustive on purpose.
@@ -59,6 +63,7 @@ impl CloseCode {
             CloseCode::Timeout => 5,
             CloseCode::RateLimited => 6,
             CloseCode::CaptureStopped => 7,
+            CloseCode::HostBusy => 8,
         }
     }
 }

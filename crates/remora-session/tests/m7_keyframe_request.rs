@@ -70,14 +70,16 @@ fn m7_the_viewer_asks_at_most_once_per_interval() {
     assert!(c.viewer.request_keyframe(almost).is_none(), "1 ms early");
     let next = t.plus(KEYFRAME_REQUEST_INTERVAL_MS);
     assert!(c.viewer.request_keyframe(next).is_some(), "interval over");
-    // The first request after Active is never held back.
+    // The first request after Active is never held back (a new session:
+    // the first one ends first, one active session at a time, H9).
+    host.disconnect(c.id);
     let mut fresh = to_active(&mut host, &device("viewer2"), ip(2));
     assert!(fresh.viewer.request_keyframe(fresh.now).is_some());
 }
 
 #[test]
 fn m7_the_host_forces_at_most_one_keyframe_per_interval_for_all_viewers() {
-    let mut host = host_with(&device("host"), vec![]);
+    let mut host = host_multi_viewer(&device("host"));
     let mut a = to_active(&mut host, &device("viewer-a"), ip(1));
     let mut b = to_active(&mut host, &device("viewer-b"), ip(2));
     let t = a.now.plus(10_000);

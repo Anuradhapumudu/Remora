@@ -65,6 +65,16 @@ fn inv15_same_password_cannot_open_a_second_session_while_the_first_is_active() 
     let otp = host.otp().clone();
     let c = to_active(&mut host, &v, ip(1));
     assert_eq!(host.state(c.id), Some(State::Active));
+    // Since phase 4.5 (H9) a connection while a session is Active is refused
+    // before any crypto, so the password is not even looked at...
+    assert_eq!(
+        host.accept_connection(ip(2), exporter(2), T0, &mut rand_core::OsRng),
+        Err(remora_session::Refused(
+            remora_session::limiter::Refusal::HostBusy
+        ))
+    );
+    // ...and once the first session has ended the used password still fails.
+    host.disconnect(c.id);
     let second = reuse(&mut host, &eve, &otp, 2, T0);
     assert_eq!(second.log.host_close(), Some(CloseCode::AuthFailed));
     assert!(second.log.prompt().is_none());
@@ -138,12 +148,13 @@ fn inv15_new_password_works_and_is_itself_one_time() {
     let mut host = host_with(&h, vec![]);
     let c1 = to_active(&mut host, &v, ip(1));
     let second = host.otp().clone();
+    // One active session at a time (H9): the first ends before the next.
+    host.disconnect(c1.id);
     let c2 = to_prompt(&mut host, &v, ip(2));
     assert!(c2.log.prompt().is_some(), "the new password works once");
     assert!(c2.log.host.contains(&HostAction::OtpUsed { id: c2.id }));
     let third = reuse(&mut host, &v, &second, 3, T0);
     assert_eq!(third.log.host_close(), Some(CloseCode::AuthFailed));
-    let _ = c1;
 }
 
 #[test]

@@ -64,6 +64,14 @@ pub struct HostConfig {
     pub password_enabled: bool,
     /// Viewer identity keys allowed to use trusted (password-less) mode.
     pub trusted: Vec<IdentityPublic>,
+    /// One active session at a time (phase4.5-criteria H9): while a session
+    /// is `Active`, new connections are refused [`Refusal::HostBusy`] before
+    /// any crypto. **`true` in every app** (v0.1 is single-viewer); `false`
+    /// only where several viewers are the point (multi-viewer media tests).
+    /// No default on purpose: whoever builds a host decides.
+    ///
+    /// [`Refusal::HostBusy`]: crate::limiter::Refusal::HostBusy
+    pub one_active_session: bool,
 }
 
 /// Why [`Host::send_video`] could not send a frame.
@@ -94,6 +102,11 @@ pub enum ApproveError {
     /// The safety code given does not match this session's (A22).
     #[error("safety code does not match this session")]
     SasMismatch,
+    /// Another session is `Active` and the host serves one at a time
+    /// ([`HostConfig::one_active_session`], phase4.5-criteria H9). Viewers
+    /// that were already waiting at the prompt cannot be let in next to it.
+    #[error("another session is active (one viewer at a time)")]
+    AnotherSessionActive,
 }
 
 /// What the host must do.
@@ -419,8 +432,18 @@ impl Host {
     }
 
     /// A QUIC connection from `peer_ip` completed its TLS handshake. Applies
-    /// the pending cap and per-IP limit **before any crypto**; on success
-    /// the new session waits for `ViewerHello`.
+    /// the one-active-session rule, then the pending cap and per-IP limit,
+    /// all **before any crypto**; on success the new session waits for
+    /// `ViewerHello`.
+    ///
+    /// One active session (phase4.5-criteria H9, when
+    /// [`HostConfig::one_active_session`]): while a session is `Active`
+    /// every new connection is refused [`Refusal::HostBusy`]. It
+    /// is checked first, so a refused attempt changes nothing: no pending
+    /// slot, no per-IP budget, no password attempt (INV12) and the one-time
+    /// password stays valid (INV15).
+    ///
+    /// [`Refusal::HostBusy`]: crate::limiter::Refusal::HostBusy
     pub fn accept_connection<R: RngCore + CryptoRng>(
         &mut self,
         peer_ip: IpAddr,
@@ -428,6 +451,14 @@ impl Host {
         now: Millis,
         rng: &mut R,
     ) -> Result<SessionId, Refused> {
+        if self.config.one_active_session
+            && self
+                .sessions
+                .values()
+                .any(|s| matches!(s.state, HostSessionState::Active { .. }))
+        {
+            return Err(Refused(crate::limiter::Refusal::HostBusy));
+        }
         self.limiter.admit(peer_ip, now).map_err(Refused)?;
         let mut id = SessionId(rng.next_u64());
         while self.sessions.contains_key(&id) {
@@ -579,6 +610,9 @@ impl Host {
         sas: Sas,
         now: Millis,
     ) -> Result<Vec<HostAction>, ApproveError> {
+        // Read before borrowing the session: the one being approved is
+        // Pending, so it is never among the Active ones.
+        let busy = self.config.one_active_session && !self.active_sessions().is_empty();
         let sess = self
             .sessions
             .get_mut(&id)
@@ -588,6 +622,9 @@ impl Host {
         };
         if *shown != sas {
             return Err(ApproveError::SasMismatch);
+        }
+        if busy {
+            return Err(ApproveError::AnotherSessionActive);
         }
         if self.capture == crate::CaptureStatus::Stopped {
             // Nothing to stream until the user fixes capture at the host:

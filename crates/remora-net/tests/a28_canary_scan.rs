@@ -73,6 +73,7 @@ async fn a28_no_secret_in_any_log_line_at_trace_level() {
             identity: host_id,
             password_enabled: true,
             trusted: vec![],
+            one_active_session: true,
         },
     )
     .await

@@ -240,6 +240,13 @@ pub fn unix_now() -> u64 {
         .map_or(0, |d| d.as_secs())
 }
 
+/// Time of day of `unix` seconds as "HH:MM:SS UTC", for log lines (the
+/// apps add no time-zone dependency for this).
+pub fn utc_time(unix: u64) -> String {
+    let s = unix % 86_400;
+    format!("{:02}:{:02}:{:02} UTC", s / 3600, s / 60 % 60, s % 60)
+}
+
 /// The host's offer code: its identity key, a single-use nonce, expiry
 /// `now + ttl_secs`, and one host candidate (Phase 3: loopback). The ICE
 /// fields are random filler until Phase 5 uses them.
@@ -273,6 +280,14 @@ pub fn offer_code(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn utc_time_of_day() {
+        assert_eq!(utc_time(0), "00:00:00 UTC");
+        // 2026-11-01 11:22:33 UTC
+        assert_eq!(utc_time(1_793_532_153), "11:22:33 UTC");
+        assert_eq!(utc_time(86_399), "23:59:59 UTC");
+    }
 
     #[test]
     fn d29_display_unavailable_text_rounds_up_to_whole_seconds() {

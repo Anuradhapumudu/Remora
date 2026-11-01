@@ -195,9 +195,12 @@ fn a28_no_secret_appears_in_any_action_or_reason() {
     let (h, v) = (device("host"), device("viewer"));
     let mut host = host_with(&h, vec![]);
     let otp = host.otp().reveal().to_owned();
-    let mut c = to_active(&mut host, &v, ip(1));
+    // The wrong attempt comes first: while a session is Active a new
+    // connection is refused before any crypto (H9, phase 4.5), so it would
+    // no longer reach the password path this test scans.
     let wrong_mode = wrong_password_mode(&host);
     let wrong = connect(&mut host, &v, wrong_mode, ip(2), T0);
+    let mut c = to_active(&mut host, &v, ip(1));
     let send = c.viewer.send_input(input_click()).unwrap();
     c.feed_viewer_actions(&mut host, vec![send]);
     let canaries = [

@@ -26,5 +26,8 @@ remora-capture = { workspace = true }
 remora-codec = { workspace = true }
 objc2-foundation = { workspace = true, features = ["NSProcessInfo"] }
 
+[dev-dependencies]
+rand_core = { workspace = true }
+
 [lints]
 workspace = true

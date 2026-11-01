@@ -490,6 +490,12 @@ fn report_close(local: Option<CloseCode>, remote: Option<CloseCode>) -> u8 {
             println!("failed: the host's screen capture stopped (it needs attention at the host)");
             exit::ERROR
         }
+        Some(CloseCode::HostBusy) => {
+            println!(
+                "the host is busy: someone else is connected to it (try again when their session ends)"
+            );
+            exit::ERROR
+        }
         Some(CloseCode::AuthFailed) => {
             println!("failed: authentication failed (wrong or used password, or not trusted)");
             exit::AUTH

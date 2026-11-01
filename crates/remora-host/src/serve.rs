@@ -129,14 +129,13 @@ async fn serve(args: ServeArgs) -> anyhow::Result<()> {
         .cert(&args.name, unix_now())
         .context("--name is at most 64 bytes")?;
     let public = keys.identity.public();
-    let config = HostConfig {
-        identity: Arc::new(Identity {
+    let config = host_config(
+        Identity {
             noise: keys.noise,
             cert,
-        }),
-        password_enabled: true,
+        },
         trusted,
-    };
+    );
     let (server, mut events) = HostServer::bind(args.bind, config).await?;
     let server = Arc::new(server);
     let addr = server.local_addr()?;
@@ -182,6 +181,19 @@ async fn serve(args: ServeArgs) -> anyhow::Result<()> {
     ui.video.stop();
     ui.server.shutdown();
     Ok(())
+}
+
+/// The session layer's configuration for this app: password mode on, the
+/// `--trust` keys, and one viewer at a time (phase4.5-criteria H9, owner
+/// 2026-10-25). The GUI uses the same function, so both front ends refuse a
+/// second viewer.
+pub(crate) fn host_config(identity: Identity, trusted: Vec<IdentityPublic>) -> HostConfig {
+    HostConfig {
+        identity: Arc::new(identity),
+        password_enabled: true,
+        trusted,
+        one_active_session: true,
+    }
 }
 
 /// One session as the person sees it: a prompt number (F-UX1) for the
@@ -307,6 +319,13 @@ impl Ui {
                 println!("note: 3 failed attempts - the password was replaced");
             }
             HostEvent::OtpUsed { .. } => {}
+            // H9: refused before the handshake, so not a password attempt;
+            // one line per attempt (owner), time and address only.
+            HostEvent::RefusedBusy { peer } => println!(
+                "refused: {} tried to connect at {} while a session is active (host busy; not a password attempt)",
+                peer.ip(),
+                remora_app::cli::utc_time(unix_now())
+            ),
             // A new viewer, a viewer's request (rate-limited by the
             // session) or capture resumed.
             HostEvent::ForceKeyframe => self.video.force_keyframe(),
@@ -601,4 +620,19 @@ pub(crate) fn identity(file: Option<PathBuf>) -> anyhow::Result<()> {
     println!("identity: {}", identity_hex(&public));
     println!("device: {}", short_code_of(&public));
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn h9_the_app_serves_one_viewer_at_a_time() {
+        let keys = remora_crypto::identity::DeviceKeys::generate(&mut rand_core::OsRng);
+        let identity = Identity {
+            cert: keys.cert("test", 0).expect("short name"),
+            noise: keys.noise,
+        };
+        assert!(host_config(identity, vec![]).one_active_session);
+    }
 }

@@ -84,7 +84,7 @@ fn active(host: &mut Host) -> Conn {
 fn m3_host_seals_nothing_for_a_session_before_active() {
     let h = device("host");
     let v = device("viewer");
-    let mut host = host_with(&h, vec![]);
+    let mut host = host_multi_viewer(&h);
     // A positive control: without an Active session that does get media,
     // "no media for the others" would pass even if sending were broken.
     let control = to_active(&mut host, &v, ip(9));
@@ -425,7 +425,7 @@ fn m8_a_key_is_replaced_after_an_hour_even_with_few_packets() {
 #[test]
 fn m8_every_session_has_its_own_key() {
     let h = device("host");
-    let mut host = host_with(&h, vec![]);
+    let mut host = host_multi_viewer(&h);
     let (va, vb) = (device("a"), device("b"));
     let mut a = to_active(&mut host, &va, ip(1));
     let mut b = to_active(&mut host, &vb, ip(2));
