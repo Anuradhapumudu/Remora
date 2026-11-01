@@ -143,7 +143,7 @@ jobs:
   # scripted edit silently cut off everything after one row; this guard
   # makes that, a deleted deferred item, or a malformed row fail CI.
   roadmap:
-    name: roadmap tables intact
+    name: roadmap tables intact, no test removed
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -154,6 +154,7 @@ jobs:
       - name: Self-test (planted breakages must be caught)
         run: python3 -I scripts/ci/check-roadmap.py --self-test
       - name: Compare with the base version
+        id: base
         env:
           EVENT: ${{ github.event_name }}
           BEFORE: ${{ github.event.before }}
@@ -167,6 +168,13 @@ jobs:
             base="HEAD~1"
           fi
           python3 -I scripts/ci/check-roadmap.py "$base"
+          echo "base=$base" >> "$GITHUB_OUTPUT"
+      - name: Self-test of the removed-test check (planted removals must be caught)
+        run: python3 -I scripts/ci/check-tests.py --self-test
+      - name: No test disappears (R2; docs/removed-tests.md for a reason)
+        env:
+          BASE: ${{ steps.base.outputs.base }}
+        run: python3 -I scripts/ci/check-tests.py "$BASE"
 
   # Measuring runs (R9, phase4.5-criteria §15): the shared helper decides
   # whether a run counts (AC power, no sleep, display on, no pausing

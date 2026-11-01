@@ -524,7 +524,7 @@ table rows).
 | # | Requirement (where) | Enforced by | Status |
 |---|---|---|---|
 | R1 | The 20 ms end-to-end budget is never raised (§0) | P1 threshold in the session runner (`P1_P95_MS`), and §9 ≤ 15.53 ms | exists |
-| R2 | The CLI stays and keeps every Phase 3/4 test (§0 item 8) | none: a deleted test would pass CI | **to build** (owner, 2026-10-27): CI compares the list of test names with the base, as the roadmap check does for IDs |
+| R2 | The CLI stays and keeps every Phase 3/4 test (§0 item 8) | `scripts/ci/check-tests.py` (CI `roadmap` job, pre-push against the upstream branch): every `#[test]` / `#[tokio::test]` fn and the compile-fail doctest count per file, BASE vs HEAD, from source; a removal needs a row in `docs/removed-tests.md`; moves within a crate pass. Plants: a real H9 test deleted (caught, named); in the checker, tokio tests unseen, cross-crate moves accepted, a fn after a second attribute missed (each caught) | **built** 2026-11-01 |
 | R3 | P5 < 150 MB with the GUI as in a session, ≥ 5 MB spare, corrected measure (§3) | `p5-recheck.py` extended to the GUI viewer; plant C at session start | to build (step 7) |
 | R4 | ≤ 4 pending handshakes means at most 4 dialogs, never more (§4) | none yet | test in the decision module (step 5), with a plant of a 5th dialog |
 | R5 | The dialog says "Accept only if the other person reads you the same code" (§4) | none yet | GUI test (step 6) |

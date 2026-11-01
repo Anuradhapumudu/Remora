@@ -30,6 +30,9 @@ step "measuring helper and every runner using it (R9)"
 python3 -I scripts/macos/measuring.py --self-test
 python3 -I scripts/ci/check-measuring.py --self-test > /dev/null
 python3 -I scripts/ci/check-measuring.py
+step "no test removed (R2) against the upstream branch"
+python3 -I scripts/ci/check-tests.py --self-test > /dev/null
+python3 -I scripts/ci/check-tests.py "$(git rev-parse --verify -q '@{upstream}' || echo HEAD~1)"
 step "roadmap tables"
 python3 -I scripts/ci/check-roadmap.py
 
