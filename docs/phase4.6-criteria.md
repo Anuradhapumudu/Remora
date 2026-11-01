@@ -10,7 +10,7 @@ this work alongside them (D-50, 2026-11-01: "laptop control next").
 ## 0. What the spikes showed (evidence, not belief)
 
 All numbers: `spikes/linux-capture/results/sl1a-20261102.txt`. The machine
-is the owner's laptop: Fedora 43, GNOME 50 on Wayland, 1920×1080, no
+is the owner's laptop: Fedora 44, GNOME 50 on Wayland, 1920×1080, no
 hardware video encoder.
 
 | Spike | Result |

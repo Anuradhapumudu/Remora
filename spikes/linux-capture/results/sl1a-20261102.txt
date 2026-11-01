@@ -146,7 +146,7 @@ third-party repositories needed. Open for the criteria: the 4K panel case
 (capture is 15-21 fps at 4K: GPU scaling or capturing at 1080p), CPU load
 of 8 encoder threads, and p95 against the 20 ms budget end to end.
 
-== S-L1c: sl1-host (laptop, Fedora 43 / GNOME 50 Wayland, 1080p) -> Mac remora-viewer, Wi-Fi LAN
+== S-L1c: sl1-host (laptop, Fedora 44 / GNOME 50 Wayland, 1080p) -> Mac remora-viewer, Wi-Fi LAN
 Full Remora session: rendezvous code + password, safety code matched (059 573),
 accepted at the host, E2E-encrypted media (same remora-net/session crates).
 Capture: portal ScreenCast + PipeWire, restore token (no dialog).
