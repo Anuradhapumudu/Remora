@@ -15,6 +15,8 @@ mod serve;
 #[cfg(target_os = "macos")]
 mod stream;
 // Used by the macOS benchmark; pure Rust, so their tests run on every platform.
+#[cfg(target_os = "macos")]
+mod gui;
 #[cfg(any(target_os = "macos", test))]
 mod stats;
 #[cfg(any(target_os = "macos", test))]
@@ -31,6 +33,10 @@ struct Cli {
 enum Command {
     /// Phase 3: accept authenticated, host-approved sessions on loopback.
     Serve(serve::ServeArgs),
+    /// Phase 4.5: the same host with windows: the code and password, an
+    /// Accept/Deny dialog per viewer, and the session indicator.
+    #[cfg(target_os = "macos")]
+    Gui(serve::ServeArgs),
     /// Print this host's identity key and device code (created if needed).
     Identity {
         /// Key file (default: the per-user config directory).
@@ -84,6 +90,8 @@ fn main() -> ExitCode {
             Ok(())
         }
         Some(Command::Serve(args)) => serve::run(args),
+        #[cfg(target_os = "macos")]
+        Some(Command::Gui(args)) => gui::run(args),
         Some(Command::Identity { identity_file }) => serve::identity(identity_file),
         #[cfg(target_os = "macos")]
         Some(Command::BenchCapture(args)) => bench::run(args),

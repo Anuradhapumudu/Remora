@@ -37,14 +37,14 @@ use remora_net::{HostEvent, HostServer, IDLE_TIMEOUT};
 use remora_session::{HostConfig, Identity, SessionId};
 
 /// How long each printed connection code is valid (protocol.md §2: ≤ 5 min).
-const CODE_TTL: Duration = Duration::from_secs(300);
+pub(crate) const CODE_TTL: Duration = Duration::from_secs(300);
 
 /// `remora-host serve` options.
 #[derive(clap::Args, Debug)]
 pub(crate) struct ServeArgs {
     /// Address to listen on (Phase 3: a specific local address).
     #[arg(long, default_value = "127.0.0.1:0")]
-    bind: SocketAddr,
+    pub(crate) bind: SocketAddr,
     /// Key file (default: the per-user config directory).
     #[arg(long)]
     identity_file: Option<PathBuf>,
@@ -59,21 +59,21 @@ pub(crate) struct ServeArgs {
     /// test pattern (no Screen Recording permission needed; tests and
     /// measurements), or nothing (Phase 3: control channel only).
     #[arg(long, value_enum, default_value_t = Source::default())]
-    source: Source,
+    pub(crate) source: Source,
     /// Width of the streamed picture in pixels (the screen is scaled to
     /// it, keeping its aspect ratio; never upscaled).
     #[arg(long, default_value_t = 1920)]
-    width: u32,
+    pub(crate) width: u32,
     /// Print one `timing:` line per sent frame on stderr: shared-clock
     /// times of capture, encoder output and send (latency measurement,
     /// phase4-criteria P1/P2). Times only.
     #[arg(long)]
-    timing: bool,
+    pub(crate) timing: bool,
 }
 
 /// `serve --source`.
 #[derive(clap::ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
-enum Source {
+pub(crate) enum Source {
     /// The main display.
     Screen,
     /// A test pattern whose frames carry their number (phase4-criteria P7).
@@ -102,7 +102,19 @@ pub(crate) fn run(args: ServeArgs) -> anyhow::Result<()> {
     rt.block_on(serve(args))
 }
 
-async fn serve(args: ServeArgs) -> anyhow::Result<()> {
+/// What both front ends (CLI and GUI) build a host from.
+pub(crate) struct Setup {
+    pub(crate) config: HostConfig,
+    pub(crate) public: IdentityPublic,
+    pub(crate) trusted: Vec<IdentityPublic>,
+    /// The F-UX2 warning about the unencrypted key file (shown every run).
+    pub(crate) key_warning: String,
+    /// Where a new identity was created, if one was.
+    pub(crate) created: Option<PathBuf>,
+}
+
+/// Checks the options and loads (or creates) this host's keys.
+pub(crate) fn setup(args: &ServeArgs) -> anyhow::Result<Setup> {
     check_source(args.source, args.width)?;
     if args.bind.ip().is_unspecified() {
         bail!(
@@ -115,16 +127,11 @@ async fn serve(args: ServeArgs) -> anyhow::Result<()> {
         .iter()
         .map(|k| parse_identity(k).with_context(|| format!("--trust {k}")))
         .collect::<anyhow::Result<Vec<_>>>()?;
-    let path = match args.identity_file {
-        Some(p) => p,
+    let path = match &args.identity_file {
+        Some(p) => p.clone(),
         None => keystore::default_path(Role::Host)?,
     };
     let (keys, created) = keystore::load_or_create(&path)?;
-    // F-UX2: on EVERY run, not only when the file is created.
-    eprintln!("{}", key_file_warning(&path));
-    if created {
-        println!("note: created a new device identity in {}", path.display());
-    }
     let cert = keys
         .cert(&args.name, unix_now())
         .context("--name is at most 64 bytes")?;
@@ -134,8 +141,30 @@ async fn serve(args: ServeArgs) -> anyhow::Result<()> {
             noise: keys.noise,
             cert,
         },
-        trusted,
+        trusted.clone(),
     );
+    Ok(Setup {
+        config,
+        public,
+        trusted,
+        key_warning: key_file_warning(&path),
+        created: created.then_some(path),
+    })
+}
+
+async fn serve(args: ServeArgs) -> anyhow::Result<()> {
+    let Setup {
+        config,
+        public,
+        key_warning,
+        created,
+        ..
+    } = setup(&args)?;
+    // F-UX2: on EVERY run, not only when the file is created.
+    eprintln!("{key_warning}");
+    if let Some(path) = created {
+        println!("note: created a new device identity in {}", path.display());
+    }
     let (server, mut events) = HostServer::bind(args.bind, config).await?;
     let server = Arc::new(server);
     let addr = server.local_addr()?;
@@ -430,7 +459,7 @@ fn check_source(source: Source, width: u32) -> anyhow::Result<()> {
 /// The video stream (macOS): started when the person accepts a viewer,
 /// stopped when the last session ends, so nothing is captured while
 /// nobody is connected.
-struct Video {
+pub(crate) struct Video {
     #[cfg(target_os = "macos")]
     source: Source,
     #[cfg(target_os = "macos")]
@@ -440,13 +469,13 @@ struct Video {
     #[cfg(target_os = "macos")]
     timing: bool,
     /// Sessions that are Active.
-    active: std::collections::HashSet<SessionId>,
+    pub(crate) active: std::collections::HashSet<SessionId>,
     #[cfg(target_os = "macos")]
     running: Option<crate::stream::Streamer>,
 }
 
 impl Video {
-    fn new(source: Source, width: u32, timing: bool, server: Arc<HostServer>) -> Self {
+    pub(crate) fn new(source: Source, width: u32, timing: bool, server: Arc<HostServer>) -> Self {
         // Other systems stream nothing yet (`check_source` refused it).
         #[cfg(not(target_os = "macos"))]
         let _ = (source, width, timing, server);
@@ -468,7 +497,7 @@ impl Video {
     /// Makes sure the stream runs before a viewer is approved, and tells
     /// the session layer whether capture works.
     #[cfg(target_os = "macos")]
-    fn prepare(&mut self) {
+    pub(crate) fn prepare(&mut self) {
         use remora_capture::{CaptureConfig, MacScreenCapture, ScreenCapture};
         use remora_session::CaptureStatus;
 
@@ -509,7 +538,7 @@ impl Video {
     #[cfg(not(target_os = "macos"))]
     fn prepare(&mut self) {}
 
-    fn force_keyframe(&self) {
+    pub(crate) fn force_keyframe(&self) {
         #[cfg(target_os = "macos")]
         if let Some(s) = &self.running {
             s.force_keyframe();
@@ -517,19 +546,19 @@ impl Video {
     }
 
     /// Session `id` is over.
-    fn ended(&mut self, id: SessionId) {
+    pub(crate) fn ended(&mut self, id: SessionId) {
         self.active.remove(&id);
         self.idle_check();
     }
 
     /// Stops the stream when no session is Active.
-    fn idle_check(&mut self) {
+    pub(crate) fn idle_check(&mut self) {
         if self.active.is_empty() {
             self.stop();
         }
     }
 
-    fn stop(&mut self) {
+    pub(crate) fn stop(&mut self) {
         #[cfg(target_os = "macos")]
         if let Some(s) = self.running.take() {
             s.stop();
