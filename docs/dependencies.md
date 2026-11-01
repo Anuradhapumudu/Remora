@@ -135,7 +135,7 @@ covers every platform, so the list also holds Linux crates (Wayland, X11,
 14-day rule and `cargo deny` check them all the same.
 
 * **14-day rule** (`check-crate-age.py`): 36 were newer than 14 days on
-  2026-11-01 and are locked to the newest older release: `annotate-snippets` 0.12.17 → **0.12.16**, `crc32fast` 1.5.3 → **1.5.2**, `lyon_algorithms` 1.0.22 → **1.0.21**, `lyon_geom` 1.0.20 → **1.0.19**, `memmap2` 0.9.12 → **0.9.11**, `ordered-float` 5.5.1 → **5.5.0**, `pulldown-cmark` 0.13.6 → **0.13.4**, `roxmltree` 0.21.2 → **0.21.1**, `smol_str` 0.3.7 → **0.3.6**, `utf8_iter` 1.1.0 → **1.0.4**, `uuid` 1.29.0 → **1.28.0**, `webbrowser` 1.2.6 → **1.2.4**, `wl-clipboard-rs` 0.9.5 → **0.9.4**, `yazi` 0.2.2 → **0.2.1**, `zcheapstr` 1.2.0 → **1.1.0**. The
+  2026-11-01 and are locked to the newest older release: `annotate-snippets` 0.12.17 → **0.12.16**, `crc32fast` 1.5.3 → **1.5.2**, `lyon_algorithms` 1.0.22 → **1.0.21**, `lyon_geom` 1.0.20 → **1.0.19**, `memmap2` 0.9.12 → **0.9.11**, `ordered-float` 5.5.1 → **5.5.0**, `pulldown-cmark` 0.13.6 → **0.13.5** (0.13.4 first, which `cargo deny` refused: RUSTSEC-2026-0414, see below), `roxmltree` 0.21.2 → **0.21.1**, `smol_str` 0.3.7 → **0.3.6**, `utf8_iter` 1.1.0 → **1.0.4**, `uuid` 1.29.0 → **1.28.0**, `webbrowser` 1.2.6 → **1.2.4**, `wl-clipboard-rs` 0.9.5 → **0.9.4**, `yazi` 0.2.2 → **0.2.1**, `zcheapstr` 1.2.0 → **1.1.0**. The
   `icu` family (all released 2026-10-22, each requiring the others at the
   same version) moved as one set: `icu_collections` → **2.3.0**, `icu_decimal` → **2.3.0**, `icu_decimal_data` → **2.3.0**, `icu_locale_core` → **2.3.0**, `icu_locale_fallback` → **2.3.0**, `icu_locale_fallback_data` → **2.3.0**, `icu_normalizer` → **2.3.0**, `icu_normalizer_data` → **2.3.0**, `icu_plurals` → **2.3.0**, `icu_plurals_data` → **2.3.0**, `icu_properties` → **2.3.0**, `icu_properties_data` → **2.3.0**, `icu_provider` → **2.3.1**, `icu_segmenter` → **2.3.0**, `icu_segmenter_data` → **2.3.0**, `fixed_decimal` → **0.7.2**, `tinystr` → **0.8.4**, `yoke` → **0.8.3**, `zerovec` → **0.11.8**, `zerovec-derive` → **0.11.6**.
 * **`clipboard-win` has no compliant release yet.** 5.2.0–5.4.1 are all
@@ -145,6 +145,20 @@ covers every platform, so the list also holds Linux crates (Wayland, X11,
   uses Apple's clipboard on macOS), but it is in the lock, so the commits
   that add Slint are pushed after that time (roadmap D-47). No exception:
   the exception file is for security fixes only.
+* **An older release can carry a fixed vulnerability.** Locking
+  `pulldown-cmark` to 0.13.4 for the 14-day rule brought back
+  RUSTSEC-2026-0414 (exponential event growth with `ENABLE_WIKILINKS`,
+  fixed in 0.13.5); `cargo deny` refused it before anything was pushed.
+  0.13.5 (2026-10-21 19:45 UTC) is 14 days old before these commits can be
+  pushed (D-47), so it needs no exception. It is used only by Slint's markup
+  compiler, at build time. **Rule:** after locking an older release, run
+  `cargo deny check advisories` before committing.
+* **Unmaintained (RustSec warnings, not vulnerabilities):** `bincode` 2.0.1
+  (RUSTSEC-2025-0141), `ttf-parser` 0.25.1 (RUSTSEC-2026-0192), `zbus_names`
+  4.3.5, `zvariant` / `zvariant_derive` 5.15.1 (RUSTSEC-2026-0370..0372).
+  All come through Slint; `zbus*` / `zvariant*` only on Linux (AT-SPI). The
+  policy reports unmaintained crates for our direct dependencies only
+  (`deny.toml`), so these are recorded here, not failed.
 * **Licences** (`cargo deny`): Slint's own crates are "GPL-3.0-only OR
   LicenseRef-Slint-…"; Remora takes GPL-3.0-only for the GPL apps, with one
   `[[licenses.exceptions]]` entry per Slint crate. `BSL-1.0` (Boost, permissive)
@@ -341,7 +355,7 @@ it in (one shortest path from our crates; R8 checks that each is here):
 | `potential_utf` | 0.1.6 | Unicode-3.0 | `icu_locale_fallback` |
 | `presser` | 0.3.1 | MIT OR Apache-2.0 | `gpu-allocator` |
 | `prettyplease` | 0.2.37 | MIT OR Apache-2.0 | `bindgen` |
-| `pulldown-cmark` | 0.13.4 | MIT | `i-slint-common` |
+| `pulldown-cmark` | 0.13.5 | MIT | `i-slint-common` |
 | `pxfm` | 0.1.30 | BSD-3-Clause OR Apache-2.0 | `moxcms` |
 | `quick-error` | 2.0.1 | MIT/Apache-2.0 | `image-webp` |
 | `quick-xml` | 0.41.0 | MIT | `wayland-scanner` |
