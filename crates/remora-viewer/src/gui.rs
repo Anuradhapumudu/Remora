@@ -332,7 +332,14 @@ async fn run(
     };
     let (client, mut events) = remora_net::connect(target.addr, config, target.nonce).await?;
     let c = client.clone();
-    let _ = slint::invoke_from_event_loop(move || on_gui(move |g| g.client = Some(c)));
+    let _ = slint::invoke_from_event_loop(move || {
+        VIDEO.with(|v| {
+            if let Some(v) = v.borrow_mut().as_mut() {
+                v.set_client(Some(c.clone()));
+            }
+        });
+        on_gui(move |g| g.client = Some(c));
+    });
     let show: crate::decode::Show = Some(Box::new(|p| {
         let _ = slint::winit_030::invoke_from_active_event_loop(move |el| {
             VIDEO.with(|v| {

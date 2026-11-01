@@ -33,6 +33,8 @@ pub(crate) enum Event {
     Counters(Arc<Counters>),
     /// The stream paused (`Some`) or resumed (`None`).
     Pause(Option<crate::Pause>),
+    /// The connection, for mouse and keyboard (sent once, after connecting).
+    Client(remora_net::ViewerClient),
     /// The session ended with this exit code.
     Ended(u8),
 }
@@ -67,6 +69,11 @@ pub(crate) struct VideoWindow {
     covered: Covered,
     /// The host's device ID for the title (the GUI sets it; empty in the CLI).
     host: String,
+    /// Mouse and keyboard → `Input` messages (phase4.6-criteria step 3).
+    input: crate::input::InputState,
+    /// Where input goes; set once the session is connected, cleared when
+    /// the window closes.
+    client: Option<remora_net::ViewerClient>,
 }
 
 /// The video window's title (owner, 2026-11-01, phase4.5-criteria §16):
@@ -164,6 +171,21 @@ impl VideoWindow {
             pause: None,
             covered: Covered::default(),
             host: String::new(),
+            input: crate::input::InputState::default(),
+            client: None,
+        }
+    }
+
+    /// The connection mouse and keyboard events go to (`None`: not sent).
+    pub(crate) fn set_client(&mut self, client: Option<remora_net::ViewerClient>) {
+        self.client = client;
+    }
+
+    fn send(&self, messages: impl IntoIterator<Item = remora_proto::messages::Input>) {
+        if let Some(c) = &self.client {
+            for m in messages {
+                c.send_input(m);
+            }
         }
     }
 
@@ -209,6 +231,7 @@ impl VideoWindow {
 
     /// Closes the window (the session is ending).
     pub(crate) fn close(&mut self) {
+        self.client = None;
         if let Some(w) = self.window.take() {
             w.set_visible(false);
         }
@@ -250,6 +273,7 @@ impl VideoWindow {
             wgpu::PresentMode::Fifo
         };
         let size = window.inner_size();
+        self.input.resized(size.width, size.height);
         let mut config = surface
             .get_default_config(&adapter, size.width.max(1), size.height.max(1))
             .ok_or_else(|| anyhow::anyhow!("the window surface does not fit the GPU"))?;
@@ -410,11 +434,16 @@ impl VideoWindow {
         if let Some(c) = &self.counters {
             c.shown();
         }
+        // Coalesced pointer motion: at most one per drawn picture.
+        let pending = self.input.flush(Instant::now());
+        self.send(pending);
     }
 
     /// An event for this window; returns `true` when the person closed it
     /// (the session should end with a Goodbye).
     pub(crate) fn window_event(&mut self, event: &WindowEvent) -> bool {
+        let messages = self.input.event(event, Instant::now());
+        self.send(messages);
         match event {
             WindowEvent::CloseRequested => {
                 self.close();
@@ -460,6 +489,7 @@ impl ApplicationHandler<Event> for App {
             Event::Picture(p) => self.video.picture(el, p),
             Event::Counters(c) => self.video.set_counters(c),
             Event::Pause(p) => self.video.set_pause(p),
+            Event::Client(c) => self.video.set_client(Some(c)),
             Event::Ended(code) => {
                 self.exit_code = Some(code);
                 el.exit();

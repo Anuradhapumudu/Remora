@@ -17,6 +17,10 @@ mod decode;
 #[cfg(target_os = "macos")]
 mod gui;
 #[cfg(target_os = "macos")]
+mod input;
+#[cfg(target_os = "macos")]
+mod keymap;
+#[cfg(target_os = "macos")]
 mod window;
 
 use std::path::PathBuf;
@@ -159,6 +163,7 @@ fn connect_command(args: ConnectArgs) -> anyhow::Result<u8> {
         let display = Display {
             show: None,
             on_counters: Box::new(|_| {}),
+            on_client: Box::new(|_| {}),
             on_pause: Box::new(|_| {}),
             close: None,
         };
@@ -168,7 +173,11 @@ fn connect_command(args: ConnectArgs) -> anyhow::Result<u8> {
         let show_proxy = proxy.clone();
         let counters_proxy = proxy.clone();
         let pause_proxy = proxy.clone();
+        let client_proxy = proxy.clone();
         let display = Display {
+            on_client: Box::new(move |c| {
+                let _ = client_proxy.send_event(Event::Client(c));
+            }),
             show: Some(Box::new(move |p| {
                 let _ = show_proxy.send_event(Event::Picture(p));
             })),
@@ -192,6 +201,7 @@ fn connect_command(args: ConnectArgs) -> anyhow::Result<u8> {
     let display = Display {
         show: decode::Show,
         on_counters: Box::new(|_| {}),
+        on_client: Box::new(|_| {}),
         on_pause: Box::new(|_| {}),
         close: None,
     };
@@ -202,6 +212,8 @@ fn connect_command(args: ConnectArgs) -> anyhow::Result<u8> {
 struct Display {
     show: decode::Show,
     on_counters: Box<dyn FnOnce(Arc<decode::Counters>) + Send>,
+    /// The connection, for the window's mouse and keyboard (step 3).
+    on_client: Box<dyn FnOnce(remora_net::ViewerClient) + Send>,
     /// The stream paused (`Some`) or resumed (`None`), for the window.
     on_pause: Box<dyn Fn(Option<Pause>) + Send>,
     close: Option<tokio::sync::oneshot::Receiver<()>>,
@@ -349,6 +361,7 @@ async fn run_connect(args: ConnectArgs, display: Display) -> anyhow::Result<u8> 
     let mut decoder =
         decode::Decoder::start(client.clone(), display.show).context("decoder thread")?;
     (display.on_counters)(decoder.counters());
+    (display.on_client)(client.clone());
     let code = session_loop(
         &client,
         &mut events,

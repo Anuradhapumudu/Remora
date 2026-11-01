@@ -35,6 +35,7 @@ pollster = { workspace = true }
 i-slint-backend-testing = { workspace = true }
 
 [dev-dependencies]
+prost = { workspace = true }
 rand_core = { workspace = true }
 remora-testkit = { workspace = true }
 
