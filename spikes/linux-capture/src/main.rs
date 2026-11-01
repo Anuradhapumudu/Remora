@@ -88,7 +88,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let seconds: u64 = std::env::args().nth(1).and_then(|s| s.parse().ok()).unwrap_or(20);
     let dmabuf = std::env::args().nth(2).as_deref() == Some("dmabuf");
     let mode = std::env::args().nth(2).unwrap_or_default();
-    let par = mode == "encode-par";
+    let slices = mode == "encode-slices";
+    let par = mode == "encode-par" || slices;
     let fast = mode == "encode-fast" || par;
     let encode = mode == "encode" || fast;
     // 1. The portal: the person picks a monitor in GNOME's dialog, once. The
@@ -158,6 +159,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .num_threads(8)
                 .max_frame_rate(FrameRate::from_hz(60.0))
                 .skip_frames(false);
+            // Size-limited slices (~1.2 KB each) so the encoder's threads have
+            // independent pieces to work on.
+            let config = if slices { config.max_slice_len(1200) } else { config };
             Some(openh264::encoder::Encoder::with_api_config(
                 openh264::OpenH264API::from_source(),
                 config,
@@ -351,7 +355,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let (c50, c95) = (pct(&mut st.convert_ms, 0.5), pct(&mut st.convert_ms, 0.95));
         println!(
             "ENCODE sl1b{}: {n} pictures, convert+encode p50 {e50:.1} p95 {e95:.1} ms (of which convert p50 {c50:.1} p95 {c95:.1}),",
-            if par { " par" } else if fast { " fast" } else { "" }
+            if slices { " slices" } else if par { " par" } else if fast { " fast" } else { "" }
         );
         println!(
             "  {:.1} KB/picture, {:.2} Mbit/s",

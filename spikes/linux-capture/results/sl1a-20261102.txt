@@ -128,3 +128,20 @@ one. Next: openh264 slices (so its threads can work in parallel; the crate
 exposes max_slice_len only) and a hardware encoder (Quick Sync via VA-API
 needs RPM Fusion's intel-media-driver; NVENC needs NVIDIA's driver) - the
 latter is the owner's decision.
+
+Run 11 (as run 10, plus size-limited slices: EncoderConfig::max_slice_len(1200),
+so the encoder's 8 threads get independent pieces; restore token, no dialog):
+  ENCODE sl1b slices: 1093 pictures, convert+encode p50 10.7 p95 13.6 ms
+                      (of which convert p50 1.2 p95 1.3), 7.5 KB/picture, 3.37 Mbit/s
+  RESULT sl1a: 1093 frames in 20.0 s (54.6 fps), interval p50 16.4 p95 28.5 ms
+
+RESULT OF S-L1 (capture + encode on the owner's Fedora 44 laptop, 1080p):
+  capture (portal + PipeWire, shared memory)         55.3 fps, p50 16.7 ms
+  conversion BGRx->YUV420, 8 threads                  1.2 ms
+  openh264, real-time settings, slices, 8 threads    ~9.5 ms
+  total per picture                                  10.7 ms p50, 13.6 ms p95
+  stream                                             54.6 fps, 3.4 Mbit/s
+Software H.264 is viable on this CPU: no hardware encoder, extra drivers or
+third-party repositories needed. Open for the criteria: the 4K panel case
+(capture is 15-21 fps at 4K: GPU scaling or capturing at 1080p), CPU load
+of 8 encoder threads, and p95 against the 20 ms budget end to end.
