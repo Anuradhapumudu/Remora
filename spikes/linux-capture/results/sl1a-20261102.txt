@@ -58,3 +58,22 @@ the shared-memory copy was part of the limit, not all of it. Still open:
 the GPU's own (tiled) modifiers, queried through EGL, avoids that; (b) whether
 the browser itself draws 60 fps on this 4K panel was not measured. Not tried
 yet: a smaller capture size (GNOME may not scale for us), and 1920-wide panels.
+
+Runs 5-6 (owner switched the panel to 1920x1080; motion page full screen):
+  shared memory: BGRx 1920x1080, MemFd
+    RESULT sl1a: 1106 frames in 20.0 s (55.3 fps), 7.9 MB/frame,
+                 interval p50 16.7 p95 27.6 max 43.3 ms
+  DMA-BUF (linear): BGRx 1920x1080, DmaBuf
+    RESULT sl1a dmabuf: 992 frames in 20.0 s (49.6 fps), 7.9 MB/frame,
+                        interval p50 24.8 p95 30.7 max 38.0 ms
+  (Two earlier attempts at 1080p ran before the page was on screen: 0.3 and
+  7.2 fps with gaps of seconds; not counted.)
+
+Conclusion of S-L1a: the 4K picture size was the main limit. At 1080p the
+portal + PipeWire capture keeps up with a 60 Hz screen (55.3 fps, p50 16.7 ms)
+with plain shared memory; linear DMA-BUF is slower at this size (its layout
+conversion costs more than the copy). For the Linux host: capture at the
+size to be streamed (1920 wide) where possible; on a 4K panel GNOME captures
+at 4K, so DMA-BUF with the GPU's native modifiers plus GPU scaling is the
+path to test next. The p95 of 27.6 ms is above one refresh: to be compared
+with the Mac's capture (Phase 2: 60 fps steady).
