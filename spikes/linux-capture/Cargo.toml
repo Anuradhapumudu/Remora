@@ -15,4 +15,9 @@ license = "GPL-3.0-or-later"
 ashpd = { version = "=0.13.13", default-features = false, features = ["tokio", "screencast"] }
 pipewire = "=0.10.1"
 openh264 = "=0.9.8"
-tokio = { version = "=1.53.3", features = ["rt-multi-thread", "macros", "time"] }
+tokio = { version = "=1.53.3", features = ["rt-multi-thread", "macros", "time", "sync"] }
+# S-L1c: Remora's own host stack (QUIC, SPAKE2 + Noise, approval, sealed media).
+remora-net = { path = "../../crates/remora-net" }
+remora-session = { path = "../../crates/remora-session" }
+remora-app = { path = "../../crates/remora-app" }
+remora-crypto = { path = "../../crates/remora-crypto" }

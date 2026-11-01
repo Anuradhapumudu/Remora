@@ -145,3 +145,23 @@ Software H.264 is viable on this CPU: no hardware encoder, extra drivers or
 third-party repositories needed. Open for the criteria: the 4K panel case
 (capture is 15-21 fps at 4K: GPU scaling or capturing at 1080p), CPU load
 of 8 encoder threads, and p95 against the 20 ms budget end to end.
+
+== S-L1c: sl1-host (laptop, Fedora 43 / GNOME 50 Wayland, 1080p) -> Mac remora-viewer, Wi-Fi LAN
+Full Remora session: rendezvous code + password, safety code matched (059 573),
+accepted at the host, E2E-encrypted media (same remora-net/session crates).
+Capture: portal ScreenCast + PipeWire, restore token (no dialog).
+Encode: openh264, parallel BT.709 conversion, slices (S-L1b settings).
+Viewer stats once the window was visible:
+  13-33 fps drawn (mostly 30-33), decode p50 2.0-2.8 / p95 2.6-3.8 ms,
+  upload+draw p50 1.5-2.0 / p95 2.0-2.4 ms, refused 0, failed 0
+Media counters (whole run): frames 5723, frames_dropped 93 (1.6 %),
+  auth_failed 0, replayed 0, bad_fragments 0, late_fragments 0
+Notes:
+- First run looked broken ("waiting" climbing, 0 fps); cause was the viewer
+  window being covered ("no drawable ... occluded" climbed while 0 fps),
+  not the stream. Once visible it drew at once.
+- Each dropped frame (Wi-Fi loss) makes the decoder wait for the next
+  keyframe ("waiting" counter keeps growing slowly): this is the dip to
+  13 fps. Loss recovery (keyframe request latency / intra refresh) is
+  open for the D-50 criteria.
+- View only: no input yet (portal RemoteDesktop is the next step in D-50).
