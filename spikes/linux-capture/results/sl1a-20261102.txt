@@ -1,0 +1,32 @@
+Spike S-L1a (roadmap D-50): GNOME 50 / Wayland screen capture through the desktop
+portal (ScreenCast) + PipeWire 1.6.11, on the owner's Fedora 44 laptop
+(i5-12500H, Iris Xe + RTX 3050 Mobile, 3840x2160 panel), 2026-11-02.
+Build: spikes/linux-capture (ashpd 0.13.13, pipewire 0.10.1), cursor embedded,
+buffers mapped to memory (MAP_BUFFERS, shared memory).
+
+Run 1 (screen left still):
+  portal: answered in 117.0 s (the owner picked the monitor and clicked Share)
+  format: BGRx 3840x2160, framerate 0/1 (variable: frames only on damage)
+  RESULT sl1a: 7 frames in 23.1 s (0.3 fps), 31.6 MB/frame,
+               interval p50 5017.8 p95 6000.4 max 6000.4 ms
+
+Run 2 (owner moved things on screen; content not recorded):
+  portal: answered in 95.7 s
+  format: BGRx 3840x2160 @ 0/1
+  RESULT sl1a: 226 frames in 20.0 s (11.3 fps), 31.6 MB/frame,
+               interval p50 66.2 p95 183.8 max 2312.8 ms
+
+Findings:
+- The portal + PipeWire path works from a Rust program; the person must
+  approve in GNOME's dialog every time (persist mode off): consent on the
+  host side, as Remora wants.
+- Pictures come at the panel's full 4K (31.6 MB each). Software H.264 at 4K is
+  out of reach: the host must scale to 1920 wide (as the Mac does) before
+  encoding, or encode in hardware.
+- 11.3 fps is far below 60, cause NOT known: (a) the content may not have
+  changed faster, (b) shared-memory buffers make GNOME copy 31.6 MB out of the
+  GPU per frame (DMA-BUF avoids it), (c) GNOME's screencast limits. Next run:
+  a known 60 fps moving pattern on screen, and DMA-BUF buffers.
+- Hardware encoders present: Intel Quick Sync (VA-API) and NVIDIA NVENC, but
+  Fedora's packages leave H.264 encoding out (patents): RPM Fusion / NVIDIA
+  driver would be the owner's decision. openh264 (software) needs no install.
