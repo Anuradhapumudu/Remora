@@ -28,6 +28,9 @@ step "fuzz targets build (separate workspace; 8c19a68 broke one unseen)"
 step "crate-age exceptions (validity, exact expiry, warning under 48 h)"
 python3 -I scripts/ci/check-crate-age.py --self-test > /dev/null
 python3 -I scripts/ci/check-crate-age.py --exceptions-only
+step "newly locked crates are in docs/dependencies.md (R8)"
+python3 -I scripts/ci/check-dep-docs.py --self-test > /dev/null
+python3 -I scripts/ci/check-dep-docs.py "$(git rev-parse --verify -q '@{upstream}' || echo HEAD~1)"
 step "measuring helper and every runner using it (R9)"
 python3 -I scripts/macos/measuring.py --self-test
 python3 -I scripts/ci/check-measuring.py --self-test > /dev/null

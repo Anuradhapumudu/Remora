@@ -120,6 +120,7 @@ jobs:
       - name: Self-test (planted too-new entries must be caught)
         run: python3 -I scripts/ci/check-crate-age.py --self-test
       - name: Check newly locked crates
+        id: age
         env:
           EVENT: ${{ github.event_name }}
           BEFORE: ${{ github.event.before }}
@@ -137,6 +138,13 @@ jobs:
           else
             python3 -I scripts/ci/check-crate-age.py --all Cargo.lock fuzz/Cargo.lock
           fi
+          echo "base=${base:-HEAD~1}" >> "$GITHUB_OUTPUT"
+      - name: Self-test of the dependencies.md check (planted gaps must be caught)
+        run: python3 -I scripts/ci/check-dep-docs.py --self-test
+      - name: Every newly locked crate is in docs/dependencies.md (R8)
+        env:
+          BASE: ${{ steps.age.outputs.base }}
+        run: python3 -I scripts/ci/check-dep-docs.py "$BASE"
 
   # docs/roadmap.md's deferred-items list and progress log are what every
   # phase is judged against, and they are hand-edited. On 2026-10-19 a
