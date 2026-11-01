@@ -240,6 +240,22 @@ pub fn unix_now() -> u64 {
         .map_or(0, |d| d.as_secs())
 }
 
+/// The arguments an app runs with. Started from a dev bundle (Finder, Dock)
+/// it gets no arguments; the bundle's Info.plist sets `REMORA_GUI=1`
+/// (`LSEnvironment`), and then the app runs `gui` (phase4.5-criteria §0
+/// item 7, Q9). Any typed command is used as it is, and only macOS has a GUI.
+pub fn args_or_gui(
+    args: impl IntoIterator<Item = OsString>,
+    remora_gui: Option<OsString>,
+) -> Vec<OsString> {
+    let args: Vec<OsString> = args.into_iter().collect();
+    if cfg!(target_os = "macos") && args.len() <= 1 && remora_gui.is_some_and(|v| v == "1") {
+        let program = args.first().cloned().unwrap_or_default();
+        return vec![program, "gui".into()];
+    }
+    args
+}
+
 /// Time of day of `unix` seconds as "HH:MM:SS UTC", for log lines (the
 /// apps add no time-zone dependency for this).
 pub fn utc_time(unix: u64) -> String {
@@ -280,6 +296,25 @@ pub fn offer_code(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn args_or_gui_opens_the_gui_only_from_a_bundle_without_arguments() {
+        let os = |v: &[&str]| v.iter().map(OsString::from).collect::<Vec<_>>();
+        let gui = Some(OsString::from("1"));
+        let want = if cfg!(target_os = "macos") {
+            os(&["app", "gui"])
+        } else {
+            os(&["app"])
+        };
+        assert_eq!(args_or_gui(os(&["app"]), gui.clone()), want);
+        // A typed command always wins; no REMORA_GUI, or another value: unchanged.
+        assert_eq!(
+            args_or_gui(os(&["app", "serve"]), gui),
+            os(&["app", "serve"])
+        );
+        assert_eq!(args_or_gui(os(&["app"]), None), os(&["app"]));
+        assert_eq!(args_or_gui(os(&["app"]), Some("0".into())), os(&["app"]));
+    }
 
     #[test]
     fn utc_time_of_day() {

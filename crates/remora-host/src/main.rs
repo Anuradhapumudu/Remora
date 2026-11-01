@@ -78,7 +78,10 @@ enum Command {
 }
 
 fn main() -> ExitCode {
-    let cli = Cli::parse();
+    let cli = Cli::parse_from(remora_app::cli::args_or_gui(
+        std::env::args_os(),
+        std::env::var_os("REMORA_GUI"),
+    ));
     init_logging();
     let result: anyhow::Result<()> = match cli.command {
         None => {

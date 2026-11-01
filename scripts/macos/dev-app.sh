@@ -3,6 +3,8 @@
 # and run it through Launch Services so macOS attributes Screen Recording
 # permission to RemoraDev — not to Terminal.
 #
+# Opened from Finder with no arguments it runs the host GUI (Phase 4.5).
+#
 # Usage:
 #   scripts/macos/dev-app.sh build
 #   scripts/macos/dev-app.sh run <remora-host args…>     # e.g. bench-capture --seconds 60
@@ -33,8 +35,11 @@ build() {
       -e "s|<string>remora-viewer</string>|<string>remora-host</string>|" \
       -e "s|<string>Remora</string>|<string>RemoraDev</string>|g" \
       "$ROOT/packaging/macos/Info.plist.in" > "$APP/Contents/Info.plist"
-  # Background-only agent app: no Dock icon, never takes focus.
-  plutil -insert LSUIElement -bool true "$APP/Contents/Info.plist"
+  # A normal app (Dock icon, can take focus): the host's Accept/Deny dialog
+  # must come to the front (phase4.5-criteria Q9, H7). Opened with no
+  # arguments (Finder, Dock) it runs the host GUI: REMORA_GUI=1 makes
+  # `remora-host` with no command run `gui`; `run <command>` is unchanged.
+  plutil -insert LSEnvironment -json '{"REMORA_GUI":"1"}' "$APP/Contents/Info.plist"
   plutil -lint "$APP/Contents/Info.plist" >/dev/null
   codesign --force --sign "$IDENTITY" --identifier "$BUNDLE_ID" "$APP/Contents/MacOS/remora-host"
   codesign --force --sign "$IDENTITY" --identifier "$BUNDLE_ID" "$APP"

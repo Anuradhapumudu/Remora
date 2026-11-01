@@ -103,7 +103,10 @@ struct ConnectArgs {
 
 fn main() -> ExitCode {
     // F-UX6: a device code typed without quotes is rejoined first.
-    let cli = Cli::parse_from(join_device_words(std::env::args_os()));
+    let cli = Cli::parse_from(join_device_words(remora_app::cli::args_or_gui(
+        std::env::args_os(),
+        std::env::var_os("REMORA_GUI"),
+    )));
     init_logging();
     let result = match cli.command {
         None => {
