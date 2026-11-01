@@ -239,8 +239,10 @@ fn invalid_envelopes_are_rejected() {
             "({x},{y})"
         );
     }
+    // 4 back and 5 forward are valid since phase4.6-criteria L3; 6 is the
+    // first button outside the allowlist.
     assert!(invalid(inp(input::Kind::Button(MouseButton {
-        button: 4,
+        button: 6,
         down: true,
         x: 0.5,
         y: 0.5

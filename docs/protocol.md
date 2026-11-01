@@ -281,11 +281,14 @@ message StreamState      { bool paused = 1; uint32 reason = 2; uint32 remaining_
 message Input {
   oneof kind {
     MouseButton button = 1;  Key key = 2;  Scroll scroll = 3;  ReleaseAll release_all = 4;
+    PointerMove move = 5;   // Phase 4.6
   }
 }
-message MouseButton { Button button = 1; bool down = 2; float x = 3; float y = 4; uint32 monitor = 5; }
-message Key { uint32 usb_hid_usage = 1; bool down = 2; }  // physical key, layout-independent
-message Scroll { float dx = 1; float dy = 2; bool precise = 3; }
+message MouseButton { uint32 button = 1; bool down = 2; float x = 3; float y = 4; }  // 1 left, 2 right, 3 middle, 4 back, 5 forward
+message Key { uint32 usb_hid_usage = 1; bool down = 2; }  // physical key, layout-independent; 1..=0xFFFF
+message Scroll { float dx = 1; float dy = 2; bool precise = 3; }  // finite, |d| <= SCROLL_MAX (10 000)
+message ReleaseAll {}
+message PointerMove { float x = 1; float y = 2; }  // 0..1 within the monitor
 ```
 
 Notes:
@@ -294,8 +297,15 @@ Notes:
   Text input (IME) is a later addition.
 * **Mouse coordinates are normalised 0..1** within the monitor, so resolution
   changes never misplace clicks.
-* **Mouse motion** goes as a media-style datagram (latest-wins, loss harmless);
-  buttons/keys go on the reliable channel so a click is never lost.
+* **Mouse motion** is planned as a media-style datagram (latest-wins, loss
+  harmless; D-1b, Phase 6). **Phase 4.6 sends `PointerMove` on the reliable
+  stream**, at most one per drawn frame (phase4.6-criteria Q2); buttons/keys
+  go on the reliable channel so a click is never lost.
+* **Checked at decode** (`decode_envelope`, phase4.6-criteria L3): every
+  coordinate finite and in 0..1, button in 1..=5, HID usage in 1..=0xFFFF,
+  scroll finite and within `SCROLL_MAX`; anything else is a protocol
+  violation that ends the session. The host's `MouseButton.monitor` field
+  of the sketch is not in the wire format yet (one monitor).
 * **`RecoveryRequest` (tag 9), Phase 4:** viewer → host, Active only, no
   fields yet ("send a keyframe"; lost frame ids for LTR recovery come
   later). Sent when the viewer's decoder cannot continue: a frame refused

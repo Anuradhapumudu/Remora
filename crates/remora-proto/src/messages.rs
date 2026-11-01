@@ -129,7 +129,7 @@ pub struct RecoveryRequest {}
 /// Mouse button press/release at normalised coordinates.
 #[derive(Clone, Copy, PartialEq, prost::Message)]
 pub struct MouseButton {
-    /// 1 left, 2 right, 3 middle.
+    /// 1 left, 2 right, 3 middle, 4 back, 5 forward.
     #[prost(uint32, tag = "1")]
     pub button: u32,
     /// Pressed (true) or released.
@@ -153,6 +153,40 @@ pub struct Key {
     #[prost(bool, tag = "2")]
     pub down: bool,
 }
+
+/// Pointer moved to (x, y), each 0..=1 within the monitor (Phase 4.6).
+/// Rides the reliable stream for now; the viewer sends at most one per
+/// drawn frame (phase4.6-criteria Q2).
+#[derive(Clone, Copy, PartialEq, prost::Message)]
+pub struct PointerMove {
+    /// 0..=1 within the monitor.
+    #[prost(float, tag = "1")]
+    pub x: f32,
+    /// 0..=1 within the monitor.
+    #[prost(float, tag = "2")]
+    pub y: f32,
+}
+
+/// Scroll by (dx, dy): lines, or pixels when `precise` (trackpad).
+/// Each is finite and at most [`crate::limits::SCROLL_MAX`] in size.
+#[derive(Clone, Copy, PartialEq, prost::Message)]
+pub struct Scroll {
+    /// Horizontal amount.
+    #[prost(float, tag = "1")]
+    pub dx: f32,
+    /// Vertical amount.
+    #[prost(float, tag = "2")]
+    pub dy: f32,
+    /// Pixels (true) or lines (false).
+    #[prost(bool, tag = "3")]
+    pub precise: bool,
+}
+
+/// Viewer asks the host to release every key and button it pressed (for
+/// example when the video window loses focus). The host releases on every
+/// session end anyway (INV10); it does not rely on this message.
+#[derive(Clone, Copy, PartialEq, prost::Message)]
+pub struct ReleaseAll {}
 
 /// Control messages (reliable stream).
 #[derive(Clone, PartialEq, prost::Message)]
@@ -198,7 +232,7 @@ pub mod control {
 #[derive(Clone, PartialEq, prost::Message)]
 pub struct Input {
     /// The message.
-    #[prost(oneof = "input::Kind", tags = "1, 2")]
+    #[prost(oneof = "input::Kind", tags = "1, 2, 3, 4, 5")]
     pub kind: Option<input::Kind>,
 }
 
@@ -213,6 +247,15 @@ pub mod input {
         /// Keyboard key.
         #[prost(message, tag = "2")]
         Key(super::Key),
+        /// Scroll wheel / trackpad.
+        #[prost(message, tag = "3")]
+        Scroll(super::Scroll),
+        /// Release everything this viewer holds down.
+        #[prost(message, tag = "4")]
+        ReleaseAll(super::ReleaseAll),
+        /// Pointer motion.
+        #[prost(message, tag = "5")]
+        Move(super::PointerMove),
     }
 }
 
@@ -348,7 +391,7 @@ pub fn decode_envelope(bytes: &[u8]) -> Result<Envelope, MessageError> {
         Some(envelope::Msg::Input(i)) => match &i.kind {
             None => return Err(MessageError::Invalid("empty or unknown input message")),
             Some(input::Kind::Button(b)) => {
-                require((1..=3).contains(&b.button), "mouse button")?;
+                require((1..=5).contains(&b.button), "mouse button")?;
                 require(
                     unit_interval(b.x) && unit_interval(b.y),
                     "pointer coordinates",
@@ -357,6 +400,17 @@ pub fn decode_envelope(bytes: &[u8]) -> Result<Envelope, MessageError> {
             Some(input::Kind::Key(k)) => {
                 require((1..=0xFFFF).contains(&k.usb_hid_usage), "HID usage")?
             }
+            Some(input::Kind::Move(m)) => {
+                require(
+                    unit_interval(m.x) && unit_interval(m.y),
+                    "pointer coordinates",
+                )?;
+            }
+            Some(input::Kind::Scroll(s)) => {
+                let fits = |v: f32| v.is_finite() && v.abs() <= crate::limits::SCROLL_MAX;
+                require(fits(s.dx) && fits(s.dy), "scroll amount")?;
+            }
+            Some(input::Kind::ReleaseAll(_)) => {}
         },
     }
     Ok(e)
