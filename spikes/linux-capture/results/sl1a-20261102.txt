@@ -165,3 +165,24 @@ Notes:
   13 fps. Loss recovery (keyframe request latency / intra refresh) is
   open for the D-50 criteria.
 - View only: no input yet (portal RemoteDesktop is the next step in D-50).
+
+== S-L2: input injection through the RemoteDesktop portal (local only, 2026-11-02)
+sl2-input: RemoteDesktop session + ScreenCast monitor on the same session,
+devices Keyboard|Pointer, PersistMode::ExplicitlyRevoked, restore token in
+rd-restore-token (0600). Moves the pointer in a 200 px square (16 moves,
+absolute, stream coordinates) and taps Left Shift. No clicks, no characters.
+Proof of arrival: GNOME IdleMonitor GetIdletime before/after.
+Portal: RemoteDesktop interface version 2; offers Keyboard|Pointer|Touchscreen.
+Run 1 (no token): dialog on the laptop, owner allowed after 71.1 s;
+  granted Keyboard|Pointer; restore token returned and saved.
+  16 moves: call p50 505 us, p95 677 us, max 731 us; shift press+release 777 us
+  idle 843155 ms -> 7 ms (input arrived)
+Run 2 (token): answered in 0.0 s, NO dialog; granted Keyboard|Pointer.
+  16 moves: call p50 443 us, p95 637 us, max 678 us; shift 1250 us
+  idle 14680 ms -> 5 ms
+So: control works on GNOME 50 Wayland with one approval at the laptop, and
+each injected event costs ~0.5 ms (a D-Bus round trip), small against the
+20 ms budget. Open for the criteria: what revokes the saved permission
+(GNOME Settings > Apps / Privacy; the token file), INV10 release-all on
+every session end, D-38 (remote input must not reach Remora's own controls;
+on this host the controls are the sl1-host stdin, not windows).
