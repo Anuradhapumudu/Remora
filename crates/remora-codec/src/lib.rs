@@ -18,8 +18,8 @@ mod sys;
 
 #[cfg(target_os = "macos")]
 pub use sys::macos::{
-    DecodedFrame, EncoderInfo, Probe444, PropertyReport, SyntheticSource, VtDecoder, VtEncoder,
-    list_encoders, probe_444, supported_properties,
+    DecodedFrame, EncoderInfo, PictureCount, Probe444, PropertyReport, SyntheticSource, VtDecoder,
+    VtEncoder, list_encoders, probe_444, supported_properties,
 };
 
 /// Video codecs Remora can produce.

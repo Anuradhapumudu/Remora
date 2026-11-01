@@ -9,10 +9,12 @@ window 960 x 624 in front, 1920-wide picture, 60 fps, 10 min, every 10 s)
 and records, side by side:
 
   footprint   phys_footprint (what P5 counted), every 10 s
-  IOSurface   vmmap --summary's IOSurface row: virtual, resident, dirty,
-              once a minute (vmmap pauses the viewer: W4)
-  counted     C(t) = footprint(t) + (IOSurface virtual - dirty) of the last
-              vmmap at or before t (phase4-criteria §14, owner 2026-10-27)
+  held        the viewer's own count of decoded pictures and their bytes,
+              from its stats line ("pictures held N (X MB)", §3b)
+  counted     C(t) = footprint(t) + held(t)
+  IOSurface   vmmap --summary's IOSurface row, ONCE, at mid-run: vmmap
+              pauses the viewer (W4), so it only checks that the viewer's
+              own count agrees (virtual - dirty within one picture of held)
 
 Why that sum (spikes/gui-memory/src/bin/iosurface-plant.rs, M4, 2026-10-26):
 IOSurfaces this process creates are in its footprint AND in vmmap's row
@@ -28,7 +30,9 @@ results/phase4.5/, never to the accepted results/phase4/.
 
 Machine state, keeping the Mac awake, AC power, sleep and display checks and
 the count of vmmap calls come from the shared helper (measuring.py, R9). Until
-2026-11-01 this script ran vmmap every 10 s (p5-recheck-20261026-2144.txt).
+2026-11-01 this script ran vmmap every 10 s (p5-recheck-20261026-2144.txt);
+the viewer's self-count replaced it the same day (phase4.5-criteria §3b,
+owner: "do anything and build the app").
 
   scripts/macos/p5-recheck.py [--minutes 10]
 """
@@ -53,7 +57,7 @@ spec.loader.exec_module(p4)
 ROOT = p4.ROOT
 OUT = os.path.join(ROOT, "results", "phase4.5")
 HOST = os.path.join(ROOT, "target", "release", "remora-host")
-VMMAP_EVERY = 6  # samples (10 s each): vmmap once a minute
+HELD = re.compile(r"pictures held (\d+) \(([\d.]+) MB\)")
 STAMP = datetime.datetime.now().strftime("%Y%m%d-%H%M")
 
 
@@ -99,6 +103,19 @@ def to_mb(v):
     return float(v[:-1]) * unit if unit else float(v) / 1048576
 
 
+def held_at(timed, t):
+    """The viewer's self-count, (pictures, MB), from its last stats line at
+    or before `t`; None if it printed none yet."""
+    seen = [m for s, l in timed if s <= t and (m := HELD.search(l))]
+    return (int(seen[-1].group(1)), float(seen[-1].group(2))) if seen else None
+
+
+def agree(u_mb, held, picture_mb):
+    """vmmap's IOSurfaces not in the footprint (virtual - dirty) and the
+    viewer's own count agree within one picture."""
+    return abs(u_mb - held[1]) <= picture_mb
+
+
 def dropped_after(stats, times, secs=3):
     """Increase of the viewer's running "dropped N" count within `secs` after
     each time in `times`: the frames lost while vmmap paused the viewer."""
@@ -123,10 +140,11 @@ def main():
     commit = subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True,
                             cwd=ROOT).stdout.strip()
     say(f"P5 re-check, {datetime.datetime.now().isoformat(timespec='seconds')}, commit {commit}")
-    say("viewer memory, synthetic picture 1920 wide, window in front, footprint every 10 s, vmmap every minute")
+    say("viewer memory, synthetic picture 1920 wide, window in front, footprint and the viewer's"
+        " own picture count every 10 s, vmmap once")
     subprocess.run(["cargo", "build", "--release", "--locked", "-p", "remora-host", "-p", "remora-viewer"],
                    cwd=ROOT, check=True)
-    run = measuring.Run(say, pauses_allowed=int(a.minutes * 60 / 10 / VMMAP_EVERY) + 1)
+    run = measuring.Run(say, pauses_allowed=1)
     run.start()
     host = DirectHost(["serve", "--source", "synthetic", "--width", "1920"])
     code = host.expect("code:")[2].split(": ", 1)[1]
@@ -137,23 +155,22 @@ def main():
     viewer.expect("SESSION ACTIVE")
     print("   the viewer window is open: leave the Mac alone, pointer in the middle of the screen",
           flush=True)
-    say(f"  {'min':>5}  {'footprint':>9}  {'IOS virt':>8}  {'IOS res':>7}  {'IOS dirty':>9}  {'counted':>8}  (MB)")
-    start, samples, vmmap_times, ios, n_sample = time.time(), [], [], None, 0
+    say(f"  {'min':>5}  {'footprint':>9}  {'held':>4}  {'held MB':>7}  {'counted':>8}  (MB)")
+    start, samples, n_sample, check = time.time(), [], 0, None
+    mid = max(1, round(a.minutes * 6 / 2))  # the one vmmap, at mid-run
     while time.time() - start < a.minutes * 60:
         run.wait(10)
         n_sample += 1
-        f = p4.footprint_mb(run, viewer.pid)  # footprint first, then vmmap (M7 ordering)
-        if n_sample % VMMAP_EVERY == 1:  # the first sample, then once a minute
-            vmmap_times.append(time.time())
-            ios = iosurface_mb(run, viewer.pid)
-        if f is None or ios is None:
+        now = time.time()
+        f = p4.footprint_mb(run, viewer.pid)
+        held = held_at([(s, l) for s, l in viewer.snapshot() if l.startswith("stats: ")], now)
+        if n_sample == mid:
+            check = (time.time(), iosurface_mb(run, viewer.pid), held)
+        if f is None or held is None:
             continue
-        v, r, d = ios
-        m = (time.time() - start) / 60
-        c = f + (v - d)
-        samples.append((m, f, v, r, d, c))
-        say(f"  {m:5.2f}  {f:9.1f}  {v:8.1f}  {r:7.1f}  {d:9.1f}  {c:8.1f}"
-            + ("" if n_sample % VMMAP_EVERY == 1 else "  (IOSurface from the last vmmap)"))
+        m = (now - start) / 60
+        samples.append((m, f, held[0], held[1], f + held[1]))
+        say(f"  {m:5.2f}  {f:9.1f}  {held[0]:4d}  {held[1]:7.1f}  {f + held[1]:8.1f}")
     host.send(f"disconnect {n}")
     counters = viewer.expect("video:", secs=30)[2]
     viewer.p.wait(timeout=30)
@@ -165,10 +182,22 @@ def main():
     idle = [l for l in late if l.startswith("stats: 0 fps")]
     drew = bool(late) and len(idle) <= 0.05 * len(late)
     say(f"drawing check: {len(late) - len(idle)} of {len(late)} stats lines after minute 1 drew frames")
-    say(f"frames dropped within 3 s after the {len(vmmap_times)} vmmap calls: "
-        f"{dropped_after(timed, vmmap_times)}")
-    valid = run.finish([("the window drew", drew, f"{len(late) - len(idle)} of {len(late)} stats lines")])
-    for name, col in (("footprint only (as P5 counted)", 1), ("footprint + IOSurfaces not in it", 5)):
+    checks = [("the window drew", drew, f"{len(late) - len(idle)} of {len(late)} stats lines")]
+    if check is None or check[2] is None:
+        checks.append(("self-count checked against vmmap", False, "no vmmap sample with a self-count"))
+    else:
+        at, (v, r, d), held = check
+        per = max((s[3] / s[2] for s in samples if s[2]), default=0.0)
+        ok = agree(v - d, held, per)
+        say(f"self-count check (vmmap once, minute {(at - start) / 60:.1f}): IOSurface virtual {v:.1f}"
+            f" resident {r:.1f} dirty {d:.1f} -> not in footprint {v - d:.1f} MB; viewer holds"
+            f" {held[0]} pictures, {held[1]:.1f} MB; one picture {per:.1f} MB ->"
+            f" {'agree' if ok else 'DISAGREE'}")
+        say(f"frames dropped within 3 s after the vmmap call: {dropped_after(timed, [at])}")
+        checks.append(("self-count agrees with vmmap", ok,
+                       f"{v - d:.1f} MB (vmmap) vs {held[1]:.1f} MB (viewer), tolerance {per:.1f} MB"))
+    valid = run.finish(checks)
+    for name, col in (("footprint only (as P5 counted)", 1), ("footprint + pictures held (self-count)", 4)):
         after1 = [(s[0], s[col]) for s in samples if s[0] >= 1]
         peak = max(s[col] for s in samples)
         growth = after1[-1][1] - after1[0][1] if after1 else float("nan")

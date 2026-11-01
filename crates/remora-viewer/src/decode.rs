@@ -71,6 +71,14 @@ pub(crate) struct Counters {
     /// Pictures handed to the window and not yet drawn.
     #[cfg(target_os = "macos")]
     pub(crate) unshown: AtomicU64,
+    /// The decoder's live pictures (set when the decode thread starts) and
+    /// the size of the last one decoded: the memory self-count
+    /// (phase4.5-criteria §3b). VideoToolbox's decoded pictures are not in
+    /// the process footprint, so a memory run adds these.
+    #[cfg(target_os = "macos")]
+    pub(crate) pictures: std::sync::OnceLock<remora_codec::PictureCount>,
+    #[cfg(target_os = "macos")]
+    pub(crate) picture_bytes: AtomicU64,
 }
 
 /// Pictures on their way to the window at most: more would only add
@@ -100,6 +108,17 @@ impl Counters {
             failed: g(&self.failed),
             dropped: g(&self.dropped) + g(&self.not_shown),
         }
+    }
+
+    /// Decoded pictures that exist now and their bytes (count × the last
+    /// picture's size); `None` before the decoder exists.
+    #[cfg(target_os = "macos")]
+    pub(crate) fn held(&self) -> Option<(u64, u64)> {
+        let n = self.pictures.get()?.get();
+        Some((
+            n,
+            n.saturating_mul(self.picture_bytes.load(Ordering::Relaxed)),
+        ))
     }
 
     /// The window has dealt with one picture. Only the window thread
@@ -182,11 +201,15 @@ fn run(
     use remora_codec::h264::SizeLimit;
 
     let mut decoder = VtDecoder::new(SizeLimit::default());
+    let _ = counters.pictures.set(decoder.picture_count());
     for (frame, received_us) in rx {
         let started = std::time::Instant::now();
         match decoder.decode(frame.frame_id, &frame.data) {
             Ok(picture) => {
                 bump(&counters.decoded);
+                counters
+                    .picture_bytes
+                    .store(picture.byte_size(), Ordering::Relaxed);
                 let Some(show) = show.as_mut() else {
                     continue; // no window: the picture is released here
                 };

@@ -390,10 +390,27 @@ impl Stats {
         self.since = Instant::now();
         self.decode.clear();
         self.draw.clear();
-        Some(format!(
+        let line = format!(
             "{fps:.0} fps, decode p50 {d50:.1} / p95 {d95:.1} ms, upload+draw p50 {r50:.1} / p95 {r95:.1} ms, refused {refused}, waiting {waiting}, failed {failed}, dropped {dropped}"
-        ))
+        );
+        #[cfg(target_os = "macos")]
+        let line = match counters.and_then(Counters::held) {
+            Some((n, bytes)) => line + &held_text(n, bytes),
+            None => line,
+        };
+        Some(line)
     }
+}
+
+/// The memory self-count on the stats line (phase4.5-criteria §3b): the
+/// decoded pictures that exist and their size, which the footprint does
+/// not include. `scripts/macos/p5-recheck.py` reads it.
+#[cfg(target_os = "macos")]
+fn held_text(pictures: u64, bytes: u64) -> String {
+    format!(
+        ", pictures held {pictures} ({:.1} MB)",
+        bytes as f64 / (1024.0 * 1024.0)
+    )
 }
 
 /// p50 and p95 in milliseconds (0 if empty).
@@ -404,4 +421,19 @@ fn percentiles(v: &mut [Duration]) -> (f64, f64) {
     v.sort_unstable();
     let at = |q: f64| v[((v.len() - 1) as f64 * q).round() as usize].as_secs_f64() * 1e3;
     (at(0.5), at(0.95))
+}
+
+#[cfg(all(test, target_os = "macos"))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn self_count_on_the_stats_line() {
+        // Two 1920 x 1248 NV12 pictures.
+        assert_eq!(
+            held_text(2, 2 * 1920 * 1248 * 3 / 2),
+            ", pictures held 2 (6.9 MB)"
+        );
+        assert_eq!(held_text(0, 0), ", pictures held 0 (0.0 MB)");
+    }
 }
