@@ -106,6 +106,9 @@ pub(crate) fn run(args: ServeArgs) -> anyhow::Result<()> {
 pub(crate) struct Setup {
     pub(crate) config: HostConfig,
     pub(crate) public: IdentityPublic,
+    /// The `--trust` keys (the GUI shows "known device" for them; the CLI
+    /// only passes them to the session layer through `config`).
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     pub(crate) trusted: Vec<IdentityPublic>,
     /// The F-UX2 warning about the unencrypted key file (shown every run).
     pub(crate) key_warning: String,
