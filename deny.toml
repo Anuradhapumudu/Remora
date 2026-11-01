@@ -33,10 +33,47 @@ allow = [
     "ISC",
     "Zlib",
     "Unicode-3.0",
+    # Boost Software License: permissive (OSI-approved), no attribution in
+    # binaries. clipboard-win / error-code, the Windows clipboard under Slint's
+    # winit backend (phase 4.5).
+    "BSL-1.0",
 ]
 confidence-threshold = 0.93
 # Allow-list entries not used yet are fine (they cover future dependencies).
 unused-allowed-license = "allow"
+
+# Slint (phase 4.5 GUI, architecture D45) is offered as "GPL-3.0-only OR
+# LicenseRef-Slint-Royalty-free-2.0 OR LicenseRef-Slint-Software-3.0"; Remora
+# takes the GPL-3.0-only option, for the GPL apps (remora-ui, remora-host,
+# remora-viewer) only. One exception per crate, so GPL can never come in
+# through any other crate (phase4.5-criteria §10).
+[[licenses.exceptions]]
+crate = "slint"
+allow = ["GPL-3.0-only"]
+[[licenses.exceptions]]
+crate = "slint-macros"
+allow = ["GPL-3.0-only"]
+[[licenses.exceptions]]
+crate = "i-slint-backend-selector"
+allow = ["GPL-3.0-only"]
+[[licenses.exceptions]]
+crate = "i-slint-backend-winit"
+allow = ["GPL-3.0-only"]
+[[licenses.exceptions]]
+crate = "i-slint-common"
+allow = ["GPL-3.0-only"]
+[[licenses.exceptions]]
+crate = "i-slint-compiler"
+allow = ["GPL-3.0-only"]
+[[licenses.exceptions]]
+crate = "i-slint-core"
+allow = ["GPL-3.0-only"]
+[[licenses.exceptions]]
+crate = "i-slint-core-macros"
+allow = ["GPL-3.0-only"]
+[[licenses.exceptions]]
+crate = "i-slint-renderer-software"
+allow = ["GPL-3.0-only"]
 
 [licenses.private]
 # Our own crates are `publish = false`; their licenses are set by hand.

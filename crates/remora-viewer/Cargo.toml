@@ -23,9 +23,16 @@ tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync", "ti
 tracing-subscriber = { workspace = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
+# The Phase 4.5 GUI: the screens (remora-ui, D45) and Slint's runtime API.
+remora-ui = { workspace = true }
+slint = { workspace = true }
 wgpu = { workspace = true }
 winit = { workspace = true }
 pollster = { workspace = true }
+
+[target.'cfg(target_os = "macos")'.dev-dependencies]
+# Drives the GUI from Rust tests (D-4, phase4.5-criteria §5).
+i-slint-backend-testing = { workspace = true }
 
 [dev-dependencies]
 rand_core = { workspace = true }

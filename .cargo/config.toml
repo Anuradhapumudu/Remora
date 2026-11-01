@@ -1,0 +1,12 @@
+# Workspace build settings.
+
+[env]
+# Slint (remora-ui, D45) keeps element ids and type names in the code it
+# generates only when this is set at compile time. Slint's testing backend
+# needs them to find a button in a Rust test (D-4: the dialog, indicator and
+# viewer tests in remora-host / remora-viewer gui.rs). Set for every build,
+# so the screens tested are the screens shipped; the cost is a few KB of
+# element names, no screen content and no secrets
+# (i-slint-backend-testing-1.18.1 search_api.rs:62, i-slint-compiler-1.18.1
+# lib.rs:282).
+SLINT_EMIT_DEBUG_INFO = "1"

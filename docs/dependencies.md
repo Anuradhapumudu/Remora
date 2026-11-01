@@ -67,7 +67,8 @@ once a workspace member actually uses it.
 | wgpu | 30.0.1, default features **off**, `std` + `wgsl` + `metal` | 30.0.1 (2026-08-22) | viewer (macOS) | The Phase 4 video window and offscreen P7 rendering (phase4-criteria R1/R2). Metal backend only: the window is macOS-only until Phase 6.5, and every other backend would add code we do not run. Pulls naga 30.0.1 (shader compiler) and objc2-metal / objc2-quartz-core 0.3.2 |
 | winit | 0.30.13, default features **off**, `rwh_06` | 0.30.13 (2026-03-02) | viewer (macOS) | The window and its event loop (R1, R5). No X11/Wayland features. 0.31 is beta only. Uses the older objc2 0.5 / objc2-app-kit 0.2 family itself, so both objc2 generations are in the lock (cargo deny reports the duplicate; it is not a RustCrypto crate, D3 is unaffected) |
 | pollster | 1.0.1 | 1.0.1 (2026-07-10) | viewer (macOS) | Blocks on wgpu's adapter/device futures once at start-up (no async runtime on the window thread) |
-| slint | 1.18.1 (`unstable-wgpu-30`) | — | viewer, host | UI; shares our wgpu 30 device. MSRV 1.92 → workspace MSRV |
+| slint | 1.18.1, default features **off**: `std`, `compat-1-2`, `accessibility`, `backend-winit`, `renderer-software`, `unstable-winit-030` | 1.18.1 (2026-09-21) | ui, host, viewer (macOS) | The Phase 4.5 GUI. Winit backend so our video window shares Slint's event loop (C′, phase4.5-criteria §2); software renderer (S1: +17 MB, against +35–39 MB for femtovg on wgpu). Licence: GPL-3.0-only option, per-crate `deny.toml` exceptions. Its generated code holds `unsafe`, so the markup lives in `remora-ui` (architecture D45). MSRV 1.92 → workspace MSRV |
+| i-slint-backend-testing | 1.18.1 | 1.18.1 (2026-09-21) | host, viewer (macOS, tests only) | Drives the GUI from Rust tests (D-4): finds elements by accessible label, presses them. Needs `SLINT_EMIT_DEBUG_INFO=1` (`.cargo/config.toml`) |
 | axum | 0.8.9 | — | signal | WebSocket signaling server |
 | tracing / tracing-subscriber | 0.1.44 / 0.3.23 | — | all | Structured logging (with secret redaction) |
 | thiserror | 2.0 | — | libraries | Error types |
@@ -124,6 +125,336 @@ by hand without noticing: `arbitrary` 1.5.0 → **1.4.2** (fuzz only),
 **3.0.6**, `unicode-ident` 1.0.27 → **1.0.26** (the latter three are
 build-time / proc-macro crates). All locked to the newest release that was
 ≥ 14 days old on 2026-10-18.
+
+## Phase 4.5 GUI: Slint's transitive crates (2026-11-01)
+
+Adding `slint` 1.18.1 (macOS target only, through `remora-ui`, `remora-host`
+and `remora-viewer`) resolved **299 new registry crates**. Cargo's lockfile
+covers every platform, so the list also holds Linux crates (Wayland, X11,
+`zbus`, AT-SPI) and Windows crates that are never built for macOS; the
+14-day rule and `cargo deny` check them all the same.
+
+* **14-day rule** (`check-crate-age.py`): 36 were newer than 14 days on
+  2026-11-01 and are locked to the newest older release: `annotate-snippets` 0.12.17 → **0.12.16**, `crc32fast` 1.5.3 → **1.5.2**, `lyon_algorithms` 1.0.22 → **1.0.21**, `lyon_geom` 1.0.20 → **1.0.19**, `memmap2` 0.9.12 → **0.9.11**, `ordered-float` 5.5.1 → **5.5.0**, `pulldown-cmark` 0.13.6 → **0.13.4**, `roxmltree` 0.21.2 → **0.21.1**, `smol_str` 0.3.7 → **0.3.6**, `utf8_iter` 1.1.0 → **1.0.4**, `uuid` 1.29.0 → **1.28.0**, `webbrowser` 1.2.6 → **1.2.4**, `wl-clipboard-rs` 0.9.5 → **0.9.4**, `yazi` 0.2.2 → **0.2.1**, `zcheapstr` 1.2.0 → **1.1.0**. The
+  `icu` family (all released 2026-10-22, each requiring the others at the
+  same version) moved as one set: `icu_collections` → **2.3.0**, `icu_decimal` → **2.3.0**, `icu_decimal_data` → **2.3.0**, `icu_locale_core` → **2.3.0**, `icu_locale_fallback` → **2.3.0**, `icu_locale_fallback_data` → **2.3.0**, `icu_normalizer` → **2.3.0**, `icu_normalizer_data` → **2.3.0**, `icu_plurals` → **2.3.0**, `icu_plurals_data` → **2.3.0**, `icu_properties` → **2.3.0**, `icu_properties_data` → **2.3.0**, `icu_provider` → **2.3.1**, `icu_segmenter` → **2.3.0**, `icu_segmenter_data` → **2.3.0**, `fixed_decimal` → **0.7.2**, `tinystr` → **0.8.4**, `yoke` → **0.8.3**, `zerovec` → **0.11.8**, `zerovec-derive` → **0.11.6**.
+* **`clipboard-win` has no compliant release yet.** 5.2.0–5.4.1 are all
+  yanked, 5.1.0 is below `arboard` 3.6/3.7's `^5.3.1`, and 5.4.2 / 5.4.3 were
+  released 2026-10-23. Locked to **5.4.2** (05:26:39 UTC), which is 14 days
+  old at **2026-11-06 05:26 UTC (10:56 local)**. It is Windows-only (`arboard`
+  uses Apple's clipboard on macOS), but it is in the lock, so the commits
+  that add Slint are pushed after that time (roadmap D-47). No exception:
+  the exception file is for security fixes only.
+* **Licences** (`cargo deny`): Slint's own crates are "GPL-3.0-only OR
+  LicenseRef-Slint-…"; Remora takes GPL-3.0-only for the GPL apps, with one
+  `[[licenses.exceptions]]` entry per Slint crate. `BSL-1.0` (Boost, permissive)
+  joined the allow list for `clipboard-win` and `error-code`. Everything
+  else is MIT, Apache-2.0, BSD, ISC, Zlib or Unicode-3.0.
+
+Every new crate, its locked version, its licence and the crate that pulls
+it in (one shortest path from our crates; R8 checks that each is here):
+
+| Crate | Locked | Licence | Pulled in by |
+|---|---|---|---|
+| `ab_glyph` | 0.2.32 | Apache-2.0 | `sctk-adwaita` |
+| `ab_glyph_rasterizer` | 0.1.10 | Apache-2.0 | `ab_glyph` |
+| `accesskit` | 0.24.1 | MIT OR Apache-2.0 | `i-slint-core` |
+| `accesskit_atspi_common` | 0.19.1 | MIT OR Apache-2.0 | `accesskit_unix` |
+| `accesskit_consumer` | 0.38.0 | MIT OR Apache-2.0 | `accesskit_ios` |
+| `accesskit_ios` | 0.1.2 | MIT OR Apache-2.0 | `accesskit_winit` |
+| `accesskit_macos` | 0.26.3 | MIT OR Apache-2.0 | `accesskit_winit` |
+| `accesskit_unix` | 0.22.1 | MIT OR Apache-2.0 | `accesskit_winit` |
+| `accesskit_windows` | 0.34.0 | MIT OR Apache-2.0 | `accesskit_winit` |
+| `accesskit_winit` | 0.33.2 | Apache-2.0 | `i-slint-backend-winit` |
+| `adler2` | 2.0.1 | 0BSD OR MIT OR Apache-2.0 | `miniz_oxide` |
+| `ahash` | 0.8.12 | MIT OR Apache-2.0 | `winit` |
+| `allocator-api2` | 0.2.21 | MIT OR Apache-2.0 | `hashbrown` |
+| `android_system_properties` | 0.1.6 | MIT OR Apache-2.0 | `wgpu-hal` |
+| `annotate-snippets` | 0.12.16 | MIT OR Apache-2.0 | `i-slint-compiler` |
+| `arboard` | 3.7.0 | MIT OR Apache-2.0 | `i-slint-backend-winit` |
+| `arrayref` | 0.3.9 | BSD-2-Clause | `tiny-skia` |
+| `as-raw-xcb-connection` | 1.0.1 | MIT OR Apache-2.0 | `x11rb` |
+| `ash` | 0.38.0+1.3.281 | MIT OR Apache-2.0 | `wgpu-hal` |
+| `async-broadcast` | 0.7.2 | MIT OR Apache-2.0 | `zbus` |
+| `async-channel` | 2.5.0 | Apache-2.0 OR MIT | `accesskit_unix` |
+| `async-executor` | 1.14.0 | Apache-2.0 OR MIT | `zbus` |
+| `async-io` | 2.6.0 | Apache-2.0 OR MIT | `zbus` |
+| `async-lock` | 3.4.2 | Apache-2.0 OR MIT | `zbus` |
+| `async-process` | 2.5.0 | Apache-2.0 OR MIT | `zbus` |
+| `async-recursion` | 1.2.0 | MIT OR Apache-2.0 | `zbus` |
+| `async-signal` | 0.2.14 | Apache-2.0 OR MIT | `async-process` |
+| `async-task` | 4.7.1 | Apache-2.0 OR MIT | `zbus` |
+| `async-trait` | 0.1.92 | MIT OR Apache-2.0 | `zbus` |
+| `atspi` | 0.29.0 | Apache-2.0 OR MIT | `accesskit_unix` |
+| `atspi-common` | 0.13.0 | Apache-2.0 OR MIT | `accesskit_atspi_common` |
+| `atspi-proxies` | 0.13.0 | Apache-2.0 OR MIT | `atspi` |
+| `bincode` | 2.0.1 | MIT | `typed-index-collections` |
+| `bindgen` | 0.72.1 | BSD-3-Clause | `skia-bindings` |
+| `blocking` | 1.7.0 | Apache-2.0 OR MIT | `zbus` |
+| `borsh` | 1.8.1 | MIT OR Apache-2.0 | `smol_str` |
+| `by_address` | 1.2.1 | MIT OR Apache-2.0 | `i-slint-compiler` |
+| `byteorder-lite` | 0.1.0 | Unlicense OR MIT | `image` |
+| `calloop-wayland-source` | 0.3.0 | MIT | `smithay-client-toolkit` |
+| `cexpr` | 0.6.0 | Apache-2.0/MIT | `bindgen` |
+| `cgl` | 0.3.2 | MIT / Apache-2.0 | `glutin` |
+| `chrono` | 0.4.45 | MIT OR Apache-2.0 | `i-slint-core` |
+| `clang-sys` | 1.9.1 | Apache-2.0 | `bindgen` |
+| `clipboard-win` | 5.4.2 | BSL-1.0 | `arboard` |
+| `clru` | 0.6.3 | MIT | `i-slint-core` |
+| `color_quant` | 1.1.0 | MIT | `gif` |
+| `const-field-offset` | 0.2.1 | MIT OR Apache-2.0 | `slint` |
+| `const-field-offset-macro` | 0.2.1 | MIT OR Apache-2.0 | `const-field-offset` |
+| `convert_case` | 0.10.0 | MIT | `derive_more-impl` |
+| `countme` | 3.0.1 | MIT OR Apache-2.0 | `rowan` |
+| `crc32fast` | 1.5.2 | MIT OR Apache-2.0 | `png` |
+| `critical-section` | 1.2.0 | MIT OR Apache-2.0 | `once_cell` |
+| `crossbeam-channel` | 0.5.17 | MIT OR Apache-2.0 | `muda` |
+| `ctor` | 0.10.1 | Apache-2.0 OR MIT | `tiny-xlib` |
+| `data-url` | 0.3.2 | MIT OR Apache-2.0 | `i-slint-compiler` |
+| `derive_more` | 2.1.1 | MIT | `i-slint-common` |
+| `derive_more-impl` | 2.1.1 | MIT | `derive_more` |
+| `downcast-rs` | 1.2.1 | MIT/Apache-2.0 | `wayland-backend` |
+| `drm` | 0.14.1 | MIT | `i-slint-backend-linuxkms` |
+| `drm-ffi` | 0.9.1 | MIT | `drm` |
+| `drm-fourcc` | 2.2.0 | MIT | `drm` |
+| `drm-sys` | 0.8.1 | MIT | `drm-ffi` |
+| `dtor` | 0.8.1 | Apache-2.0 OR MIT | `ctor` |
+| `endi` | 1.1.1 | MIT | `zvariant` |
+| `enumflags2` | 0.7.12 | MIT OR Apache-2.0 | `zbus` |
+| `enumflags2_derive` | 0.7.12 | MIT OR Apache-2.0 | `enumflags2` |
+| `error-code` | 3.4.0 | BSL-1.0 | `clipboard-win` |
+| `euclid` | 0.22.14 | MIT OR Apache-2.0 | `i-slint-core` |
+| `event-listener` | 5.4.2 | Apache-2.0 OR MIT | `zbus` |
+| `event-listener-strategy` | 0.5.4 | Apache-2.0 OR MIT | `async-broadcast` |
+| `fastrand` | 2.5.0 | Apache-2.0 OR MIT | `softbuffer` |
+| `fdeflate` | 0.3.7 | MIT OR Apache-2.0 | `png` |
+| `field-offset` | 0.3.6 | MIT OR Apache-2.0 | `const-field-offset` |
+| `filetime` | 0.2.29 | MIT/Apache-2.0 | `tar` |
+| `fixed_decimal` | 0.7.2 | Unicode-3.0 | `icu_decimal` |
+| `fixedbitset` | 0.5.7 | MIT OR Apache-2.0 | `petgraph` |
+| `flate2` | 1.1.10 | MIT OR Apache-2.0 | `usvg` |
+| `float-cmp` | 0.9.0 | MIT | `strict-num` |
+| `font-types` | 0.12.7 | MIT OR Apache-2.0 | `read-fonts` |
+| `fontdb` | 0.24.0 | MIT | `usvg` |
+| `fontique` | 0.11.1 | Apache-2.0 OR MIT | `i-slint-common` |
+| `form_urlencoded` | 1.2.2 | MIT OR Apache-2.0 | `url` |
+| `futures` | 0.3.34 | MIT OR Apache-2.0 | `i-slint-backend-winit` |
+| `futures-channel` | 0.3.34 | MIT OR Apache-2.0 | `futures` |
+| `futures-executor` | 0.3.34 | MIT OR Apache-2.0 | `futures` |
+| `futures-io` | 0.3.34 | MIT OR Apache-2.0 | `futures` |
+| `futures-lite` | 2.6.1 | Apache-2.0 OR MIT | `zbus` |
+| `futures-macro` | 0.3.34 | MIT OR Apache-2.0 | `futures-util` |
+| `futures-sink` | 0.3.34 | MIT OR Apache-2.0 | `futures` |
+| `gethostname` | 1.1.0 | Apache-2.0 | `x11rb` |
+| `gif` | 0.14.2 | MIT OR Apache-2.0 | `resvg` |
+| `gl_generator` | 0.14.0 | Apache-2.0 | `glutin_egl_sys` |
+| `glob` | 0.3.4 | MIT OR Apache-2.0 | `clang-sys` |
+| `glow` | 0.18.0 | MIT OR Apache-2.0 OR Zlib | `i-slint-renderer-skia` |
+| `glutin` | 0.32.3 | Apache-2.0 | `i-slint-backend-winit` |
+| `glutin-winit` | 0.5.0 | MIT | `i-slint-backend-winit` |
+| `glutin_egl_sys` | 0.7.1 | Apache-2.0 | `glutin` |
+| `glutin_glx_sys` | 0.6.1 | Apache-2.0 | `glutin` |
+| `glutin_wgl_sys` | 0.6.1 | Apache-2.0 | `glutin` |
+| `gpu-allocator` | 0.28.0 | MIT OR Apache-2.0 | `wgpu-hal` |
+| `grid` | 1.0.1 | MIT | `taffy` |
+| `harfrust` | 0.12.0 | MIT | `parley` |
+| `hex` | 0.4.3 | MIT OR Apache-2.0 | `zbus` |
+| `htmlparser` | 0.2.1 | MIT OR Apache-2.0 | `i-slint-common` |
+| `i-slint-backend-linuxkms` | 1.18.1 | GPL-3.0-only OR LicenseRef-Slint-Royalty-free-2.0 OR LicenseRef-Slint-Software-3.0 | `slint` |
+| `i-slint-backend-selector` | 1.18.1 | GPL-3.0-only OR LicenseRef-Slint-Royalty-free-2.0 OR LicenseRef-Slint-Software-3.0 | `slint` |
+| `i-slint-backend-testing` | 1.18.1 | GPL-3.0-only OR LicenseRef-Slint-Royalty-free-2.0 OR LicenseRef-Slint-Software-3.0 | `remora-host` |
+| `i-slint-backend-winit` | 1.18.1 | GPL-3.0-only OR LicenseRef-Slint-Royalty-free-2.0 OR LicenseRef-Slint-Software-3.0 | `slint` |
+| `i-slint-common` | 1.18.1 | GPL-3.0-only OR LicenseRef-Slint-Royalty-free-2.0 OR LicenseRef-Slint-Software-3.0 | `i-slint-backend-testing` |
+| `i-slint-compiler` | 1.18.1 | GPL-3.0-only OR LicenseRef-Slint-Royalty-free-2.0 OR LicenseRef-Slint-Software-3.0 | `slint-macros` |
+| `i-slint-core` | 1.18.1 | GPL-3.0-only OR LicenseRef-Slint-Royalty-free-2.0 OR LicenseRef-Slint-Software-3.0 | `i-slint-backend-testing` |
+| `i-slint-core-macros` | 1.18.1 | GPL-3.0-only OR LicenseRef-Slint-Royalty-free-2.0 OR LicenseRef-Slint-Software-3.0 | `slint` |
+| `i-slint-renderer-skia` | 1.18.1 | GPL-3.0-only OR LicenseRef-Slint-Royalty-free-2.0 OR LicenseRef-Slint-Software-3.0 | `i-slint-backend-winit` |
+| `i-slint-renderer-software` | 1.18.1 | GPL-3.0-only OR LicenseRef-Slint-Royalty-free-2.0 OR LicenseRef-Slint-Software-3.0 | `i-slint-backend-testing` |
+| `iana-time-zone` | 0.1.65 | MIT OR Apache-2.0 | `chrono` |
+| `iana-time-zone-haiku` | 0.1.2 | MIT OR Apache-2.0 | `iana-time-zone` |
+| `icu_collections` | 2.3.0 | Unicode-3.0 | `icu_normalizer` |
+| `icu_decimal` | 2.3.0 | Unicode-3.0 | `i-slint-common` |
+| `icu_decimal_data` | 2.3.0 | Unicode-3.0 | `icu_decimal` |
+| `icu_locale_core` | 2.3.0 | Unicode-3.0 | `i-slint-common` |
+| `icu_locale_fallback` | 2.3.0 | Unicode-3.0 | `icu_decimal` |
+| `icu_locale_fallback_data` | 2.3.0 | Unicode-3.0 | `icu_locale_fallback` |
+| `icu_normalizer` | 2.3.0 | Unicode-3.0 | `i-slint-core` |
+| `icu_normalizer_data` | 2.3.0 | Unicode-3.0 | `icu_normalizer` |
+| `icu_plurals` | 2.3.0 | Unicode-3.0 | `icu_decimal` |
+| `icu_plurals_data` | 2.3.0 | Unicode-3.0 | `icu_plurals` |
+| `icu_properties` | 2.3.0 | Unicode-3.0 | `icu_normalizer` |
+| `icu_properties_data` | 2.3.0 | Unicode-3.0 | `icu_properties` |
+| `icu_provider` | 2.3.1 | Unicode-3.0 | `i-slint-common` |
+| `icu_segmenter` | 2.3.0 | Unicode-3.0 | `parley` |
+| `icu_segmenter_data` | 2.3.0 | Unicode-3.0 | `icu_segmenter` |
+| `idna` | 1.1.0 | MIT OR Apache-2.0 | `url` |
+| `idna_adapter` | 1.2.2 | Apache-2.0 OR MIT | `idna` |
+| `image` | 0.25.10 | MIT OR Apache-2.0 | `i-slint-core` |
+| `image-webp` | 0.2.4 | MIT OR Apache-2.0 | `resvg` |
+| `imagesize` | 0.15.0 | MIT | `usvg` |
+| `imgref` | 1.12.3 | CC0-1.0 OR Apache-2.0 | `i-slint-backend-winit` |
+| `input` | 0.10.0 | MIT | `i-slint-backend-linuxkms` |
+| `input-sys` | 1.19.0 | MIT | `input` |
+| `io-lifetimes` | 1.0.11 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT | `udev` |
+| `itoa` | 1.0.18 | MIT OR Apache-2.0 | `serde_json` |
+| `keyboard-types` | 0.7.0 | MIT OR Apache-2.0 | `muda` |
+| `khronos_api` | 3.1.0 | Apache-2.0 | `gl_generator` |
+| `kurbo` | 0.13.1 | Apache-2.0 OR MIT | `svgtypes` |
+| `libseat` | 0.2.4 | MIT | `i-slint-backend-linuxkms` |
+| `libseat-sys` | 0.2.0 | MIT | `libseat` |
+| `libudev-sys` | 0.1.4 | MIT | `udev` |
+| `linebender_resource_handle` | 0.1.1 | Apache-2.0 OR MIT | `fontique` |
+| `litemap` | 0.8.3 | Unicode-3.0 | `icu_locale_core` |
+| `lyon_algorithms` | 1.0.21 | MIT OR Apache-2.0 | `i-slint-core` |
+| `lyon_extra` | 1.1.0 | MIT OR Apache-2.0 | `i-slint-core` |
+| `lyon_geom` | 1.0.19 | MIT OR Apache-2.0 | `i-slint-core` |
+| `lyon_path` | 1.0.19 | MIT OR Apache-2.0 | `i-slint-core` |
+| `memmap2` | 0.9.11 | MIT OR Apache-2.0 | `winit` |
+| `memoffset` | 0.9.1 | MIT | `field-offset` |
+| `miniz_oxide` | 0.8.9 | MIT OR Zlib OR Apache-2.0 | `png` |
+| `miniz_oxide` | 0.9.1 | MIT OR Zlib OR Apache-2.0 | `flate2` |
+| `moxcms` | 0.8.1 | BSD-3-Clause OR Apache-2.0 | `image` |
+| `muda` | 0.19.3 | Apache-2.0 OR MIT | `i-slint-backend-winit` |
+| `nix` | 0.31.3 | MIT | `i-slint-backend-linuxkms` |
+| `objc2-core-text` | 0.3.2 | Zlib OR Apache-2.0 OR MIT | `fontique` |
+| `ordered-float` | 5.5.0 | MIT | `wgpu-hal` |
+| `ordered-stream` | 0.2.0 | MIT OR Apache-2.0 | `zbus` |
+| `os_pipe` | 1.2.3 | MIT | `wl-clipboard-rs` |
+| `owned_ttf_parser` | 0.25.1 | Apache-2.0 | `ab_glyph` |
+| `parking` | 2.2.1 | Apache-2.0 OR MIT | `async-io` |
+| `parlance` | 0.1.1 | Apache-2.0 OR MIT | `fontique` |
+| `parley` | 0.11.1 | Apache-2.0 OR MIT | `i-slint-core` |
+| `parley_data` | 0.11.1 | Apache-2.0 OR MIT | `parley` |
+| `percent-encoding` | 2.3.2 | MIT OR Apache-2.0 | `winit` |
+| `petgraph` | 0.8.3 | MIT OR Apache-2.0 | `tree_magic_mini` |
+| `phf` | 0.13.1 | MIT | `accesskit_atspi_common` |
+| `phf_generator` | 0.13.1 | MIT | `phf_macros` |
+| `phf_macros` | 0.13.1 | MIT | `phf` |
+| `phf_shared` | 0.13.1 | MIT | `phf` |
+| `pico-args` | 0.5.0 | MIT | `resvg` |
+| `pin-utils` | 0.1.1 | MIT OR Apache-2.0 | `spin_on` |
+| `pin-weak` | 1.1.0 | MIT | `slint` |
+| `piper` | 0.2.5 | MIT OR Apache-2.0 | `blocking` |
+| `pkg-config` | 0.3.34 | MIT OR Apache-2.0 | `x11-dl` |
+| `png` | 0.18.1 | MIT OR Apache-2.0 | `image` |
+| `polycool` | 0.4.0 | MIT OR Apache-2.0 | `kurbo` |
+| `potential_utf` | 0.1.6 | Unicode-3.0 | `icu_locale_fallback` |
+| `presser` | 0.3.1 | MIT OR Apache-2.0 | `gpu-allocator` |
+| `prettyplease` | 0.2.37 | MIT OR Apache-2.0 | `bindgen` |
+| `pulldown-cmark` | 0.13.4 | MIT | `i-slint-common` |
+| `pxfm` | 0.1.30 | BSD-3-Clause OR Apache-2.0 | `moxcms` |
+| `quick-error` | 2.0.1 | MIT/Apache-2.0 | `image-webp` |
+| `quick-xml` | 0.41.0 | MIT | `wayland-scanner` |
+| `range-alloc` | 0.1.5 | MIT OR Apache-2.0 | `wgpu-hal` |
+| `read-fonts` | 0.41.0 | MIT OR Apache-2.0 | `fontique` |
+| `regex` | 1.13.1 | MIT OR Apache-2.0 | `skia-bindings` |
+| `resvg` | 0.48.1 | Apache-2.0 OR MIT | `i-slint-common` |
+| `rgb` | 0.8.53 | MIT | `i-slint-core` |
+| `rowan` | 0.17.0 | MIT OR Apache-2.0 | `i-slint-compiler` |
+| `roxmltree` | 0.21.1 | MIT OR Apache-2.0 | `fontique` |
+| `scoped-tls` | 1.0.1 | MIT/Apache-2.0 | `wayland-backend` |
+| `scoped-tls-hkt` | 0.1.5 | MIT/Apache-2.0 | `i-slint-backend-winit` |
+| `sctk-adwaita` | 0.10.1 | MIT | `winit` |
+| `serde_json` | 1.0.154 | MIT OR Apache-2.0 | `i-slint-core-macros` |
+| `serde_repr` | 0.1.21 | MIT OR Apache-2.0 | `zbus` |
+| `serde_spanned` | 1.1.2 | MIT OR Apache-2.0 | `toml` |
+| `signal-hook-registry` | 1.4.8 | MIT OR Apache-2.0 | `async-signal` |
+| `simd-adler32` | 0.3.10 | MIT | `fdeflate` |
+| `simplecss` | 0.2.2 | Apache-2.0 OR MIT | `usvg` |
+| `siphasher` | 1.0.4 | MIT OR Apache-2.0 | `svgtypes` |
+| `skia-bindings` | 0.153.3 | MIT | `skia-safe` |
+| `skia-safe` | 0.153.3 | MIT | `i-slint-renderer-skia` |
+| `skrifa` | 0.44.0 | MIT OR Apache-2.0 | `i-slint-common` |
+| `slint` | 1.18.1 | GPL-3.0-only OR LicenseRef-Slint-Royalty-free-2.0 OR LicenseRef-Slint-Software-3.0 | `remora-host` |
+| `slint-macros` | 1.18.1 | GPL-3.0-only OR LicenseRef-Slint-Royalty-free-2.0 OR LicenseRef-Slint-Software-3.0 | `slint` |
+| `slotmap` | 1.1.1 | Zlib | `taffy` |
+| `smithay-client-toolkit` | 0.19.2 | MIT | `winit` |
+| `softbuffer` | 0.4.8 | MIT OR Apache-2.0 | `i-slint-backend-winit` |
+| `spin_on` | 0.1.1 | Apache-2.0 OR MIT | `slint-macros` |
+| `spirv` | 0.4.0+sdk-1.4.341.0 | Apache-2.0 | `naga` |
+| `stable_deref_trait` | 1.2.1 | MIT OR Apache-2.0 | `vtable` |
+| `strict-num` | 0.1.1 | MIT | `usvg` |
+| `strum` | 0.28.0 | MIT | `i-slint-core` |
+| `strum_macros` | 0.28.0 | MIT | `strum` |
+| `svgtypes` | 0.16.1 | Apache-2.0 OR MIT | `resvg` |
+| `swash` | 0.2.10 | Apache-2.0 OR MIT | `i-slint-core` |
+| `sys-locale` | 0.3.2 | MIT OR Apache-2.0 | `i-slint-core` |
+| `taffy` | 0.10.1 | MIT | `i-slint-core` |
+| `tar` | 0.4.46 | MIT OR Apache-2.0 | `skia-bindings` |
+| `tempfile` | 3.27.0 | MIT OR Apache-2.0 | `uds_windows` |
+| `text-size` | 1.1.1 | MIT OR Apache-2.0 | `rowan` |
+| `tiny-skia` | 0.11.4 | BSD-3-Clause | `sctk-adwaita` |
+| `tiny-skia` | 0.12.0 | BSD-3-Clause | `resvg` |
+| `tiny-skia-path` | 0.11.4 | BSD-3-Clause | `tiny-skia` |
+| `tiny-skia-path` | 0.12.0 | BSD-3-Clause | `tiny-skia` |
+| `tiny-xlib` | 0.2.5 | MIT OR Apache-2.0 OR Zlib | `softbuffer` |
+| `tinystr` | 0.8.4 | Unicode-3.0 | `icu_locale_core` |
+| `toml` | 1.1.8+spec-1.1.0 | MIT OR Apache-2.0 | `skia-bindings` |
+| `toml_writer` | 1.1.3+spec-1.1.0 | MIT OR Apache-2.0 | `toml` |
+| `tree_magic_mini` | 3.2.2 | MIT | `wl-clipboard-rs` |
+| `ttf-parser` | 0.25.1 | MIT OR Apache-2.0 | `owned_ttf_parser` |
+| `typed-index-collections` | 3.5.0 | MIT OR Apache-2.0 | `i-slint-compiler` |
+| `udev` | 0.9.3 | MIT | `input` |
+| `uds_windows` | 1.2.1 | MIT | `zbus` |
+| `unicase` | 2.10.0 | MIT OR Apache-2.0 | `pulldown-cmark` |
+| `unicode-bidi` | 0.3.18 | MIT OR Apache-2.0 | `usvg` |
+| `unicode-linebreak` | 0.1.5 | Apache-2.0 | `i-slint-core` |
+| `unicode-script` | 0.5.8 | MIT OR Apache-2.0 | `i-slint-core` |
+| `unicode-vo` | 0.1.0 | MIT/Apache-2.0 | `usvg` |
+| `unicode-xid` | 0.2.6 | MIT OR Apache-2.0 | `derive_more-impl` |
+| `unty` | 0.0.4 | MIT OR Apache-2.0 | `bincode` |
+| `url` | 2.5.8 | MIT OR Apache-2.0 | `webbrowser` |
+| `usvg` | 0.48.1 | Apache-2.0 OR MIT | `resvg` |
+| `utf8_iter` | 1.0.4 | Apache-2.0 OR MIT | `icu_collections` |
+| `uuid` | 1.28.0 | Apache-2.0 OR MIT | `accesskit` |
+| `vtable` | 0.5.0 | MIT OR Apache-2.0 | `i-slint-backend-testing` |
+| `vtable-macro` | 0.5.0 | MIT OR Apache-2.0 | `vtable` |
+| `wayland-backend` | 0.3.17 | MIT | `winit` |
+| `wayland-client` | 0.31.15 | MIT | `winit` |
+| `wayland-csd-frame` | 0.3.0 | MIT | `smithay-client-toolkit` |
+| `wayland-cursor` | 0.31.14 | MIT | `smithay-client-toolkit` |
+| `wayland-protocols` | 0.32.13 | MIT | `winit` |
+| `wayland-protocols-plasma` | 0.3.12 | MIT | `winit` |
+| `wayland-protocols-wlr` | 0.3.12 | MIT | `smithay-client-toolkit` |
+| `wayland-scanner` | 0.31.11 | MIT | `smithay-client-toolkit` |
+| `wayland-sys` | 0.31.11 | MIT | `wayland-backend` |
+| `webbrowser` | 1.2.4 | MIT OR Apache-2.0 | `i-slint-backend-winit` |
+| `weezl` | 0.1.12 | MIT OR Apache-2.0 | `gif` |
+| `wl-clipboard-rs` | 0.9.4 | MIT OR Apache-2.0 | `arboard` |
+| `write-fonts` | 0.50.0 | MIT OR Apache-2.0 | `i-slint-renderer-skia` |
+| `writeable` | 0.6.4 | Unicode-3.0 | `icu_decimal` |
+| `x11-dl` | 2.21.0 | MIT | `winit` |
+| `x11rb` | 0.13.2 | MIT OR Apache-2.0 | `winit` |
+| `x11rb-protocol` | 0.13.2 | MIT OR Apache-2.0 | `x11rb` |
+| `xattr` | 1.6.1 | MIT OR Apache-2.0 | `tar` |
+| `xcursor` | 0.3.11 | MIT | `wayland-cursor` |
+| `xkbcommon` | 0.9.0 | MIT | `i-slint-backend-linuxkms` |
+| `xml-rs` | 0.8.29 | MIT | `gl_generator` |
+| `xmlwriter` | 0.1.0 | MIT | `usvg` |
+| `yazi` | 0.2.1 | Apache-2.0 OR MIT | `swash` |
+| `yeslogic-fontconfig-sys` | 6.0.1 | MIT | `fontique` |
+| `yoke` | 0.8.3 | Unicode-3.0 | `icu_provider` |
+| `yoke-derive` | 0.8.4 | Unicode-3.0 | `yoke` |
+| `zbus` | 5.19.0 | MIT | `i-slint-backend-winit` |
+| `zbus-lockstep` | 0.5.2 | MIT | `atspi-common` |
+| `zbus-lockstep-macros` | 0.5.2 | MIT | `atspi-common` |
+| `zbus_macros` | 5.19.0 | MIT | `zbus` |
+| `zbus_names` | 4.3.5 | MIT | `zbus` |
+| `zbus_xml` | 5.2.1 | MIT | `zbus-lockstep` |
+| `zcheapstr` | 1.1.0 | MIT | `zvariant` |
+| `zeno` | 0.3.3 | Apache-2.0 OR MIT | `i-slint-renderer-software` |
+| `zerofrom` | 0.1.8 | Unicode-3.0 | `icu_provider` |
+| `zerofrom-derive` | 0.1.8 | Unicode-3.0 | `zerofrom` |
+| `zerotrie` | 0.2.5 | Unicode-3.0 | `icu_provider` |
+| `zerovec` | 0.11.8 | Unicode-3.0 | `icu_decimal` |
+| `zerovec-derive` | 0.11.6 | Unicode-3.0 | `zerovec` |
+| `zlib-rs` | 0.6.8 | Zlib | `flate2` |
+| `zmij` | 1.0.23 | MIT | `serde_json` |
+| `zune-core` | 0.5.3 | MIT OR Apache-2.0 OR Zlib | `image` |
+| `zune-jpeg` | 0.5.15 | MIT OR Apache-2.0 OR Zlib | `resvg` |
+| `zvariant` | 5.15.1 | MIT | `zbus` |
+| `zvariant_derive` | 5.15.1 | MIT | `zvariant` |
+| `zvariant_utils` | 4.2.0 | MIT | `zbus_macros` |
 
 ## Spike lockfiles (outside the checks above)
 

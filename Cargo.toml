@@ -30,6 +30,7 @@ remora-codec = { path = "crates/remora-codec" }
 remora-input = { path = "crates/remora-input" }
 remora-testkit = { path = "crates/remora-testkit" }
 remora-app = { path = "crates/remora-app" }
+remora-ui = { path = "crates/remora-ui" }
 
 # async + network
 tokio = { version = "1.53", default-features = false }
@@ -87,7 +88,12 @@ openh264 = "0.9.8"
 wgpu = { version = "30.0.1", default-features = false, features = ["std", "wgsl", "metal"] }
 winit = { version = "0.30.13", default-features = false, features = ["rwh_06"] }
 pollster = "1.0.1"
-slint = { version = "1.18.1", features = ["unstable-wgpu-30"] }
+# Phase 4.5 GUI (phase4.5-criteria §2, §3), used only by remora-ui (D45): the
+# winit backend (our video window shares Slint's event loop, option C′) and
+# the SOFTWARE renderer (S1: +17 MB over the video path, against +35-39 MB
+# for femtovg on wgpu).
+slint = { version = "1.18.1", default-features = false, features = ["std", "compat-1-2", "accessibility", "backend-winit", "renderer-software", "unstable-winit-030"] }
+i-slint-backend-testing = "1.18.1"
 
 # server
 axum = { version = "0.8.9", features = ["ws"] }
