@@ -143,7 +143,7 @@ jobs:
   # scripted edit silently cut off everything after one row; this guard
   # makes that, a deleted deferred item, or a malformed row fail CI.
   roadmap:
-    name: roadmap tables intact, no test removed
+    name: roadmap tables intact, no test removed, plants on record
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -175,6 +175,10 @@ jobs:
         env:
           BASE: ${{ steps.base.outputs.base }}
         run: python3 -I scripts/ci/check-tests.py "$BASE"
+      - name: Self-test of the plant record check (planted bad records must be caught)
+        run: python3 -I scripts/ci/check-plants.py --self-test
+      - name: Every recorded plant points at a real row and test (R7)
+        run: python3 -I scripts/ci/check-plants.py
 
   # Measuring runs (R9, phase4.5-criteria §15): the shared helper decides
   # whether a run counts (AC power, no sleep, display on, no pausing

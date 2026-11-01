@@ -33,6 +33,9 @@ python3 -I scripts/ci/check-measuring.py
 step "no test removed (R2) against the upstream branch"
 python3 -I scripts/ci/check-tests.py --self-test > /dev/null
 python3 -I scripts/ci/check-tests.py "$(git rev-parse --verify -q '@{upstream}' || echo HEAD~1)"
+step "plant record (R7)"
+python3 -I scripts/ci/check-plants.py --self-test > /dev/null
+python3 -I scripts/ci/check-plants.py
 step "roadmap tables"
 python3 -I scripts/ci/check-roadmap.py
 
