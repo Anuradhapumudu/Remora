@@ -60,6 +60,15 @@ enum Command {
     /// Phase 2: report encoder capabilities (4:4:4, LTR, intra-refresh) as evidence.
     #[cfg(target_os = "macos")]
     ProbeEncoder,
+    /// Print machine state that can skew a measurement (thermal, power, Low
+    /// Power Mode, load), as bench-capture does. Measuring scripts call this
+    /// in a separate process, so the measured process is left alone.
+    #[cfg(target_os = "macos")]
+    MachineState {
+        /// Label printed with the state, e.g. "start" or "end".
+        #[arg(long, default_value = "now")]
+        when: String,
+    },
 }
 
 fn main() -> ExitCode {
@@ -80,6 +89,11 @@ fn main() -> ExitCode {
         Some(Command::BenchCapture(args)) => bench::run(args),
         #[cfg(target_os = "macos")]
         Some(Command::ProbeEncoder) => bench::probe(),
+        #[cfg(target_os = "macos")]
+        Some(Command::MachineState { when }) => {
+            sysmon::print_machine_state(&when);
+            Ok(())
+        }
         #[cfg(target_os = "macos")]
         Some(Command::ListDisplays) => bench::list_displays(),
         #[cfg(target_os = "macos")]
