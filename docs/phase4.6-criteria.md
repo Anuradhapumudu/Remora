@@ -1,10 +1,11 @@
-# D-50: view and control a Linux (GNOME Wayland) host from the Mac — criteria
+# Phase 4.6 (D-50): view and control a Linux (GNOME Wayland) host from the Mac — criteria
 
-**Status: DRAFT, waiting for the owner's approval.** Nothing below is built
-until the owner approves it (roadmap D-50: "spike, then criteria for the
-owner's approval, then building"). When approved, this file is renamed to
-`docs/phase4.6-criteria.md`, so `scripts/ci/check-criteria.py` checks its
-tables like every other phase's.
+**Status: APPROVED by the owner, 2026-11-02**, as drafted, with the
+recommended answer to every decision in §2 ("Real crates", "⌘ → Super",
+"Approve as drafted"). Roadmap D-50: "spike, then criteria for the owner's
+approval, then building" — building may start. Phase 4.5's manual items
+(M1–M7, O2, D-34 runs, final P5) are still open; the owner chose to run
+this work alongside them (D-50, 2026-11-01: "laptop control next").
 
 ## 0. What the spikes showed (evidence, not belief)
 
@@ -23,8 +24,9 @@ Spike code is throwaway (D-41) and used **no `unsafe`** (the `pipewire`
 0.10.1 and `ashpd` 0.13.13 APIs we called are safe Rust).
 
 **Not verified yet (must be checked, not assumed):**
-- that GNOME shows its own "screen is being shared / remote controlled"
-  indicator in the top bar during a portal session (the owner can look);
+- ~~that GNOME shows its own indicator~~ — **observed by the owner**
+  2026-11-02 during S-L2 ("Yes, I saw an icon" in the top bar). Still to
+  be checked in the manual test (L6) for the real host, not only the spike;
 - how the person revokes the saved permission (GNOME Settings → Privacy /
   Apps is expected, not checked);
 - that injected keys go to the focused window only, and that the GNOME
