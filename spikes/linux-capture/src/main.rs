@@ -36,6 +36,46 @@ struct Stats {
     encoded_bytes: u64,
 }
 
+/// BGRx -> YUV 4:2:0, BT.709 video range (what the Mac viewer's shader
+/// assumes), integer maths, rows split over `threads` threads. Chroma is the
+/// average of each 2x2 block.
+fn bgrx_to_i420(px: &[u8], w: usize, h: usize, y: &mut [u8], u: &mut [u8], v: &mut [u8], threads: usize) {
+    let pairs = h / 2;
+    let per = pairs.div_ceil(threads.max(1));
+    std::thread::scope(|s| {
+        let mut ys = y.chunks_mut(w * 2 * per);
+        let mut us = u.chunks_mut(w / 2 * per);
+        let mut vs = v.chunks_mut(w / 2 * per);
+        for t in 0..threads {
+            let (Some(yc), Some(uc), Some(vc)) = (ys.next(), us.next(), vs.next()) else { break };
+            let first = t * per;
+            s.spawn(move || {
+                let rows = yc.len() / w / 2;
+                for pr in 0..rows {
+                    let r0 = (first + pr) * 2;
+                    for x2 in 0..w / 2 {
+                        let (mut rs, mut gs, mut bs) = (0i32, 0i32, 0i32);
+                        for dy in 0..2 {
+                            for dx in 0..2 {
+                                let i = ((r0 + dy) * w + x2 * 2 + dx) * 4;
+                                let (b, g, r) = (px[i] as i32, px[i + 1] as i32, px[i + 2] as i32);
+                                yc[(pr * 2 + dy) * w + x2 * 2 + dx] =
+                                    (16 + ((47 * r + 157 * g + 16 * b + 128) >> 8)) as u8;
+                                rs += r;
+                                gs += g;
+                                bs += b;
+                            }
+                        }
+                        let (r, g, b) = (rs / 4, gs / 4, bs / 4);
+                        uc[pr * (w / 2) + x2] = (128 + ((-26 * r - 87 * g + 112 * b + 128) >> 8)).clamp(0, 255) as u8;
+                        vc[pr * (w / 2) + x2] = (128 + ((112 * r - 102 * g - 10 * b + 128) >> 8)).clamp(0, 255) as u8;
+                    }
+                }
+            });
+        }
+    });
+}
+
 fn pct(v: &mut [f64], p: f64) -> f64 {
     if v.is_empty() {
         return f64::NAN;
@@ -48,7 +88,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let seconds: u64 = std::env::args().nth(1).and_then(|s| s.parse().ok()).unwrap_or(20);
     let dmabuf = std::env::args().nth(2).as_deref() == Some("dmabuf");
     let mode = std::env::args().nth(2).unwrap_or_default();
-    let fast = mode == "encode-fast";
+    let par = mode == "encode-par";
+    let fast = mode == "encode-fast" || par;
     let encode = mode == "encode" || fast;
     // 1. The portal: the person picks a monitor in GNOME's dialog, once. The
     // portal then returns a restore token (persist mode "until revoked");
@@ -215,16 +256,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let (w, h) = (st.format.size().width as usize, st.format.size().height as usize);
                 if w > 0 && stride == w * 4 && px.len() >= w * h * 4 {
                     let t0 = Instant::now();
-                    let yuv = openh264::formats::YUVBuffer::from_rgb_source(
-                        openh264::formats::BgraSliceU8::new(&px[..w * h * 4], (w, h)),
-                    );
-                    st.convert_ms.push(t0.elapsed().as_secs_f64() * 1e3);
-                    if let Some(enc) = st.encoder.as_mut() {
-                        if let Ok(bits) = enc.encode(&yuv) {
-                            let n = bits.to_vec().len() as u64;
-                            st.encoded_bytes += n;
-                        }
-                    }
+                    let encoded = if par {
+                        let (mut yp, mut up, mut vp) = (vec![0u8; w * h], vec![0u8; w * h / 4], vec![0u8; w * h / 4]);
+                        bgrx_to_i420(&px[..w * h * 4], w, h, &mut yp, &mut up, &mut vp, 8);
+                        st.convert_ms.push(t0.elapsed().as_secs_f64() * 1e3);
+                        let slices = openh264::formats::YUVSlices::new((&yp, &up, &vp), (w, h), (w, w / 2, w / 2));
+                        st.encoder.as_mut().and_then(|e| e.encode(&slices).ok().map(|b| b.to_vec().len() as u64))
+                    } else {
+                        let yuv = openh264::formats::YUVBuffer::from_rgb_source(
+                            openh264::formats::BgraSliceU8::new(&px[..w * h * 4], (w, h)),
+                        );
+                        st.convert_ms.push(t0.elapsed().as_secs_f64() * 1e3);
+                        st.encoder.as_mut().and_then(|e| e.encode(&yuv).ok().map(|b| b.to_vec().len() as u64))
+                    };
+                    st.encoded_bytes += encoded.unwrap_or(0);
                     st.encode_ms.push(t0.elapsed().as_secs_f64() * 1e3);
                 }
             }
@@ -306,7 +351,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let (c50, c95) = (pct(&mut st.convert_ms, 0.5), pct(&mut st.convert_ms, 0.95));
         println!(
             "ENCODE sl1b{}: {n} pictures, convert+encode p50 {e50:.1} p95 {e95:.1} ms (of which convert p50 {c50:.1} p95 {c95:.1}),",
-            if fast { " fast" } else { "" }
+            if par { " par" } else if fast { " fast" } else { "" }
         );
         println!(
             "  {:.1} KB/picture, {:.2} Mbit/s",
