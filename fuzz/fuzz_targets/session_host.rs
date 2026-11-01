@@ -22,6 +22,8 @@ fuzz_target!(|data: &[u8]| {
         identity: Arc::new(Identity { noise, cert }),
         password_enabled: true,
         trusted: vec![key.public()],
+        // As the apps run it (H9); the target opens one connection anyway.
+        one_active_session: true,
     };
     let mut host = Host::new(config, &mut OsRng);
     // A06: the hello must carry an issued nonce; the fuzzer can find this one.

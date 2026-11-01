@@ -23,6 +23,8 @@ step "cargo deny --locked check"
 cargo deny --locked check
 step "cargo audit"
 cargo audit
+step "fuzz targets build (separate workspace; 8c19a68 broke one unseen)"
+(cd fuzz && cargo fuzz build -O)
 step "crate-age exceptions (validity, exact expiry, warning under 48 h)"
 python3 -I scripts/ci/check-crate-age.py --self-test > /dev/null
 python3 -I scripts/ci/check-crate-age.py --exceptions-only
