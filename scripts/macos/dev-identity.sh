@@ -18,7 +18,8 @@
 #   1. a private key   (RSA 2048, label "Remora Local Dev Signing")
 #   2. a certificate   (CN "Remora Local Dev Signing", self-signed, valid 3 years,
 #                       extendedKeyUsage = codeSigning only)
-# No trust settings, no system keychain, no admin rights, no password prompt.
+# No trust settings, no system keychain, no admin rights. No app may use the key
+# without asking: macOS shows a prompt each time codesign signs with it (Q7).
 # (No trust is needed: macOS permissions check the app's designated requirement —
 # "identifier … and certificate leaf = H<fingerprint>" — not a trusted root.)
 set -euo pipefail
@@ -65,8 +66,16 @@ EOF
     P12_PASS="$("$OPENSSL" rand -hex 16)"
     "$OPENSSL" pkcs12 -export -inkey "$TMP/key.pem" -in "$TMP/cert.pem" -name "$NAME" \
       -passout "pass:$P12_PASS" -out "$TMP/id.p12"
-    # -T: let /usr/bin/codesign use the key without asking each time.
-    security import "$TMP/id.p12" -k "$KEYCHAIN" -P "$P12_PASS" -T /usr/bin/codesign
+    if [[ -n "${REMORA_DEV_KEYCHAIN:-}" ]]; then
+      # The CI test's throwaway keychain: nobody is there to answer a prompt,
+      # so codesign gets silent access (-T) to that key only.
+      security import "$TMP/id.p12" -k "$KEYCHAIN" -P "$P12_PASS" -T /usr/bin/codesign
+    else
+      # The login keychain: no app is trusted, so macOS asks before codesign
+      # (or anything else) uses the key, and nothing can sign as RemoraDev
+      # unnoticed between sessions (owner, phase4.5-criteria Q7 / D-36).
+      security import "$TMP/id.p12" -k "$KEYCHAIN" -P "$P12_PASS"
+    fi
     echo "created:"; "$0" status
     ;;
 
