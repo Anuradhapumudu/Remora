@@ -22,50 +22,86 @@
 #![allow(missing_docs)]
 
 slint::slint! {
-    import { Button, LineEdit, VerticalBox, HorizontalBox } from "std-widgets.slint";
+    import { Button, LineEdit, VerticalBox, HorizontalBox, GroupBox, Palette } from "std-widgets.slint";
+
+    // UI/UX pass (owner, 2026-11-01; phase4.5-criteria §16): one clear task
+    // per window, the most important thing largest, status always visible,
+    // plain sentences, details on request.
 
     export component MainWindow inherits Window {
-        title: "Remora host";
-        preferred-width: 560px;
+        title: "Remora \u{2014} share this screen";
+        preferred-width: 520px;
+        min-width: 420px;
         in property <string> device;
         in property <string> warning;
         in property <string> code;
         in property <string> password;
         in property <string> note;
+        in property <string> status: "Waiting for someone to connect.";
         in property <bool> secrets-visible: true;
         in property <bool> session-active;
         in property <string> notice;
         in property <string> refused;
         in property <string> display;
+        in-out property <bool> warning-details: false;
         callback show-secrets();
         callback hide-secrets();
         VerticalBox {
-            Text { text: "This computer: " + root.device; font-weight: 700; }
-            Text { text: root.warning; wrap: word-wrap; color: #9a4d00; font-size: 11px; }
-            if root.secrets-visible: VerticalLayout {
-                spacing: 6px;
-                Text { text: "To let someone see this screen, give them this code and password:"; wrap: word-wrap; }
-                code-field := TextInput { text: root.code; read-only: true; single-line: false; wrap: char-wrap; font-size: 11px; }
-                password-text := Text { text: "Password: " + root.password; font-size: 28px; }
-                Text { text: root.note; wrap: word-wrap; }
+            spacing: 12px;
+            status-text := Text { text: root.status; font-size: 15px; font-weight: 600; wrap: word-wrap; }
+            if root.notice != "": Text { text: root.notice; wrap: word-wrap; color: #c0392b; }
+            if root.display != "": Text { text: root.display; wrap: word-wrap; }
+            if root.secrets-visible: GroupBox {
+                title: "Give these to the person who will see your screen";
+                VerticalLayout {
+                    spacing: 6px;
+                    Text { text: "Connection code"; color: Palette.foreground.with-alpha(0.7); font-size: 12px; }
+                    HorizontalLayout {
+                        spacing: 8px;
+                        code-field := TextInput {
+                            text: root.code; read-only: true; single-line: false; wrap: char-wrap;
+                            font-size: 12px; font-family: "Menlo";
+                        }
+                        copy-button := Button {
+                            text: "Copy";
+                            clicked => { code-field.select-all(); code-field.copy(); code-field.clear-selection(); }
+                        }
+                    }
+                    Text { text: "Password"; color: Palette.foreground.with-alpha(0.7); font-size: 12px; }
+                    password-text := Text { text: root.password; font-size: 34px; font-weight: 700; font-family: "Menlo"; }
+                    if root.note != "": Text { text: root.note; wrap: word-wrap; font-size: 12px; }
+                }
             }
             if !root.secrets-visible: hidden-text := Text {
-                text: "The code and password are hidden while someone is connected: your screen is being shown to them.";
+                text: "The code and password are hidden while your screen is being shared, so the viewer cannot see them.";
                 wrap: word-wrap;
             }
             if root.session-active: show-button := Button {
                 text: root.secrets-visible ? "Hide code and password" : "Show code and password";
                 clicked => { if (root.secrets-visible) { root.hide-secrets(); } else { root.show-secrets(); } }
             }
-            Text { text: root.notice; wrap: word-wrap; color: #9a4d00; }
-            Text { text: root.display; wrap: word-wrap; }
-            Text { text: root.refused; wrap: word-wrap; font-size: 11px; }
+            if root.refused != "": Text { text: root.refused; wrap: word-wrap; font-size: 12px; }
+            HorizontalLayout {
+                spacing: 8px;
+                Text { text: "This computer: " + root.device; font-size: 12px; color: Palette.foreground.with-alpha(0.7); vertical-alignment: center; }
+                Rectangle { }
+            }
+            HorizontalLayout {
+                spacing: 6px;
+                Text {
+                    text: "Development build: this computer\u{2019}s keys are stored unencrypted.";
+                    font-size: 11px; color: #b9770e; wrap: word-wrap; vertical-alignment: center;
+                }
+                Button { text: root.warning-details ? "Hide details" : "Details"; clicked => { root.warning-details = !root.warning-details; } }
+            }
+            if root.warning-details: warning-text := Text { text: root.warning; wrap: word-wrap; font-size: 11px; color: #b9770e; }
         }
     }
 
     export component DialogWindow inherits Window {
         title: "Remora \u{2014} someone wants to see your screen";
         always-on-top: true;
+        preferred-width: 420px;
         in property <string> sas;
         in property <string> name;
         in property <string> device;
@@ -88,27 +124,36 @@ slint::slint! {
                 return reject;
             }
             VerticalBox {
+                spacing: 10px;
                 Text { text: "Someone wants to see your screen"; font-size: 18px; font-weight: 700; }
-                Text { text: "Safety code"; }
-                sas-text := Text { text: root.sas; font-size: 40px; font-weight: 700; }
-                Text { text: "Accept only if the other person reads you the same code."; wrap: word-wrap; }
-                device-text := Text { text: "Device ID: " + root.device + " (" + root.trust + ")"; }
-                name-text := Text { text: "Name: " + root.name; wrap: word-wrap; }
-                Text { text: "name chosen by the other computer, not checked"; font-size: 11px; color: #666666; }
-                left-text := Text { text: "No answer in " + root.seconds-left + " s means deny."; }
-                HorizontalBox {
+                Text { text: "Ask them to read you the code on their screen. Accept only if it is exactly this one:"; wrap: word-wrap; }
+                sas-text := Text { text: root.sas; font-size: 44px; font-weight: 700; font-family: "Menlo"; horizontal-alignment: center; }
+                GroupBox {
+                    title: "Who is asking";
+                    VerticalLayout {
+                        spacing: 4px;
+                        device-text := Text { text: "Device ID: " + root.device + " (" + root.trust + ")"; }
+                        name-text := Text { text: "Name: " + root.name; wrap: word-wrap; }
+                        Text { text: "The name is chosen by the other computer and not checked."; font-size: 11px; color: Palette.foreground.with-alpha(0.6); wrap: word-wrap; }
+                    }
+                }
+                left-text := Text { text: "Denied automatically in " + root.seconds-left + " s."; font-size: 12px; color: Palette.foreground.with-alpha(0.7); }
+                HorizontalLayout {
+                    spacing: 10px;
                     deny-button := Button { text: "Deny"; clicked => { root.deny(); } }
                     accept-button := Rectangle {
-                        min-width: 110px;
-                        min-height: 32px;
+                        min-width: 120px;
+                        min-height: 30px;
                         border-radius: 6px;
-                        background: root.accept-enabled ? #2a7d2e : #c8c8c8;
+                        background: root.accept-enabled ? #2a7d2e : #8a8a8a;
+                        opacity: root.accept-enabled ? 1 : 0.6;
                         accessible-role: button;
                         accessible-label: "Accept";
                         accessible-enabled: root.accept-enabled;
                         accessible-action-default => { root.accept-accessible(); }
                         Text { text: "Accept"; color: white; font-weight: 700; }
                         accept-area := TouchArea {
+                            mouse-cursor: root.accept-enabled ? pointer : not-allowed;
                             pointer-event(event) => {
                                 if (event.button == PointerEventButton.left) {
                                     if (event.kind == PointerEventKind.down) {
@@ -128,28 +173,38 @@ slint::slint! {
     }
 
     export component SessionWindow inherits Window {
-        title: "Remora \u{2014} your screen is being shown";
+        title: "Remora \u{2014} sharing your screen";
         always-on-top: true;
+        preferred-width: 340px;
+        min-width: 300px;
+        min-height: 150px;
         in property <string> text;
         in property <string> elapsed;
         in property <string> display;
         callback end-session();
         VerticalBox {
-            indicator-text := Text { text: root.text; font-size: 16px; font-weight: 700; wrap: word-wrap; }
-            Text { text: "for " + root.elapsed; }
-            Text { text: root.display; wrap: word-wrap; }
-            end-button := Button { text: "End session"; clicked => { root.end-session(); } }
+            spacing: 8px;
+            HorizontalLayout {
+                spacing: 8px;
+                Rectangle { width: 12px; height: 12px; border-radius: 6px; background: #e74c3c; y: (parent.height - self.height) / 2; }
+                indicator-text := Text { text: root.text; font-size: 15px; font-weight: 700; wrap: word-wrap; vertical-alignment: center; }
+            }
+            Text { text: "Shared for " + root.elapsed; font-size: 12px; color: Palette.foreground.with-alpha(0.7); }
+            if root.display != "": Text { text: root.display; wrap: word-wrap; font-size: 12px; }
+            end-button := Button { text: "End session"; primary: true; clicked => { root.end-session(); } }
         }
     }
 
     export component ViewerWindow inherits Window {
-        title: "Remora viewer";
-        preferred-width: 520px;
+        title: "Remora \u{2014} connect to a computer";
+        preferred-width: 460px;
+        min-width: 380px;
         in property <string> stage: "form";
         in-out property <string> code-text;
         in-out property <string> password-text;
         in property <string> host-device;
         in property <string> form-error;
+        in property <bool> can-connect;
         in property <string> sas;
         in property <string> verification;
         in property <bool> verified;
@@ -157,48 +212,62 @@ slint::slint! {
         in property <string> display;
         in property <string> ended-text;
         callback code-edited(string);
+        callback password-edited(string);
         callback connect();
         callback codes-match();
         callback codes-differ();
         callback disconnect();
         callback new-connection();
         VerticalBox {
+            spacing: 10px;
             if root.stage == "form": VerticalLayout {
                 spacing: 8px;
-                Text { text: "Connection code (from the host's window)"; }
+                Text { text: "Connect to a computer"; font-size: 18px; font-weight: 700; }
+                Text { text: "Ask the person at the other computer for their connection code and password."; wrap: word-wrap; color: Palette.foreground.with-alpha(0.7); }
+                Text { text: "Connection code"; font-size: 12px; }
                 code-field := LineEdit {
-                    placeholder-text: "paste the code";
+                    placeholder-text: "remora1:\u{2026} (paste it here)";
                     text <=> root.code-text;
                     edited(t) => { root.code-edited(t); }
                 }
-                host-text := Text { text: root.host-device; wrap: word-wrap; }
-                Text { text: "Password (6 digits shown at the host)"; }
-                password-field := LineEdit { input-type: password; text <=> root.password-text; }
-                error-text := Text { text: root.form-error; wrap: word-wrap; color: #b00020; }
-                connect-button := Button { text: "Connect"; clicked => { root.connect(); } }
+                if root.host-device != "": host-text := Text { text: root.host-device; wrap: word-wrap; color: #27ae60; font-size: 12px; }
+                Text { text: "Password"; font-size: 12px; }
+                password-field := LineEdit {
+                    input-type: password;
+                    placeholder-text: "6 digits";
+                    text <=> root.password-text;
+                    edited(t) => { root.password-edited(t); }
+                    accepted => { if (root.can-connect) { root.connect(); } }
+                }
+                if root.form-error != "": error-text := Text { text: root.form-error; wrap: word-wrap; color: #c0392b; }
+                connect-button := Button { text: "Connect"; primary: true; enabled: root.can-connect; clicked => { root.connect(); } }
             }
             if root.stage == "connecting": VerticalLayout {
                 spacing: 8px;
-                Text { text: "Connecting\u{2026}"; }
+                Text { text: "Connecting\u{2026}"; font-size: 16px; }
                 Button { text: "Cancel"; clicked => { root.disconnect(); } }
             }
             if root.stage == "comparing" || root.stage == "active": VerticalLayout {
                 spacing: 8px;
-                Text { text: root.stage == "active" ? "Connected: the screen is in the video window." : "Safety code"; }
-                sas-text := Text { text: root.sas; font-size: 40px; font-weight: 700; }
-                verification-text := Text { text: root.verification; wrap: word-wrap; }
-                waiting-text := Text { text: root.waiting; wrap: word-wrap; }
-                if !root.verified: HorizontalBox {
+                Text {
+                    text: root.stage == "active" ? "Connected. The other screen is in the video window." : "Read this code to the person at the other computer:";
+                    wrap: word-wrap;
+                }
+                sas-text := Text { text: root.sas; font-size: 44px; font-weight: 700; font-family: "Menlo"; horizontal-alignment: center; }
+                verification-text := Text { text: root.verification; wrap: word-wrap; color: root.verified ? #27ae60 : #b9770e; }
+                if root.waiting != "": waiting-text := Text { text: root.waiting; wrap: word-wrap; font-size: 12px; }
+                if !root.verified: HorizontalLayout {
+                    spacing: 8px;
                     match-button := Button { text: "The codes match"; clicked => { root.codes-match(); } }
                     differ-button := Button { text: "They don't match"; clicked => { root.codes-differ(); } }
                 }
-                display-text := Text { text: root.display; wrap: word-wrap; font-size: 18px; }
+                if root.display != "": display-text := Text { text: root.display; wrap: word-wrap; font-size: 16px; }
                 disconnect-button := Button { text: "Disconnect"; clicked => { root.disconnect(); } }
             }
             if root.stage == "ended": VerticalLayout {
                 spacing: 8px;
-                ended-message := Text { text: root.ended-text; wrap: word-wrap; }
-                Button { text: "New connection"; clicked => { root.new-connection(); } }
+                ended-message := Text { text: root.ended-text; wrap: word-wrap; font-size: 15px; }
+                Button { text: "New connection"; primary: true; clicked => { root.new-connection(); } }
             }
         }
     }

@@ -97,6 +97,7 @@ impl ViewerGui {
     pub(crate) fn new(options: Options) -> Result<Rc<RefCell<Self>>, slint::PlatformError> {
         let window = ViewerWindow::new()?;
         window.on_code_edited(|text| on_gui(move |g| g.code_edited(&text)));
+        window.on_password_edited(|_| on_gui(|g| g.update_can_connect()));
         window.on_connect(|| on_gui(ViewerGui::connect));
         window.on_codes_match(|| {
             on_gui(|g| {
@@ -122,6 +123,7 @@ impl ViewerGui {
                 g.window.set_code_text("".into());
                 g.window.set_host_device("".into());
                 g.window.set_form_error("".into());
+                g.update_can_connect();
                 g.refresh();
             })
         });
@@ -141,8 +143,20 @@ impl ViewerGui {
         Millis(u64::try_from(self.started.elapsed().as_millis()).unwrap_or(u64::MAX))
     }
 
+    /// Error prevention (§16): Connect is enabled only for a code the parser
+    /// accepts and a 6-digit password.
+    fn update_can_connect(&self) {
+        let ok = remora_app::decide::viewer::can_connect(
+            &self.window.get_code_text(),
+            &self.window.get_password_text(),
+            unix_now(),
+        );
+        self.window.set_can_connect(ok);
+    }
+
     /// V1: as the code is typed or pasted, show whose it is (or why not).
     fn code_edited(&mut self, text: &str) {
+        self.update_can_connect();
         if text.trim().is_empty() {
             self.window.set_host_device("".into());
             self.window.set_form_error("".into());
@@ -168,6 +182,7 @@ impl ViewerGui {
         // copy is the zeroizing `Otp` (Slint's own copy is §11b's limit).
         let password = self.window.get_password_text();
         self.window.set_password_text("".into());
+        self.window.set_can_connect(false);
         let target = match read_code(&code, unix_now()) {
             Ok(t) => t,
             Err(e) => return self.window.set_form_error(e.into()),
@@ -178,6 +193,12 @@ impl ViewerGui {
         };
         drop(password);
         self.window.set_form_error("".into());
+        let host = target.host_device.clone();
+        VIDEO.with(|v| {
+            if let Some(v) = v.borrow_mut().as_mut() {
+                v.set_host(host);
+            }
+        });
         self.desk.connecting();
         let options = self.options.clone();
         let started = std::thread::Builder::new()
@@ -429,8 +450,11 @@ mod tests {
 
     fn gui() -> Rc<RefCell<ViewerGui>> {
         testing::init_no_event_loop();
+        // Never the person's real key file: a throwaway one per test.
+        let dir =
+            std::env::temp_dir().join(format!("remora-viewer-gui-test-{}", std::process::id()));
         ViewerGui::new(Options {
-            identity_file: None,
+            identity_file: Some(dir.join(format!("{:?}.key", std::thread::current().id()))),
             name: "test".into(),
         })
         .unwrap()
@@ -493,20 +517,36 @@ mod tests {
     }
 
     #[test]
-    fn v2_connect_clears_the_password_field_even_when_it_is_refused() {
+    fn v2_connect_clears_the_password_field() {
         let g = gui();
         let w = g.borrow().window.clone_strong();
         let now = u32::try_from(unix_now()).unwrap();
         w.set_code_text(code_text(now).into());
-        w.set_password_text("12".into()); // not 6 digits: refused before connecting
+        g.borrow_mut().code_edited(&w.get_code_text());
+        w.set_password_text("123 456".into());
+        g.borrow().update_can_connect();
+        assert!(w.get_can_connect());
         press(&w, "Connect");
         assert_eq!(w.get_password_text(), "", "the field is cleared at Connect");
-        assert!(
-            w.get_form_error().contains("6 digits"),
-            "{}",
-            w.get_form_error()
-        );
-        assert_eq!(w.get_stage(), "form");
+        assert_eq!(w.get_stage(), "connecting");
+    }
+
+    #[test]
+    fn connect_stays_disabled_until_the_code_and_password_are_valid() {
+        let g = gui();
+        let w = g.borrow().window.clone_strong();
+        let now = u32::try_from(unix_now()).unwrap();
+        assert!(!w.get_can_connect(), "empty form");
+        w.set_code_text(code_text(now).into());
+        g.borrow_mut().code_edited(&w.get_code_text());
+        w.set_password_text("12".into());
+        g.borrow().update_can_connect();
+        assert!(!w.get_can_connect(), "2 digits");
+        press(&w, "Connect");
+        assert_eq!(w.get_stage(), "form", "a disabled Connect does nothing");
+        w.set_password_text("123456".into());
+        g.borrow().update_can_connect();
+        assert!(w.get_can_connect());
     }
 
     #[test]

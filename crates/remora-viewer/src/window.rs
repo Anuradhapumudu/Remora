@@ -65,6 +65,24 @@ pub(crate) struct VideoWindow {
     pause: Option<crate::Pause>,
     /// O1 (phase4.5-criteria §7, D-35): the window is covered.
     covered: Covered,
+    /// The host's device ID for the title (the GUI sets it; empty in the CLI).
+    host: String,
+}
+
+/// The video window's title (owner, 2026-11-01, phase4.5-criteria §16):
+/// "Remora — <host> · <status>", with the developer stats line on stderr
+/// only; without a known host (the CLI) "Remora viewer — <status>".
+pub(crate) fn title_for(host: &str, status: &str) -> String {
+    let who = if host.is_empty() {
+        "Remora viewer".to_owned()
+    } else {
+        format!("Remora \u{2014} {host}")
+    };
+    if status.is_empty() {
+        who
+    } else {
+        format!("{who} \u{00B7} {status}")
+    }
 }
 
 /// O1: while the window is covered (`Occluded(true)`), pictures are still
@@ -145,12 +163,18 @@ impl VideoWindow {
             no_drawable: (0, ""),
             pause: None,
             covered: Covered::default(),
+            host: String::new(),
         }
     }
 
     /// Whether `id` is this window.
     pub(crate) fn is(&self, id: WindowId) -> bool {
         self.window.as_ref().is_some_and(|w| w.id() == id)
+    }
+
+    /// The host's device ID, for the title.
+    pub(crate) fn set_host(&mut self, host: String) {
+        self.host = host;
     }
 
     /// The decoder's counters, for the stats line.
@@ -165,7 +189,7 @@ impl VideoWindow {
             Some(_) => self.show_pause(),
             None => {
                 if let Some(w) = &self.window {
-                    w.set_title("Remora viewer");
+                    w.set_title(&title_for(&self.host, ""));
                 }
             }
         }
@@ -344,7 +368,7 @@ impl VideoWindow {
     /// The title while paused (the stats line takes it back on resume).
     fn show_pause(&self) {
         if let (Some(w), Some(p)) = (&self.window, &self.pause) {
-            w.set_title(&format!("Remora viewer — {}", p.text()));
+            w.set_title(&title_for(&self.host, &p.text()));
         }
     }
 
@@ -367,7 +391,10 @@ impl VideoWindow {
         }
         eprintln!("stats: {line}");
         if let Some(w) = &self.window {
-            w.set_title(&format!("Remora viewer — {line}"));
+            // The title keeps the frame rate only ("53 fps"); the full line is
+            // for developers and the measuring scripts, on stderr.
+            let fps = line.split(',').next().unwrap_or("");
+            w.set_title(&title_for(&self.host, fps));
         }
     }
 }
@@ -522,6 +549,19 @@ fn percentiles(v: &mut [Duration]) -> (f64, f64) {
 #[cfg(all(test, target_os = "macos"))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_title_names_the_host_and_keeps_only_the_frame_rate() {
+        assert_eq!(
+            title_for("8531 422 5411-5", "53 fps"),
+            "Remora \u{2014} 8531 422 5411-5 \u{00B7} 53 fps"
+        );
+        assert_eq!(
+            title_for("8531 422 5411-5", ""),
+            "Remora \u{2014} 8531 422 5411-5"
+        );
+        assert_eq!(title_for("", "60 fps"), "Remora viewer \u{00B7} 60 fps");
+    }
 
     #[test]
     fn o1_covered_window_draws_nothing_then_draws_at_once() {

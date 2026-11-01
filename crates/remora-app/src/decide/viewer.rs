@@ -59,8 +59,19 @@ pub fn read_code(text: &str, now_unix: u64) -> Result<Target, String> {
 
 /// Reads the typed password (V2) into a buffer that is zeroized on drop.
 pub fn read_password(text: &str) -> Result<Otp, String> {
-    Otp::parse(text.trim())
+    // Shown grouped at the host ("248 416"): spaces anywhere are ignored.
+    let digits: String = text.split_whitespace().collect();
+    Otp::parse(&digits)
         .map_err(|e| format!("The password is the 6 digits shown at the host ({e})."))
+}
+
+/// Whether Connect can be pressed: a code the parser accepts and 6 digits
+/// (spaces ignored). Prevents the errors instead of reporting them.
+pub fn can_connect(code: &str, password: &str, now_unix: u64) -> bool {
+    let digits: String = password.split_whitespace().collect();
+    read_code(code, now_unix).is_ok()
+        && digits.len() == 6
+        && digits.bytes().all(|b| b.is_ascii_digit())
 }
 
 /// What a request from the viewer window asks the connection to do.

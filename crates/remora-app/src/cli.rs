@@ -184,6 +184,30 @@ impl PasswordChange {
             }
         }
     }
+
+    /// The same, as one plain sentence for the host window (empty when the
+    /// password is unchanged: a fresh code needs no explanation there).
+    pub fn sentence(self) -> &'static str {
+        match self {
+            Self::Unchanged => "",
+            Self::UsedUp => {
+                "New code and password: the last ones were used by the previous viewer. Each pair works for one connection."
+            }
+            Self::ReplacedAfterFailures => {
+                "New password: the old one was replaced after 3 failed attempts and no longer works."
+            }
+        }
+    }
+}
+
+/// A 6-digit password as the host window shows it: "248 416" (easier to
+/// read out and to compare; the viewer accepts it with or without the space).
+pub fn group_password(digits: &str) -> String {
+    if digits.len() == 6 && digits.is_ascii() {
+        format!("{} {}", &digits[..3], &digits[3..])
+    } else {
+        digits.to_owned()
+    }
 }
 
 /// A safety code as people read it aloud: `123 456`.
@@ -314,6 +338,25 @@ mod tests {
         );
         assert_eq!(args_or_gui(os(&["app"]), None), os(&["app"]));
         assert_eq!(args_or_gui(os(&["app"]), Some("0".into())), os(&["app"]));
+    }
+
+    #[test]
+    fn password_shown_grouped_and_changes_explained_in_plain_sentences() {
+        assert_eq!(group_password("248416"), "248 416");
+        assert_eq!(group_password("12345"), "12345");
+        assert_eq!(PasswordChange::Unchanged.sentence(), "");
+        assert!(PasswordChange::UsedUp.sentence().contains("one connection"));
+        assert!(
+            PasswordChange::ReplacedAfterFailures
+                .sentence()
+                .contains("3 failed attempts")
+        );
+        for c in [
+            PasswordChange::UsedUp,
+            PasswordChange::ReplacedAfterFailures,
+        ] {
+            assert!(!c.sentence().starts_with("note:"));
+        }
     }
 
     #[test]

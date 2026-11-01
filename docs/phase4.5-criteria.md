@@ -516,6 +516,35 @@ visible, and the result is recorded with how it was checked.
 | 2026-11-01 | §3b: steps 5–6 proceed before D-34 reports; the viewer self-count is built. Limit, I3 `unsafe` and irreversible steps unchanged | Owner: "okay continue do anything and build the app loop unitil the app build" |
 | 2026-11-01 | §2 corrected (Slint-generated `unsafe`, roadmap D-46). Option A chosen: the screens live in `crates/remora-ui`, markup only, without `forbid(unsafe_code)`; host and viewer keep it (architecture D45) | Owner: "lets go the best option as you think lets build it" |
 | 2026-11-01 | I3: the AppKit call for the indicator on every Space is built (architecture D46); §11b updated | Owner, after the exact code: "lets go with your best plan which is suitable with our app lets go until our app build" |
+| 2026-11-01 | §16: UI/UX pass after M1; R3 (video title) changed; H10 confirmed | Owner: "using HCI we need to imporve ui and ux"; title: "Host name + a short status"; H10: "Yes, I clicked Show" |
+
+## 16. UI/UX pass (owner, 2026-11-01)
+
+After M1 ran (accept through the GUI on the M4) the owner wrote: "for me it
+is working but we need to make the ui better and optimize it better and
+using HCI we need to imporve ui and ux". Judged against Nielsen's
+heuristics on the owner's screenshot:
+
+| Where | Problem | Heuristic | Change |
+|---|---|---|---|
+| Session indicator | Too small: text clipped, End session not visible | User control and freedom | Minimum size, red dot, End session always shown (primary) |
+| Host window | One block of text, the key warning dominated | Aesthetic and minimalist design | Grouped "Give these to the person …" box; short warning with Details (the full F-UX2 text, path included, one click away) |
+| Host window | Long code hard to copy; password hard to read out | Recognition, efficiency | Copy button; password shown "248 416" (the viewer accepts it with or without the space) |
+| Host window | "note: …" read like terminal output | Match with the real world | Plain sentences (`PasswordChange::sentence`) |
+| Host window | Nothing said what was happening | Visibility of system status | Status line: waiting / someone is asking / being shared with … |
+| Viewer form | Connect could be pressed with a bad code or password | Error prevention | Connect enabled only for a valid code and 6 digits; Return in the password field connects |
+| Video window title | The developer stats line | Match with the real world | "Remora — <host> · 53 fps"; the full stats line stays on stderr (the measuring scripts read it there) |
+
+**R3 changed (owner, 2026-11-01):** asked what the video window's title
+should show, the owner chose "Host name + a short status". The full stats
+line remains on stderr every second.
+
+**H10 checked:** the code and password visible in the owner's screenshot
+during the session were shown by the owner's own click on Show (owner,
+2026-11-01); H10 worked as designed.
+
+The security rules (H1–H12, the decision module) are unchanged; every
+accessible label the tests press is unchanged.
 
 ## 15. Requirements and the checks that enforce them (check (c), 2026-10-27)
 

@@ -168,7 +168,8 @@ impl<C: HostControl + 'static> HostGui<C> {
         self.code_issued = CLOCK.with(TestableClock::now);
         let (code, password, note) = self.control.new_code(explain);
         self.main.set_code(code.into());
-        self.main.set_password(password.into());
+        self.main
+            .set_password(remora_app::cli::group_password(&password).into());
         self.main.set_note(note.into());
         self.main.set_notice("".into());
     }
@@ -368,8 +369,20 @@ impl<C: HostControl + 'static> HostGui<C> {
                 }
             }
         }
-        self.main
-            .set_session_active(self.desk.indicator(now).is_some());
+        let indicator = self.desk.indicator(now);
+        // Visibility of system status: one line saying what is happening now.
+        let status = match (&indicator, views.is_empty()) {
+            (Some(i), _) => format!(
+                "Your screen is being shared: {}.",
+                i.text.trim_end_matches(" is viewing your screen")
+            ),
+            (None, false) => {
+                "Someone is asking to see your screen. Answer in the dialog.".to_owned()
+            }
+            (None, true) => "Waiting for someone to connect.".to_owned(),
+        };
+        self.main.set_status(status.into());
+        self.main.set_session_active(indicator.is_some());
         self.main.set_secrets_visible(self.desk.secrets_visible());
         self.main.set_display(display.into());
         let n = self.desk.refused_busy_count();
@@ -501,7 +514,7 @@ impl HostControl for Live {
         let otp = self.server.otp();
         let note = if explain {
             PasswordChange::between(self.shown_password.reveal(), otp.reveal(), self.rotated)
-                .note()
+                .sentence()
                 .to_owned()
         } else {
             String::new()
@@ -819,12 +832,20 @@ mod tests {
         let session = g.borrow().session.clone_strong();
         assert!(!session.window().is_visible());
         assert!(main.get_secrets_visible());
+        g.borrow_mut().refresh(at(500));
+        assert_eq!(main.get_status(), "Waiting for someone to connect.");
         prompt(&g, 7, "Bob", at(1_000));
         assert!(!session.window().is_visible(), "not before Active");
+        assert!(
+            main.get_status().starts_with("Someone is asking"),
+            "{}",
+            main.get_status()
+        );
         g.borrow_mut()
             .event(HostEvent::Active { id: SessionId(7) }, at(5_000));
         assert!(session.window().is_visible());
         assert_eq!(session.get_text(), "Bob is viewing your screen");
+        assert_eq!(main.get_status(), "Your screen is being shared: Bob.");
         assert!(!main.get_secrets_visible(), "H10: hidden while active");
         assert!(g.borrow().dialogs.is_empty(), "its dialog is gone");
         g.borrow_mut().refresh(at(65_000 + 5_000));

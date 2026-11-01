@@ -394,8 +394,26 @@ fn v1_a_hosts_code_shows_its_device_and_an_answer_code_is_refused() {
 }
 
 #[test]
+fn connect_is_possible_only_with_a_valid_code_and_six_digits() {
+    let now: u32 = 1_800_000_000;
+    let code = a_code(remora_proto::code::CodeKind::Offer, now);
+    let can = |c: &str, p: &str| remora_app::decide::viewer::can_connect(c, p, now.into());
+    assert!(can(&code, "123456"));
+    assert!(can(&code, "123 456"));
+    assert!(!can(&code, "12345"));
+    assert!(!can(&code, "1234567"));
+    assert!(!can(&code, "12345x"));
+    assert!(!can("not a code", "123456"));
+    assert!(!can(
+        &a_code(remora_proto::code::CodeKind::Answer, now),
+        "123456"
+    ));
+}
+
+#[test]
 fn v2_password_is_six_digits() {
     assert!(read_password(" 123456 ").is_ok());
+    assert!(read_password("123 456").is_ok(), "as the host shows it");
     assert!(read_password("12345").is_err());
     assert!(read_password("abcdef").is_err());
 }
