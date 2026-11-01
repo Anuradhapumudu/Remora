@@ -26,6 +26,8 @@ cargo audit
 step "crate-age exceptions (validity, exact expiry, warning under 48 h)"
 python3 -I scripts/ci/check-crate-age.py --self-test > /dev/null
 python3 -I scripts/ci/check-crate-age.py --exceptions-only
+step "measuring helper self-test (R9)"
+python3 -I scripts/macos/measuring.py --self-test
 step "roadmap tables"
 python3 -I scripts/ci/check-roadmap.py
 
