@@ -523,8 +523,8 @@ impl Video {
         }
         let capture: anyhow::Result<Box<dyn ScreenCapture>> = match self.source {
             Source::Screen => MacScreenCapture::main_display(screen_capture_config(self.width))
-            .map(|c| Box::new(c) as Box<dyn ScreenCapture>)
-            .map_err(anyhow::Error::from),
+                .map(|c| Box::new(c) as Box<dyn ScreenCapture>)
+                .map_err(anyhow::Error::from),
             // 16:9, as a typical screen.
             _ => Ok(Box::new(crate::stream::SyntheticCapture::new(
                 self.width,
@@ -673,7 +673,10 @@ mod tests {
     #[test]
     fn the_streamed_screen_shows_the_cursor() {
         let c = screen_capture_config(1920);
-        assert!(c.show_cursor, "until the separate cursor channel (D-48) exists");
+        assert!(
+            c.show_cursor,
+            "until the separate cursor channel (D-48) exists"
+        );
         assert_eq!(c.width, 1920);
     }
 
