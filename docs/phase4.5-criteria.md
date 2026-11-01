@@ -145,6 +145,14 @@ arrival is delayed by Slint's loop), work stops and the options come back to
 the owner **before** any GUI code depends on them; B and A would each need
 their own unsafe-policy decision (CLAUDE.md: not D19's precedent).
 
+**Correction 2026-11-01 (roadmap D-46):** "none" above holds for code we
+write, not for code Slint generates into our crate. `slint::slint!` output
+derives `const-field-offset`'s `FieldOffsets`, which expands into `unsafe`
+blocks (`const-field-offset-macro-0.2.1/macro.rs:207`, read at the locked
+version) inside `remora-host` / `remora-viewer`; `#![forbid(unsafe_code)]`
+rejects them. S1 did not see it because the spike had no `forbid`. The GUI
+waits for the owner's decision (D-46).
+
 **Spike S1 checks C′** (§3): both windows open in one process, our window
 gets its events, frames are drawn on arrival with the same frame interval as
 Phase 4 (P4: 16.67 ms p50 at 60 Hz with a 60 fps source), and nothing needs
