@@ -5,7 +5,10 @@
 //! GNOME sends a frame only when something on screen changes: move a window
 //! or play a video during the run.
 //!
-//!     cargo run --release -- [seconds]
+//!     cargo run --release -- [seconds] [dmabuf]
+//!
+//! `dmabuf`: offer the linear DRM modifier and ask for DMA-BUF buffers (GPU
+//! memory, no copy into shared memory); buffers are counted, not mapped.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -23,6 +26,7 @@ struct Stats {
     frames: u64,
     bytes: u64,
     intervals_ms: Vec<f64>,
+    data_type: Option<String>,
 }
 
 fn pct(v: &mut [f64], p: f64) -> f64 {
@@ -35,6 +39,7 @@ fn pct(v: &mut [f64], p: f64) -> f64 {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let seconds: u64 = std::env::args().nth(1).and_then(|s| s.parse().ok()).unwrap_or(20);
+    let dmabuf = std::env::args().nth(2).as_deref() == Some("dmabuf");
     // 1. The portal: the person picks a monitor in GNOME's dialog.
     let rt = tokio::runtime::Runtime::new()?;
     let (proxy, session, node, size) = rt.block_on(async {
@@ -71,6 +76,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         frames: 0,
         bytes: 0,
         intervals_ms: Vec::new(),
+        data_type: None,
     }));
     let stream = pw::stream::StreamBox::new(
         &core,
@@ -86,7 +92,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _listener = stream
         .add_local_listener_with_user_data(Rc::clone(&stats))
         .state_changed(|_, _, old, new| eprintln!("stream: {old:?} -> {new:?}"))
-        .param_changed(|_, st, id, param| {
+        .param_changed(move |stream, st, id, param| {
             let Some(param) = param else { return };
             if id != pw::spa::param::ParamType::Format.as_raw() {
                 return;
@@ -101,6 +107,30 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     st.format.framerate().num,
                     st.format.framerate().denom
                 );
+                if dmabuf {
+                    // Ask for DMA-BUF memory now that the format is fixed.
+                    let buffers = pw::spa::pod::Object {
+                        type_: pw::spa::utils::SpaTypes::ObjectParamBuffers.as_raw(),
+                        id: pw::spa::param::ParamType::Buffers.as_raw(),
+                        properties: vec![pw::spa::pod::Property {
+                            key: pw::spa::sys::SPA_PARAM_BUFFERS_dataType,
+                            flags: pw::spa::pod::PropertyFlags::empty(),
+                            value: pw::spa::pod::Value::Int(
+                                1 << pw::spa::buffer::DataType::DmaBuf.as_raw(),
+                            ),
+                        }],
+                    };
+                    let bytes: Vec<u8> = pw::spa::pod::serialize::PodSerializer::serialize(
+                        std::io::Cursor::new(Vec::new()),
+                        &pw::spa::pod::Value::Object(buffers),
+                    )
+                    .expect("buffers pod")
+                    .0
+                    .into_inner();
+                    let pod = spa::pod::Pod::from_bytes(&bytes).expect("pod");
+                    let r = stream.update_params(&mut [pod]);
+                    eprintln!("asked for DMA-BUF buffers: {r:?}");
+                }
             }
         })
         .process(move |stream, st| {
@@ -110,9 +140,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 return;
             }
             let size = u64::from(datas[0].chunk().size());
+            let kind = format!("{:?}", datas[0].type_());
             let now = Instant::now();
             let mut st = st.borrow_mut();
-            if size == 0 {
+            if st.data_type.is_none() {
+                eprintln!("first buffer: {kind}, chunk size {size}");
+                st.data_type = Some(kind.clone());
+            }
+            if size == 0 && !dmabuf {
                 return; // a cursor-only or empty buffer: not a picture
             }
             let started = *st.started.get_or_insert(now);
@@ -127,7 +162,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         })
         .register()?;
-    let obj = pw::spa::pod::object!(
+    let mut obj = pw::spa::pod::object!(
         pw::spa::utils::SpaTypes::ObjectParamFormat,
         pw::spa::param::ParamType::EnumFormat,
         pw::spa::pod::property!(pw::spa::param::format::FormatProperties::MediaType, Id, pw::spa::param::format::MediaType::Video),
@@ -156,6 +191,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             pw::spa::utils::Fraction { num: 1000, denom: 1 }
         ),
     );
+    if dmabuf {
+        // The linear layout (DRM_FORMAT_MOD_LINEAR = 0): every GPU path can
+        // produce it. MANDATORY + DONT_FIXATE as PipeWire's DMA-BUF guide asks.
+        obj.properties.push(pw::spa::pod::Property {
+            key: pw::spa::param::format::FormatProperties::VideoModifier.as_raw(),
+            flags: pw::spa::pod::PropertyFlags::from_bits_retain(
+                pw::spa::sys::SPA_POD_PROP_FLAG_MANDATORY | pw::spa::sys::SPA_POD_PROP_FLAG_DONT_FIXATE,
+            ),
+            value: pw::spa::pod::Value::Choice(pw::spa::pod::ChoiceValue::Long(pw::spa::utils::Choice(
+                pw::spa::utils::ChoiceFlags::empty(),
+                pw::spa::utils::ChoiceEnum::Enum { default: 0, alternatives: vec![0] },
+            ))),
+        });
+    }
     let values: Vec<u8> = pw::spa::pod::serialize::PodSerializer::serialize(
         std::io::Cursor::new(Vec::new()),
         &pw::spa::pod::Value::Object(obj),
@@ -166,7 +215,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     stream.connect(
         spa::utils::Direction::Input,
         Some(node),
-        pw::stream::StreamFlags::AUTOCONNECT | pw::stream::StreamFlags::MAP_BUFFERS,
+        if dmabuf {
+            pw::stream::StreamFlags::AUTOCONNECT
+        } else {
+            pw::stream::StreamFlags::AUTOCONNECT | pw::stream::StreamFlags::MAP_BUFFERS
+        },
         &mut params,
     )?;
     eprintln!("capturing for {seconds} s once the first frame arrives (move something on screen)");
@@ -175,8 +228,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut st = stats.borrow_mut();
     let secs = st.started.zip(st.last).map_or(0.0, |(a, b)| b.duration_since(a).as_secs_f64());
     let (p50, p95, max) = (pct(&mut st.intervals_ms, 0.5), pct(&mut st.intervals_ms, 0.95), pct(&mut st.intervals_ms, 1.0));
+    println!("buffers: {}", st.data_type.clone().unwrap_or_default());
     println!(
-        "RESULT sl1a: {} frames in {secs:.1} s ({:.1} fps), {:.1} MB/frame, interval p50 {p50:.1} p95 {p95:.1} max {max:.1} ms",
+        "RESULT sl1a{}: {} frames in {secs:.1} s ({:.1} fps), {:.1} MB/frame, interval p50 {p50:.1} p95 {p95:.1} max {max:.1} ms",
+        if dmabuf { " dmabuf" } else { "" },
         st.frames,
         st.frames as f64 / secs.max(1e-9),
         st.bytes as f64 / st.frames.max(1) as f64 / 1_048_576.0

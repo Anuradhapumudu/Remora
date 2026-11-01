@@ -44,3 +44,17 @@ capture delivers a steady 15.2 fps, exactly every 4th refresh (66.7 ms =
 GNOME copy each 31.6 MB 4K picture out of the GPU, and it cannot do that at
 60 Hz. Test next: negotiate DMA-BUF buffers (GPU memory, no copy), the path
 GNOME's own screen recorder uses.
+
+Run 4 (same 60 Hz motion page; DMA-BUF buffers, linear modifier, not mapped):
+  portal: answered in 82.6 s
+  format: BGRx 3840x2160 @ 0/1; asked for DMA-BUF buffers: Ok
+  first buffer: DataType::DmaBuf, chunk size 33177600
+  RESULT sl1a dmabuf: 412 frames in 20.0 s (20.6 fps), 31.6 MB/frame,
+                      interval p50 39.1 p95 67.2 max 85.0 ms
+
+GPU buffers were really used and raised the rate from 15.2 to 20.6 fps:
+the shared-memory copy was part of the limit, not all of it. Still open:
+(a) the linear layout makes GNOME convert each 4K picture on the GPU; offering
+the GPU's own (tiled) modifiers, queried through EGL, avoids that; (b) whether
+the browser itself draws 60 fps on this 4K panel was not measured. Not tried
+yet: a smaller capture size (GNOME may not scale for us), and 1920-wide panels.
