@@ -46,12 +46,14 @@ struct Gpu {
     renderer: Renderer,
 }
 
-struct App {
+/// The video window and everything it draws, apart from the event loop
+/// that drives it (the CLI's own loop, [`run`]; the Phase 4.5 GUI will put
+/// it on Slint's, option C′, phase4.5-criteria §2). It opens with the
+/// first picture.
+pub(crate) struct VideoWindow {
     window: Option<Arc<Window>>,
     gpu: Option<Gpu>,
-    close: Option<CloseRequest>,
     counters: Option<Arc<Counters>>,
-    exit_code: Option<u8>,
     stats: Stats,
     /// `connect --timing`: one stderr line per drawn frame (P1/P2).
     timing: bool,
@@ -59,9 +61,42 @@ struct App {
     /// last reason (R3: e.g. a hidden window gets none).
     no_drawable: (u64, &'static str),
     /// While the stream is paused: the title says why, counting down
-    /// every second if the host's display is unavailable (D-29). Plain text,
-    /// no styling: the proper overlay is Phase 4.5 (roadmap D-33).
+    /// every second if the host's display is unavailable (D-29).
     pause: Option<crate::Pause>,
+    /// O1 (phase4.5-criteria §7, D-35): the window is covered.
+    covered: Covered,
+}
+
+/// O1: while the window is covered (`Occluded(true)`), pictures are still
+/// decoded (the decoder's reference chain must stay intact) but not
+/// uploaded or drawn; the first picture after `Occluded(false)` is drawn.
+#[derive(Debug, Default)]
+pub(crate) struct Covered {
+    now: bool,
+    /// Pictures not drawn because the window was covered.
+    pub(crate) skipped: u64,
+}
+
+impl Covered {
+    /// The window's occlusion changed.
+    pub(crate) fn set(&mut self, covered: bool) {
+        self.now = covered;
+    }
+
+    /// A decoded picture arrived: draw it?
+    pub(crate) fn draw(&mut self) -> bool {
+        if self.now {
+            self.skipped += 1;
+        }
+        !self.now
+    }
+}
+
+/// What the CLI's event loop keeps besides the window.
+struct App {
+    video: VideoWindow,
+    close: Option<CloseRequest>,
+    exit_code: Option<u8>,
 }
 
 /// A presented frame: CPU time for acquire + draw + present, and with
@@ -89,22 +124,68 @@ pub(crate) fn run(
         .name("remora-session".into())
         .spawn(move || session(proxy, close_rx))?;
     let mut app = App {
-        window: None,
-        gpu: None,
+        video: VideoWindow::new(timing),
         close: Some(close_tx),
-        counters: None,
         exit_code: None,
-        stats: Stats::new(),
-        timing,
-        no_drawable: (0, ""),
-        pause: None,
     };
     event_loop.run_app(&mut app)?;
     let _ = thread.join();
     Ok(app.exit_code.unwrap_or(remora_app::cli::exit::ERROR))
 }
 
-impl App {
+impl VideoWindow {
+    /// No window yet; it opens with the first picture.
+    pub(crate) fn new(timing: bool) -> Self {
+        Self {
+            window: None,
+            gpu: None,
+            counters: None,
+            stats: Stats::new(),
+            timing,
+            no_drawable: (0, ""),
+            pause: None,
+            covered: Covered::default(),
+        }
+    }
+
+    /// The decoder's counters, for the stats line.
+    pub(crate) fn set_counters(&mut self, c: Arc<Counters>) {
+        self.counters = Some(c);
+    }
+
+    /// The stream paused (`Some`) or resumed (`None`).
+    pub(crate) fn set_pause(&mut self, p: Option<crate::Pause>) {
+        self.pause = p;
+        match p {
+            Some(_) => self.show_pause(),
+            None => {
+                if let Some(w) = &self.window {
+                    w.set_title("Remora viewer");
+                }
+            }
+        }
+    }
+
+    /// Once a second while paused with a countdown: the title's time left.
+    /// Returns whether it wants to be called again in a second.
+    pub(crate) fn tick(&self) -> bool {
+        match &self.pause {
+            Some(p) => {
+                self.show_pause();
+                p.deadline.is_some()
+            }
+            None => false,
+        }
+    }
+
+    /// Closes the window (the session is ending).
+    pub(crate) fn close(&mut self) {
+        if let Some(w) = self.window.take() {
+            w.set_visible(false);
+        }
+        self.gpu = None;
+    }
+
     fn open(&mut self, el: &ActiveEventLoop, width: u32, height: u32) -> anyhow::Result<()> {
         // Start at half the picture size on a Retina screen (1 picture
         // pixel per screen pixel), never larger than 1280 points wide.
@@ -273,6 +354,12 @@ impl App {
                 self.no_drawable.0, self.no_drawable.1
             ));
         }
+        if self.covered.skipped > 0 {
+            line.push_str(&format!(
+                ", not drawn while covered {}",
+                self.covered.skipped
+            ));
+        }
         eprintln!("stats: {line}");
         if let Some(w) = &self.window {
             w.set_title(&format!("Remora viewer — {line}"));
@@ -280,63 +367,26 @@ impl App {
     }
 }
 
-impl ApplicationHandler<Event> for App {
-    fn resumed(&mut self, _el: &ActiveEventLoop) {}
-
-    /// While paused, wake once a second to update the title's countdown.
-    fn about_to_wait(&mut self, el: &ActiveEventLoop) {
-        match &self.pause {
-            Some(p) => {
-                self.show_pause();
-                if p.deadline.is_some() {
-                    el.set_control_flow(ControlFlow::WaitUntil(
-                        Instant::now() + Duration::from_secs(1),
-                    ));
-                }
-            }
-            None => el.set_control_flow(ControlFlow::Wait),
+impl VideoWindow {
+    /// A decoded picture: opens the window on the first, uploads and draws
+    /// it at once (D34) unless the window is covered (O1). Either way the
+    /// decoder may hand over the next one.
+    pub(crate) fn picture(&mut self, el: &ActiveEventLoop, p: Picture) {
+        if self.window.is_none() || self.covered.draw() {
+            self.show(el, p);
+        }
+        if let Some(c) = &self.counters {
+            c.shown();
         }
     }
 
-    fn user_event(&mut self, el: &ActiveEventLoop, event: Event) {
-        match event {
-            Event::Picture(p) => {
-                self.show(el, p);
-                if let Some(c) = &self.counters {
-                    c.shown();
-                }
-            }
-            Event::Counters(c) => self.counters = Some(c),
-            Event::Pause(p) => {
-                self.pause = p;
-                match p {
-                    Some(_) => self.show_pause(),
-                    None => {
-                        if let Some(w) = &self.window {
-                            w.set_title("Remora viewer");
-                        }
-                    }
-                }
-            }
-            Event::Ended(code) => {
-                self.exit_code = Some(code);
-                el.exit();
-            }
-        }
-    }
-
-    fn window_event(&mut self, _el: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
+    /// An event for this window; returns `true` when the person closed it
+    /// (the session should end with a Goodbye).
+    pub(crate) fn window_event(&mut self, event: &WindowEvent) -> bool {
         match event {
             WindowEvent::CloseRequested => {
-                // The session sends a Goodbye and then reports how it
-                // ended (Event::Ended), which closes the event loop.
-                if let Some(close) = self.close.take() {
-                    let _ = close.send(());
-                }
-                if let Some(w) = self.window.take() {
-                    w.set_visible(false);
-                }
-                self.gpu = None;
+                self.close();
+                return true;
             }
             WindowEvent::Resized(size) => {
                 if let Some(gpu) = self.gpu.as_mut() {
@@ -350,7 +400,48 @@ impl ApplicationHandler<Event> for App {
             WindowEvent::RedrawRequested => {
                 let _ = self.present(false);
             }
+            // O1: on macOS from the window's occlusion state (winit
+            // window_delegate.rs:352).
+            WindowEvent::Occluded(covered) => self.covered.set(*covered),
             _ => {}
+        }
+        false
+    }
+}
+
+impl ApplicationHandler<Event> for App {
+    fn resumed(&mut self, _el: &ActiveEventLoop) {}
+
+    /// While paused, wake once a second to update the title's countdown.
+    fn about_to_wait(&mut self, el: &ActiveEventLoop) {
+        if self.video.tick() {
+            el.set_control_flow(ControlFlow::WaitUntil(
+                Instant::now() + Duration::from_secs(1),
+            ));
+        } else {
+            el.set_control_flow(ControlFlow::Wait);
+        }
+    }
+
+    fn user_event(&mut self, el: &ActiveEventLoop, event: Event) {
+        match event {
+            Event::Picture(p) => self.video.picture(el, p),
+            Event::Counters(c) => self.video.set_counters(c),
+            Event::Pause(p) => self.video.set_pause(p),
+            Event::Ended(code) => {
+                self.exit_code = Some(code);
+                el.exit();
+            }
+        }
+    }
+
+    fn window_event(&mut self, _el: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
+        // The session sends a Goodbye and then reports how it ended
+        // (Event::Ended), which closes the event loop.
+        if self.video.window_event(&event)
+            && let Some(close) = self.close.take()
+        {
+            let _ = close.send(());
         }
     }
 }
@@ -426,6 +517,33 @@ fn percentiles(v: &mut [Duration]) -> (f64, f64) {
 #[cfg(all(test, target_os = "macos"))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn o1_covered_window_draws_nothing_then_draws_at_once() {
+        let mut c = Covered::default();
+        assert!(c.draw(), "not covered: drawn");
+        c.set(true);
+        assert!(!c.draw());
+        assert!(!c.draw());
+        assert_eq!(c.skipped, 2, "decoded, counted, not drawn");
+        c.set(false);
+        assert!(c.draw(), "the first picture after uncovering is drawn");
+        assert_eq!(c.skipped, 2);
+    }
+
+    #[test]
+    fn o1_the_windows_occlusion_events_reach_it() {
+        // winit's own events, before any window exists (none is needed).
+        let mut v = VideoWindow::new(false);
+        assert!(!v.window_event(&WindowEvent::Occluded(true)));
+        assert!(!v.covered.draw(), "covered: not drawn");
+        assert!(!v.window_event(&WindowEvent::Occluded(false)));
+        assert!(v.covered.draw(), "uncovered: drawn");
+        assert!(
+            v.window_event(&WindowEvent::CloseRequested),
+            "closing ends the session"
+        );
+    }
 
     #[test]
     fn self_count_on_the_stats_line() {
