@@ -272,6 +272,36 @@ target Mac and how much memory the viewer may take on it). The D-34 numbers
 are then judged against that purpose, and the purpose is recorded in
 quality.md with the decision.
 
+## 3b. Owner, 2026-11-01: build the app now; the viewer counts its own pictures
+
+The owner's words, after step 1 of the P5 correction's follow-ups (the
+measuring helper) was reported with the question whether the viewer should
+count its own decoded pictures: **"okay continue do anything and build the
+app loop unitil the app build"**.
+
+What that changes:
+
+* **Build order (§13):** steps 5 and 6 (decision module, host GUI, viewer
+  GUI, O1) proceed **before** D-34 reports, instead of waiting for it.
+  The P5 rule (§3, §3a) is unchanged: the final runs measure it, and a fail
+  stops the phase for the owner's decision as before.
+* **Viewer self-count (proposed in phase4-criteria §14 (a)):** built. The
+  viewer counts the decoded pictures it holds (count × bytes per picture)
+  and prints it on its stats line, so a memory run can compute
+  `C(t) = footprint(t) + own count(t)` without vmmap pausing the viewer;
+  vmmap then runs once per session to check the two agree (within one
+  picture).
+
+What it does **not** change (each needs its own decision):
+
+* The 150 MB limit (owner, 2026-10-27: unchanged until D-34 reports).
+* The `unsafe` AppKit call for the indicator over a full-screen app (I3):
+  the owner gets the exact code first (§1, CLAUDE.md unsafe policy). Until
+  then the indicator is built without it and the gap stays in §11b.
+* Anything irreversible or published (merging, keychain, signing).
+* D-34's runs and the manual steps M1–M7 need the owner at the Mac; the
+  owner is told before.
+
 ## 4. Host Accept/Deny dialog — who sees the screen
 
 The dialog is the control that decides who sees the owner's screen
@@ -475,6 +505,7 @@ visible, and the result is recorded with how it was checked.
 | 2026-10-25 | Approved with the answers in §1: H4 press **and** release after the delay; H9 refuse before the handshake and log every refused attempt; Q3's time-boxed D-34 step, the limit decision staying with the owner; D-36 per phase plus the `codesign` confirmation check; §11b known limitations | "G-3: approved with these answers. Update the criteria and push." |
 | 2026-10-27 | I3: S1 result recorded (always-on-top is occluded over a full-screen app); Stage Manager becomes manual step **M7** on the real indicator. §12/§13: D-37 timed to the exact UTC expiry, D-42/D-43 added | Owner: "I'll do it later with the real indicator, not the spike windows … Make it a 4.5 check against the real session indicator (I1–I3)." and "(a) Yes. D-37 after 2026-10-28 02:22 local … do both after 15:24 local on the 28th" |
 | 2026-10-27 | §3a added: P5 measured as footprint + decoded pictures (phase4-criteria §14), baseline 150 MB steady / ≥ 153 MB peak, D-34 brought into 4.5 with a 3 h time-box and the 145 MB bar; the 150 MB limit unchanged until D-34 reports. §15 added: requirements and the checks that enforce them (check (c)) | Owner: "Approve with these changes" (five changes, 2026-10-27); "Keep the 145 MB bar in the D-34 rule. I want real headroom, not a just-fits pass."; "The 150 MB limit stays as it is until D-34's investigation reports. Then I'll decide." |
+| 2026-11-01 | §3b: steps 5–6 proceed before D-34 reports; the viewer self-count is built. Limit, I3 `unsafe` and irreversible steps unchanged | Owner: "okay continue do anything and build the app loop unitil the app build" |
 
 ## 15. Requirements and the checks that enforce them (check (c), 2026-10-27)
 
