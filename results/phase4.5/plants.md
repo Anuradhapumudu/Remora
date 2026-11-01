@@ -45,3 +45,6 @@ plant for the same row is still to come with the GUI (D-46).
 | R9 | Another program's caffeinate accepted | `scripts/macos/measuring.py: a caffeinate for someone else does not count` | 2026-11-01 |
 | R9 | Pausing instrument allowance ignored | `scripts/macos/measuring.py: pausing over allowance` | 2026-11-01 |
 | R9 | A runner calls vmmap directly | `scripts/ci/check-measuring.py: python: vmmap directly` | 2026-11-01 |
+| H9 | A refusal during connect returned as an error, not the host's close (the CI race of 2026-11-01) | `crates/remora-net/tests/h9_host_busy.rs::h9_a_refusal_during_connect_is_the_hosts_close_not_an_error` | 2026-11-01 |
+| R8 | A newly locked crate missing from dependencies.md | `scripts/ci/check-dep-docs.py: a new undocumented crate is caught` | 2026-11-01 |
+| R8 | A crate name only in prose counted as documented | `scripts/ci/check-dep-docs.py: a name only in prose does not count` | 2026-11-01 |

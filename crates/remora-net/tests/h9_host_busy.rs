@@ -10,7 +10,7 @@ mod common;
 use std::time::Duration;
 
 use common::*;
-use remora_net::{HostEvent, ViewerEvent, connect};
+use remora_net::{HostEvent, ViewerEvent, connect, server_config, to_varint};
 use remora_session::CloseCode;
 
 /// Waits (≤ `secs`) for the viewer's end: `Closed` with the host's code, or
@@ -68,7 +68,7 @@ async fn h9_second_viewer_is_refused_busy_and_the_password_survives() {
         let nonce = host.server.issue_nonce(Duration::from_secs(300));
         let ended = match connect(host.addr, viewer_cfg(&b, password(&otp)), nonce).await {
             Ok((_client, mut ev)) => closed_by_host(&mut ev, 5).await,
-            // Refused so early that opening the stream already failed.
+            // A refusal is an event with the host's code, never an error.
             Err(e) => panic!("attempt {attempt}: connect failed without a close code: {e}"),
         };
         assert_eq!(ended, Some(Some(CloseCode::HostBusy)), "attempt {attempt}");
@@ -111,4 +111,36 @@ async fn h9_second_viewer_is_refused_busy_and_the_password_survives() {
             .is_some(),
         "the password was not spent by the refused attempts"
     );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn h9_a_refusal_during_connect_is_the_hosts_close_not_an_error() {
+    // CI, 2026-11-01: the host refused so fast that connect() itself failed
+    // ("connection: closed by peer: 23") and the viewer would have shown a
+    // raw error instead of "the host is busy". A bare QUIC server that
+    // closes with HostBusy the moment the handshake is done, many times so
+    // the fast path is hit.
+    let ep = quinn::Endpoint::server(server_config().unwrap(), loopback()).unwrap();
+    let addr = ep.local_addr().unwrap();
+    tokio::spawn(async move {
+        while let Some(incoming) = ep.accept().await {
+            if let Ok(conn) = incoming.await {
+                conn.close(to_varint(CloseCode::HostBusy), b"");
+            }
+        }
+    });
+    let v = device("viewer");
+    let otp = remora_crypto::secret::Otp::parse("123456").unwrap();
+    for attempt in 1..=100 {
+        let (_client, mut ev) = connect(addr, viewer_cfg(&v, password(&otp)), [0; 16])
+            .await
+            .unwrap_or_else(|e| {
+                panic!("attempt {attempt}: an error instead of the host's close: {e}")
+            });
+        assert_eq!(
+            closed_by_host(&mut ev, 5).await,
+            Some(Some(CloseCode::HostBusy)),
+            "attempt {attempt}"
+        );
+    }
 }
