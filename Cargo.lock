@@ -2042,6 +2042,7 @@ dependencies = [
  "rand_core 0.6.4",
  "remora-crypto",
  "remora-proto",
+ "remora-session",
  "remora-testkit",
  "thiserror 2.0.21",
  "zeroize",

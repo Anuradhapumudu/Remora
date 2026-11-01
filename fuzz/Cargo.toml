@@ -97,3 +97,10 @@ path = "fuzz_targets/h264_frame.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "display_name"
+path = "fuzz_targets/display_name.rs"
+test = false
+doc = false
+bench = false

@@ -13,6 +13,8 @@ examine_globs = [
     "crates/remora-proto/src/datagram.rs",
     "crates/remora-proto/src/frame.rs",
     "crates/remora-proto/src/messages.rs",
+    # Untrusted names made safe to show in the host dialog (phase4.5 H6).
+    "crates/remora-proto/src/display_text.rs",
     # remora-crypto: all of it (phase3-criteria §7), explicitly including the
     # A32 element validator (src/pake/validate.rs) — a security control that
     # compensates for a check the spake2 crate does not perform.
@@ -32,6 +34,9 @@ examine_globs = [
     # Device key file: owner-only creation and refusal rules are a control.
     "crates/remora-app/src/keystore.rs",
     "crates/remora-app/src/prompts.rs",
+    # The GUI's decisions: dialogs, arming delay, keys, indicator, hidden
+    # code, viewer verification (phase4.5-criteria §10: 0 missed).
+    "crates/remora-app/src/decide/**/*.rs",
 ]
 
 # Test-only modules inside src/ (they ARE the tests; mutating them is noise).
