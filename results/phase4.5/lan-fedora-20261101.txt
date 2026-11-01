@@ -1,0 +1,22 @@
+LAN test, 2026-11-01 (local time ~23:50): host = owner's Fedora 44 laptop (x86-64, 192.168.8.103),
+remora-host cross-compiled on the M4 (cargo zigbuild, commit b1d9629), serve --source none
+(Linux has no capture yet, Phase 6.5); viewer = remora-viewer connect --no-window on the M4 (192.168.8.100).
+Same home Wi-Fi network; QUIC over UDP; one-time keys for both sides (throwaway key files).
+
+=== viewer (M4) ===
+connecting to 192.168.8.103:50282 (host device 2283 002 0890-6)
+safety code: 307 397 - compare it with the host's screen (host "Fedora laptop", device 2283 002 0890-6)
+waiting for the person at the host to accept or deny (nothing to type here)
+SESSION ACTIVE
+session ended
+video: 0 frames decoded, 0 refused, 0 waiting for a keyframe, 0 failed, 0 dropped
+
+=== host (Fedora) ===
+device: 2283 002 0890-6
+listening: 192.168.8.103:50282
+prompt 1: "Mac viewer" (device 3439 566 0701-3) safety code 307 397 - check it matches the viewer's screen, then type 'accept 1' or 'deny 1'
+note: the previous code and password were used up when that viewer proved the password - each works for ONE connection. Give the next viewer these new ones:
+SESSION ACTIVE 1: a viewer is connected (type 'disconnect 1' to end it)
+session ended 1 (Normal)
+
+Result: handshake, matching safety codes (307 397), approval and an orderly end across two machines and two OSes. No video (host has --source none).
