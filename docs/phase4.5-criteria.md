@@ -349,7 +349,7 @@ attacker list; noted in threat-model §9 by this phase).
 |---|---|---|
 | **I1** | From `Active` until `Closed`, the host shows a **session window**: "<device> is viewing your screen", the time since it started, and **End session**. It has no close or minimise button while a session is active | **Automated GUI test (D-4):** for every session event the indicator is visible exactly while the state is `Active`; plant: hidden after 5 s → caught |
 | **I2** | **End session** is one click and reaches `Closed` within **1 s**, the viewer is told (`Goodbye`), capture stops | Automated: click → `Closed` ≤ 1 s; plant: button not wired → caught |
-| **I3** | The indicator is visible **whatever else is on screen**: `always-on-top` (Slint sets winit `WindowLevel::AlwaysOnTop`, `winitwindowadapter.rs:1898`), and the menu bar shows that a session is active. **Unverified:** whether an always-on-top window shows over a full-screen app on another Space — winit 0.30.13's macOS extensions have no "all Spaces" setting (`platform/macos.rs`), so if S1 shows it does not, the options come to the owner: accept and document the gap, or one AppKit call (`unsafe`, an unsafe-policy decision). **S1 (2026-10-27): it does not** — the window is reported occluded while the owner is on a full-screen app (two runs, `spikes/gui-memory/results/i3-checks.txt`); the options go to the owner with the S1 report. **Stage Manager** (owner, 2026-10-27): checked on the **real** session indicator, not the spike windows — the spike is not a proper indicator (no session, not the indicator's window), so a result on it would not mean much; the S1 attempt also could not turn Stage Manager on | Manual M3 + S1; **M7** (Stage Manager) |
+| **I3** | The indicator is visible **whatever else is on screen**: `always-on-top` (Slint sets winit `WindowLevel::AlwaysOnTop`, `winitwindowadapter.rs:1898`), and the menu bar shows that a session is active. **Unverified:** whether an always-on-top window shows over a full-screen app on another Space — winit 0.30.13's macOS extensions have no "all Spaces" setting (`platform/macos.rs`), so if S1 shows it does not, the options come to the owner: accept and document the gap, or one AppKit call (`unsafe`, an unsafe-policy decision). **S1 (2026-10-27): it does not** — the window is reported occluded while the owner is on a full-screen app (two runs, `spikes/gui-memory/results/i3-checks.txt`); the options go to the owner with the S1 report. **Built 2026-11-01** (owner-approved, architecture D46): the indicator's window is put on every Space with `CanJoinAllSpaces \| FullScreenAuxiliary` (`remora-input/src/sys/macos_window.rs`, the one `unsafe` in an FFI module); AppKit reports both flags on the M4 (`cargo run -p remora-input --example all_spaces`); visibility over a full-screen app is checked in M3. **Stage Manager** (owner, 2026-10-27): checked on the **real** session indicator, not the spike windows — the spike is not a proper indicator (no session, not the indicator's window), so a result on it would not mean much; the S1 attempt also could not turn Stage Manager on | Manual M3 + S1; **M7** (Stage Manager) |
 
 **How D-4 closes:** I1 and I2 run as Rust tests through Slint's testing
 backend. `i-slint-backend-testing` 1.18.1 exists (crates.io; licence
@@ -457,10 +457,10 @@ still over, stop and report — it is a regression to explain even though the
 * **Apps with Accessibility permission can press Accept** through the
   accessibility API. Such an app can already control the whole Mac; it is
   outside the threat model's attacker list (§4).
-* **The indicator over a full-screen app on another Space is unverified**
-  (I3): winit 0.30.13 has no "all Spaces" setting. If S1 shows it is hidden
-  there, the AppKit call needs `unsafe` and comes to the owner as exact code
-  (§1); until then this is a limitation.
+* **The indicator over a full-screen app on another Space** (I3): S1
+  showed it hidden there; the owner approved the AppKit call (architecture
+  D46, 2026-11-01) and AppKit now reports the window on every Space. Whether
+  it is really visible beside a full-screen app is manual step M3.
 * **Keyboard-only users cannot accept** (Q4): Accept is not in the keyboard
   focus chain, so Full Keyboard Access without VoiceOver cannot reach it.
   Deny stays reachable by keyboard.
@@ -515,6 +515,7 @@ visible, and the result is recorded with how it was checked.
 | 2026-10-27 | §3a added: P5 measured as footprint + decoded pictures (phase4-criteria §14), baseline 150 MB steady / ≥ 153 MB peak, D-34 brought into 4.5 with a 3 h time-box and the 145 MB bar; the 150 MB limit unchanged until D-34 reports. §15 added: requirements and the checks that enforce them (check (c)) | Owner: "Approve with these changes" (five changes, 2026-10-27); "Keep the 145 MB bar in the D-34 rule. I want real headroom, not a just-fits pass."; "The 150 MB limit stays as it is until D-34's investigation reports. Then I'll decide." |
 | 2026-11-01 | §3b: steps 5–6 proceed before D-34 reports; the viewer self-count is built. Limit, I3 `unsafe` and irreversible steps unchanged | Owner: "okay continue do anything and build the app loop unitil the app build" |
 | 2026-11-01 | §2 corrected (Slint-generated `unsafe`, roadmap D-46). Option A chosen: the screens live in `crates/remora-ui`, markup only, without `forbid(unsafe_code)`; host and viewer keep it (architecture D45) | Owner: "lets go the best option as you think lets build it" |
+| 2026-11-01 | I3: the AppKit call for the indicator on every Space is built (architecture D46); §11b updated | Owner, after the exact code: "lets go with your best plan which is suitable with our app lets go until our app build" |
 
 ## 15. Requirements and the checks that enforce them (check (c), 2026-10-27)
 

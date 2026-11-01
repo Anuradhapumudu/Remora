@@ -357,6 +357,9 @@ impl<C: HostControl + 'static> HostGui<C> {
                 self.session.set_display(display.clone().into());
                 if !self.session.window().is_visible() {
                     let _ = self.session.show();
+                    if let Some(problem) = on_all_spaces(self.session.window()) {
+                        self.main.set_notice(problem.into());
+                    }
                 }
             }
             None => {
@@ -431,6 +434,23 @@ impl TestableClock {
 fn bring_to_front(w: &slint::Window) {
     use slint::winit_030::WinitWindowAccessor;
     w.with_winit_window(|w| w.focus_window());
+}
+
+/// I3 (architecture D46): the session indicator on every Space, also next
+/// to a full-screen app. `None` when it took effect or there is no native
+/// window (Slint's testing backend); otherwise what the person should know.
+fn on_all_spaces(w: &slint::Window) -> Option<String> {
+    use remora_input::window::{CAN_JOIN_ALL_SPACES, FULL_SCREEN_AUXILIARY, show_on_all_spaces};
+    use slint::winit_030::WinitWindowAccessor;
+    use slint::winit_030::winit::raw_window_handle::HasWindowHandle;
+    let handle = w.with_winit_window(|w| w.window_handle().ok().map(|h| h.as_raw()))??;
+    let want = CAN_JOIN_ALL_SPACES | FULL_SCREEN_AUXILIARY;
+    match show_on_all_spaces(handle) {
+        Ok(flags) if flags & want == want => None,
+        Ok(_) | Err(_) => {
+            Some("The session indicator may be hidden behind full-screen apps on this Mac.".into())
+        }
+    }
 }
 
 // ------------------------------------------------------------- the app --

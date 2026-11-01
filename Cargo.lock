@@ -4355,6 +4355,7 @@ dependencies = [
  "remora-capture",
  "remora-codec",
  "remora-crypto",
+ "remora-input",
  "remora-net",
  "remora-proto",
  "remora-session",
@@ -4367,6 +4368,13 @@ dependencies = [
 [[package]]
 name = "remora-input"
 version = "0.0.1"
+dependencies = [
+ "objc2 0.6.4",
+ "objc2-app-kit 0.3.2",
+ "raw-window-handle",
+ "thiserror 2.0.21",
+ "winit",
+]
 
 [[package]]
 name = "remora-net"

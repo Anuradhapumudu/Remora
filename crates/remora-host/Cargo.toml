@@ -24,6 +24,8 @@ tracing-subscriber = { workspace = true }
 [target.'cfg(target_os = "macos")'.dependencies]
 # The Phase 4.5 GUI: the screens (remora-ui, D45) and Slint's runtime API.
 remora-ui = { workspace = true }
+# I3: the session indicator on every Space (architecture D46).
+remora-input = { workspace = true }
 slint = { workspace = true }
 remora-capture = { workspace = true }
 remora-codec = { workspace = true }
