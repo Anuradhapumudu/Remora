@@ -228,6 +228,20 @@ pub(crate) fn host_config(identity: Identity, trusted: Vec<IdentityPublic>) -> H
     }
 }
 
+/// What the host captures when it streams the screen. The cursor is drawn
+/// into the video (owner, 2026-11-01: "Remora doesn't capture the mouse
+/// cursor"): the design sends it separately so the viewer can draw it
+/// without the video's delay (docs/quality.md, roadmap D-48), and until that
+/// channel exists a screen without its pointer is not usable.
+#[cfg(target_os = "macos")]
+pub(crate) fn screen_capture_config(width: u32) -> remora_capture::CaptureConfig {
+    remora_capture::CaptureConfig {
+        width,
+        show_cursor: true,
+        ..remora_capture::CaptureConfig::default()
+    }
+}
+
 /// One session as the person sees it: a prompt number (F-UX1) for the
 /// protocol's random 64-bit session ID.
 struct Entry {
@@ -501,17 +515,14 @@ impl Video {
     /// the session layer whether capture works.
     #[cfg(target_os = "macos")]
     pub(crate) fn prepare(&mut self) {
-        use remora_capture::{CaptureConfig, MacScreenCapture, ScreenCapture};
+        use remora_capture::{MacScreenCapture, ScreenCapture};
         use remora_session::CaptureStatus;
 
         if self.running.is_some() || self.source == Source::None {
             return;
         }
         let capture: anyhow::Result<Box<dyn ScreenCapture>> = match self.source {
-            Source::Screen => MacScreenCapture::main_display(CaptureConfig {
-                width: self.width,
-                ..CaptureConfig::default()
-            })
+            Source::Screen => MacScreenCapture::main_display(screen_capture_config(self.width))
             .map(|c| Box::new(c) as Box<dyn ScreenCapture>)
             .map_err(anyhow::Error::from),
             // 16:9, as a typical screen.
@@ -657,6 +668,14 @@ pub(crate) fn identity(file: Option<PathBuf>) -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn the_streamed_screen_shows_the_cursor() {
+        let c = screen_capture_config(1920);
+        assert!(c.show_cursor, "until the separate cursor channel (D-48) exists");
+        assert_eq!(c.width, 1920);
+    }
 
     #[test]
     fn h9_the_app_serves_one_viewer_at_a_time() {
