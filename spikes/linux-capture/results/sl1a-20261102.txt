@@ -30,3 +30,17 @@ Findings:
 - Hardware encoders present: Intel Quick Sync (VA-API) and NVIDIA NVENC, but
   Fedora's packages leave H.264 encoding out (patents): RPM Fusion / NVIDIA
   driver would be the owner's decision. openh264 (software) needs no install.
+
+Run 3 (known content: scripts/macos/motion-pattern.html full screen in the
+laptop's browser, changing every frame at 60 Hz):
+  portal: answered in 129.2 s
+  format: BGRx 3840x2160 @ 0/1
+  RESULT sl1a: 305 frames in 20.0 s (15.2 fps), 31.6 MB/frame,
+               interval p50 66.7 p95 68.3 max 102.9 ms
+
+So the content was not the limit: with a picture that changes every frame the
+capture delivers a steady 15.2 fps, exactly every 4th refresh (66.7 ms =
+4 x 16.7 ms). Leading hypothesis, NOT yet shown: shared-memory buffers make
+GNOME copy each 31.6 MB 4K picture out of the GPU, and it cannot do that at
+60 Hz. Test next: negotiate DMA-BUF buffers (GPU memory, no copy), the path
+GNOME's own screen recorder uses.
