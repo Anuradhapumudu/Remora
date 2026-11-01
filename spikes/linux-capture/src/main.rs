@@ -32,6 +32,7 @@ struct Stats {
     data_type: Option<String>,
     encoder: Option<openh264::encoder::Encoder>,
     encode_ms: Vec<f64>,
+    convert_ms: Vec<f64>,
     encoded_bytes: u64,
 }
 
@@ -46,8 +47,17 @@ fn pct(v: &mut [f64], p: f64) -> f64 {
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let seconds: u64 = std::env::args().nth(1).and_then(|s| s.parse().ok()).unwrap_or(20);
     let dmabuf = std::env::args().nth(2).as_deref() == Some("dmabuf");
-    let encode = std::env::args().nth(2).as_deref() == Some("encode");
-    // 1. The portal: the person picks a monitor in GNOME's dialog.
+    let mode = std::env::args().nth(2).unwrap_or_default();
+    let fast = mode == "encode-fast";
+    let encode = mode == "encode" || fast;
+    // 1. The portal: the person picks a monitor in GNOME's dialog, once. The
+    // portal then returns a restore token (persist mode "until revoked");
+    // later runs present it and get no dialog. GNOME issues a new token each
+    // time, so the latest one is saved. Spike only: the token file is 0600 in
+    // the spike folder; revoking it is GNOME Settings -> Privacy -> Screen Sharing.
+    let token_path = std::path::PathBuf::from("restore-token");
+    let token = std::fs::read_to_string(&token_path).ok().map(|s| s.trim().to_owned());
+    eprintln!("portal: restore token {}", if token.is_some() { "present (no dialog expected)" } else { "absent (GNOME will ask)" });
     let rt = tokio::runtime::Runtime::new()?;
     let (proxy, session, node, size) = rt.block_on(async {
         let proxy = Screencast::new().await?;
@@ -59,12 +69,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .set_cursor_mode(CursorMode::Embedded)
                     .set_sources(ashpd::enumflags2::BitFlags::from_flag(SourceType::Monitor))
                     .set_multiple(false)
-                    .set_persist_mode(PersistMode::DoNot),
+                    .set_persist_mode(PersistMode::ExplicitlyRevoked)
+                    .set_restore_token(token.as_deref()),
             )
             .await?;
         let started = Instant::now();
         let streams = proxy.start(&session, None, Default::default()).await?.response()?;
         eprintln!("portal: answered in {:.1} s", started.elapsed().as_secs_f64());
+        if let Some(new) = streams.restore_token() {
+            use std::io::Write;
+            use std::os::unix::fs::OpenOptionsExt;
+            if let Ok(mut f) = std::fs::OpenOptions::new()
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .mode(0o600)
+                .open(&token_path)
+            {
+                let _ = f.write_all(new.as_bytes());
+            }
+        }
         let s = streams.streams().first().ok_or(ashpd::Error::NoResponse)?.clone();
         Ok::<_, ashpd::Error>((proxy, session, s.pipe_wire_node_id(), s.size()))
     })?;
@@ -84,8 +108,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         bytes: 0,
         intervals_ms: Vec::new(),
         data_type: None,
-        encoder: if encode { Some(openh264::encoder::Encoder::new()?) } else { None },
+        encoder: if fast {
+            use openh264::encoder::{Complexity, EncoderConfig, FrameRate, UsageType};
+            // Screen sharing, real time: the settings meant for this use.
+            let config = EncoderConfig::new()
+                .usage_type(UsageType::ScreenContentRealTime)
+                .complexity(Complexity::Low)
+                .num_threads(8)
+                .max_frame_rate(FrameRate::from_hz(60.0))
+                .skip_frames(false);
+            Some(openh264::encoder::Encoder::with_api_config(
+                openh264::OpenH264API::from_source(),
+                config,
+            )?)
+        } else if encode {
+            Some(openh264::encoder::Encoder::new()?)
+        } else {
+            None
+        },
         encode_ms: Vec::new(),
+        convert_ms: Vec::new(),
         encoded_bytes: 0,
     }));
     let stream = pw::stream::StreamBox::new(
@@ -176,6 +218,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     let yuv = openh264::formats::YUVBuffer::from_rgb_source(
                         openh264::formats::BgraSliceU8::new(&px[..w * h * 4], (w, h)),
                     );
+                    st.convert_ms.push(t0.elapsed().as_secs_f64() * 1e3);
                     if let Some(enc) = st.encoder.as_mut() {
                         if let Ok(bits) = enc.encode(&yuv) {
                             let n = bits.to_vec().len() as u64;
@@ -260,8 +303,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if encode {
         let n = st.encode_ms.len();
         let (e50, e95) = (pct(&mut st.encode_ms, 0.5), pct(&mut st.encode_ms, 0.95));
+        let (c50, c95) = (pct(&mut st.convert_ms, 0.5), pct(&mut st.convert_ms, 0.95));
         println!(
-            "ENCODE sl1b: {n} pictures, convert+encode p50 {e50:.1} p95 {e95:.1} ms, {:.1} KB/picture, {:.2} Mbit/s",
+            "ENCODE sl1b{}: {n} pictures, convert+encode p50 {e50:.1} p95 {e95:.1} ms (of which convert p50 {c50:.1} p95 {c95:.1}),",
+            if fast { " fast" } else { "" }
+        );
+        println!(
+            "  {:.1} KB/picture, {:.2} Mbit/s",
             st.encoded_bytes as f64 / n.max(1) as f64 / 1024.0,
             st.encoded_bytes as f64 * 8.0 / 1e6 / secs.max(1e-9)
         );

@@ -92,3 +92,23 @@ how much is the colour conversion and how much the encoder; not yet tried:
 openh264's threads / slices and its real-time (screen content) settings.
 Hardware encoders on this laptop (Intel Quick Sync via VA-API, NVIDIA NVENC)
 need packages Fedora does not ship with H.264 (RPM Fusion / NVIDIA driver).
+
+Runs 8-9 (1080p, motion page full screen; conversion timed separately).
+The owner approved once in GNOME's dialog with a restore token (persist
+mode "until revoked"); run 9 reused it: "portal: answered in 0.0 s", no
+dialog. Token file 0600 in the spike folder.
+  default EncoderConfig:
+    ENCODE sl1b: 461 pictures, convert+encode p50 42.6 p95 46.9 ms
+                 (of which convert p50 17.1 p95 17.5), 12.8 KB/picture, 2.42 Mbit/s
+    RESULT sl1a: 461 frames in 20.0 s (23.0 fps)
+  ScreenContentRealTime, Complexity::Low, 8 threads, 60 fps, no skipping:
+    ENCODE sl1b fast: 480 pictures, convert+encode p50 40.9 p95 44.1 ms
+                      (of which convert p50 17.1 p95 17.6), 8.8 KB/picture, 1.72 Mbit/s
+    RESULT sl1a: 480 frames in 20.0 s (24.0 fps)
+
+Split: the BGRx->YUV420 conversion (openh264's Rust rgb2yuv, one thread)
+takes 17 ms; the encoder about 24 ms even with the real-time settings (its
+threads need slices, not set). Neither fits a 60 fps / 20 ms budget in
+software as is. Paths: conversion on several cores or the GPU (expected to
+shrink a lot), and for the encoder either slices + threads (unmeasured) or a
+hardware encoder (Quick Sync / NVENC: packages Fedora leaves out).
