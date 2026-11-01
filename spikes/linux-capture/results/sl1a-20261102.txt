@@ -77,3 +77,18 @@ size to be streamed (1920 wide) where possible; on a 4K panel GNOME captures
 at 4K, so DMA-BUF with the GPU's native modifiers plus GPU scaling is the
 path to test next. The p95 of 27.6 ms is above one refresh: to be compared
 with the Mac's capture (Phase 2: 60 fps steady).
+
+Run 7 (S-L1b: 1080p, shared memory, every picture converted BGRx -> YUV420
+and encoded with openh264 0.9.8 (default EncoderConfig, built from source)
+inside the capture callback; 60 Hz motion page full screen):
+  ENCODE sl1b: 461 pictures, convert+encode p50 42.4 p95 47.4 ms,
+               12.9 KB/picture, 2.42 Mbit/s
+  RESULT sl1a: 461 frames in 20.0 s (23.0 fps), interval p50 43.2 ms
+
+Software encoding as configured is too slow: 42 ms per 1080p picture caps
+the stream at 23 fps and alone exceeds the 20 ms end-to-end budget
+(quality.md §1; the Mac's hardware encoder: C12 p95 7.6 ms). Not yet split:
+how much is the colour conversion and how much the encoder; not yet tried:
+openh264's threads / slices and its real-time (screen content) settings.
+Hardware encoders on this laptop (Intel Quick Sync via VA-API, NVIDIA NVENC)
+need packages Fedora does not ship with H.264 (RPM Fusion / NVIDIA driver).

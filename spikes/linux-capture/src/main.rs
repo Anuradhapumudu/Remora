@@ -7,6 +7,9 @@
 //!
 //!     cargo run --release -- [seconds] [dmabuf]
 //!
+//! `encode`: also convert each picture (BGRx) and encode it with openh264
+//! in the capture callback, measuring the time and bytes per picture (S-L1b).
+//!
 //! `dmabuf`: offer the linear DRM modifier and ask for DMA-BUF buffers (GPU
 //! memory, no copy into shared memory); buffers are counted, not mapped.
 
@@ -27,6 +30,9 @@ struct Stats {
     bytes: u64,
     intervals_ms: Vec<f64>,
     data_type: Option<String>,
+    encoder: Option<openh264::encoder::Encoder>,
+    encode_ms: Vec<f64>,
+    encoded_bytes: u64,
 }
 
 fn pct(v: &mut [f64], p: f64) -> f64 {
@@ -40,6 +46,7 @@ fn pct(v: &mut [f64], p: f64) -> f64 {
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let seconds: u64 = std::env::args().nth(1).and_then(|s| s.parse().ok()).unwrap_or(20);
     let dmabuf = std::env::args().nth(2).as_deref() == Some("dmabuf");
+    let encode = std::env::args().nth(2).as_deref() == Some("encode");
     // 1. The portal: the person picks a monitor in GNOME's dialog.
     let rt = tokio::runtime::Runtime::new()?;
     let (proxy, session, node, size) = rt.block_on(async {
@@ -77,6 +84,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         bytes: 0,
         intervals_ms: Vec::new(),
         data_type: None,
+        encoder: if encode { Some(openh264::encoder::Encoder::new()?) } else { None },
+        encode_ms: Vec::new(),
+        encoded_bytes: 0,
     }));
     let stream = pw::stream::StreamBox::new(
         &core,
@@ -141,6 +151,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             let size = u64::from(datas[0].chunk().size());
             let kind = format!("{:?}", datas[0].type_());
+            let stride = datas[0].chunk().stride() as usize;
+            let picture: Option<Vec<u8>> = if encode { datas[0].data().map(|d| d.to_vec()) } else { None };
             let now = Instant::now();
             let mut st = st.borrow_mut();
             if st.data_type.is_none() {
@@ -157,6 +169,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             st.last = Some(now);
             st.frames += 1;
             st.bytes += size;
+            if let Some(px) = picture {
+                let (w, h) = (st.format.size().width as usize, st.format.size().height as usize);
+                if w > 0 && stride == w * 4 && px.len() >= w * h * 4 {
+                    let t0 = Instant::now();
+                    let yuv = openh264::formats::YUVBuffer::from_rgb_source(
+                        openh264::formats::BgraSliceU8::new(&px[..w * h * 4], (w, h)),
+                    );
+                    if let Some(enc) = st.encoder.as_mut() {
+                        if let Ok(bits) = enc.encode(&yuv) {
+                            let n = bits.to_vec().len() as u64;
+                            st.encoded_bytes += n;
+                        }
+                    }
+                    st.encode_ms.push(t0.elapsed().as_secs_f64() * 1e3);
+                }
+            }
             if now.duration_since(started) >= limit {
                 ml.quit();
             }
@@ -229,6 +257,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let secs = st.started.zip(st.last).map_or(0.0, |(a, b)| b.duration_since(a).as_secs_f64());
     let (p50, p95, max) = (pct(&mut st.intervals_ms, 0.5), pct(&mut st.intervals_ms, 0.95), pct(&mut st.intervals_ms, 1.0));
     println!("buffers: {}", st.data_type.clone().unwrap_or_default());
+    if encode {
+        let n = st.encode_ms.len();
+        let (e50, e95) = (pct(&mut st.encode_ms, 0.5), pct(&mut st.encode_ms, 0.95));
+        println!(
+            "ENCODE sl1b: {n} pictures, convert+encode p50 {e50:.1} p95 {e95:.1} ms, {:.1} KB/picture, {:.2} Mbit/s",
+            st.encoded_bytes as f64 / n.max(1) as f64 / 1024.0,
+            st.encoded_bytes as f64 * 8.0 / 1e6 / secs.max(1e-9)
+        );
+    }
     println!(
         "RESULT sl1a{}: {} frames in {secs:.1} s ({:.1} fps), {:.1} MB/frame, interval p50 {p50:.1} p95 {p95:.1} max {max:.1} ms",
         if dmabuf { " dmabuf" } else { "" },
