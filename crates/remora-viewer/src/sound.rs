@@ -67,7 +67,18 @@ pub(crate) struct Jitter {
     catching_up: bool,
     /// Times catch-up started (stats).
     pub(crate) catch_ups: u64,
+    /// Output frames played since the sound (re)started after running
+    /// dry; `None` once [`RESYNC_WINDOW`] has passed.
+    since_dry: Option<u64>,
+    /// Times a backlog was dropped right after a restart (stats).
+    pub(crate) resyncs: u64,
 }
+
+/// Just after the sound (re)starts, a gap was already heard: a backlog
+/// that arrives then (live, 2026-11-03: the buffer ran dry, then jumped to
+/// ~110 ms in one burst) is dropped down to [`START`] at once rather than
+/// drained at 1 % for seconds. Milliseconds of playback this applies for.
+const RESYNC_WINDOW_MS: u64 = 500;
 
 /// Most timing samples kept between two stats lines.
 const MAX_AGES: usize = 4096;
@@ -106,6 +117,8 @@ impl Jitter {
             window_frames: 0,
             catching_up: false,
             catch_ups: 0,
+            since_dry: Some(0),
+            resyncs: 0,
         }
     }
 
@@ -183,6 +196,7 @@ impl Jitter {
                     None => {
                         self.playing = false;
                         self.underruns += 1;
+                        self.since_dry = Some(0);
                         (0.0, 0.0)
                     }
                 }
@@ -206,6 +220,19 @@ impl Jitter {
     /// Starts catching up when a whole second never went down to
     /// [`TARGET`]; stops at [`START`].
     fn watch_level(&mut self, frames: u64) {
+        if let Some(played) = self.since_dry {
+            if self.held.len() > TARGET {
+                let extra = self.held.len() - START;
+                self.held.drain(..extra);
+                self.consumed += extra as u64;
+                self.dropped += extra as u64;
+                self.pos = 0.0;
+                self.resyncs += 1;
+            }
+            let played = played + frames;
+            self.since_dry =
+                (played * 1000 < RESYNC_WINDOW_MS * u64::from(self.device_rate)).then_some(played);
+        }
         let held = self.held.len();
         self.window_min = self.window_min.min(held);
         self.window_frames += frames;
@@ -717,11 +744,54 @@ mod tests {
 
     #[test]
     fn a_full_buffer_drains_back_to_start() {
-        // Live: ~110 ms held for the whole session. Within 10 s of steady
-        // sound it is back near START (+ one packet in flight).
-        let (held, j) = steady(5, 10);
-        assert!(held <= START + FRAME, "still holding {held} frames");
-        assert_eq!(j.catch_ups, 1);
+        // A backlog that builds up while playing (past the start window):
+        // within 10 s of steady sound it is back near START (+ one packet
+        // in flight), by playing 1 % fast, not by dropping sound.
+        let (_, mut j) = steady(2, 2);
+        for _ in 0..3 {
+            j.push(&frame(0.1));
+        }
+        let mut out = vec![0.0; 2 * FRAME];
+        for _ in 0..500 {
+            j.push(&frame(0.1));
+            j.pull(&mut out, 2, false);
+        }
+        assert!(
+            j.held() <= START + FRAME,
+            "still holding {} frames",
+            j.held()
+        );
+        assert_eq!((j.catch_ups, j.resyncs, j.dropped), (1, 0, 0));
+    }
+
+    #[test]
+    fn the_first_fill_while_the_device_starts_is_dropped_at_once() {
+        // Live: ~115 ms held in the first second (earbuds starting).
+        let (held, j) = steady(5, 1);
+        assert!(held <= START + FRAME, "{held}");
+        assert_eq!(j.resyncs, 1);
+    }
+
+    #[test]
+    fn a_backlog_right_after_running_dry_is_dropped_at_once() {
+        let (_, mut j) = steady(2, 2); // well past the start window
+        let mut out = vec![0.0; 2 * FRAME];
+        for _ in 0..4 {
+            j.pull(&mut out, 2, false); // nothing arrives: runs dry
+        }
+        assert_eq!(j.underruns, 1);
+        for _ in 0..6 {
+            j.push(&frame(0.1)); // the burst after the gap
+        }
+        j.pull(&mut out, 2, false);
+        assert!(j.held() <= START, "kept a backlog of {} frames", j.held());
+        assert_eq!(j.resyncs, 1);
+        // Later, normal sound is never dropped this way.
+        for _ in 0..100 {
+            j.push(&frame(0.1));
+            j.pull(&mut out, 2, false);
+        }
+        assert_eq!(j.resyncs, 1);
     }
 
     #[test]
