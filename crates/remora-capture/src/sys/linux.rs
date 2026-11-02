@@ -205,6 +205,19 @@ impl PortalInput {
     }
 }
 
+/// Messages into PipeWire's main loop.
+enum PwMsg {
+    /// We stop capturing (not reported as an event).
+    Quit,
+    /// The desktop ended the cast (GNOME's top-bar "Stop"): report
+    /// [`CaptureEvent::Stopped`] at once, then stop.
+    DesktopClosed,
+}
+
+/// Where the portal task tells a running capture that the desktop closed
+/// the session (set while PipeWire runs).
+type ClosedSlot = Arc<Mutex<Option<pw::channel::Sender<PwMsg>>>>;
+
 /// What the portal thread returns once the person (or the token) agreed.
 struct Started {
     fd: OwnedFd,
@@ -223,7 +236,9 @@ pub struct PortalCapture {
     /// done (the session closed).
     portal: Option<(tokio::task::JoinHandle<()>, mpsc::Receiver<()>)>,
     input: Option<PortalInput>,
-    pipewire: Option<(pw::channel::Sender<()>, JoinHandle<()>)>,
+    pipewire: Option<(pw::channel::Sender<PwMsg>, JoinHandle<()>)>,
+    /// INV11/L6: the portal task reports GNOME's "Stop" through this.
+    closed: ClosedSlot,
 }
 
 impl std::fmt::Debug for PortalCapture {
@@ -262,9 +277,11 @@ impl PortalCapture {
         let failed = Arc::new(Mutex::new(None));
         let control = opts.control;
         let f = Arc::clone(&failed);
+        let closed = ClosedSlot::default();
+        let c = Arc::clone(&closed);
         let (done_tx, done_rx) = mpsc::channel();
         let task = portal_runtime()?.spawn(async move {
-            portal_task(opts, started_tx, portal_rx, f).await;
+            portal_task(opts, started_tx, portal_rx, f, c).await;
             let _ = done_tx.send(());
         });
         let started = match started_rx.recv_timeout(PORTAL_ANSWER) {
@@ -296,6 +313,7 @@ impl PortalCapture {
             portal: Some((task, done_rx)),
             input,
             pipewire: None,
+            closed,
         })
     }
 
@@ -327,6 +345,9 @@ impl ScreenCapture for PortalCapture {
             .map_err(|e| os("spawn", e))?;
         match ready_rx.recv_timeout(Duration::from_secs(10)) {
             Ok(Ok(())) => {
+                if let Ok(mut slot) = self.closed.lock() {
+                    *slot = Some(quit_tx.clone());
+                }
                 self.pipewire = Some((quit_tx, thread));
                 Ok(())
             }
@@ -335,15 +356,18 @@ impl ScreenCapture for PortalCapture {
                 Err(e)
             }
             Err(_) => {
-                let _ = quit_tx.send(());
+                let _ = quit_tx.send(PwMsg::Quit);
                 Err(CaptureError::Timeout("connecting to PipeWire"))
             }
         }
     }
 
     fn stop(&mut self) -> Result<(), CaptureError> {
+        if let Ok(mut slot) = self.closed.lock() {
+            *slot = None;
+        }
         if let Some((quit, thread)) = self.pipewire.take() {
-            let _ = quit.send(());
+            let _ = quit.send(PwMsg::Quit);
             thread
                 .join()
                 .map_err(|_| CaptureError::InvalidState("the PipeWire thread panicked"))?;
@@ -396,7 +420,19 @@ async fn portal_task(
     started: mpsc::Sender<Result<Started, CaptureError>>,
     mut rx: tokio::sync::mpsc::UnboundedReceiver<PortalCmd>,
     failed: Arc<Mutex<Option<String>>>,
+    closed_slot: ClosedSlot,
 ) {
+    // GNOME's "Stop" (INV11, phase4.6 L6): input fails from now on and a
+    // running capture reports Stopped at once, so the session ends without
+    // waiting for the viewer's next event.
+    let desktop_closed = || {
+        if let Ok(mut f) = failed.lock() {
+            *f = Some("the desktop closed the screen-sharing session".into());
+        }
+        if let Some(tx) = closed_slot.lock().ok().and_then(|s| s.clone()) {
+            let _ = tx.send(PwMsg::DesktopClosed);
+        }
+    };
     {
         let token = opts.token_file.as_deref().and_then(RestoreToken::load);
         let monitor = SelectSourcesOptions::default()
@@ -498,7 +534,7 @@ async fn portal_task(
                             None => std::future::pending::<()>().await,
                         }
                     } => {
-                        fail("the desktop closed the remote-desktop session".into());
+                        desktop_closed();
                         return;
                     }
                 };
@@ -552,7 +588,26 @@ async fn portal_task(
             let node = stream.pipe_wire_node_id();
             let size = logical_size(stream.size());
             if started.send(Ok(Started { fd, node, size })).is_ok() {
-                while let Some(PortalCmd::Input(_)) = rx.recv().await {}
+                let mut closed = session.receive_closed().await.ok().map(Box::pin);
+                loop {
+                    tokio::select! {
+                        cmd = rx.recv() => match cmd {
+                            Some(PortalCmd::Input(_)) => {}
+                            Some(PortalCmd::Close) | None => break,
+                        },
+                        () = async {
+                            match closed.as_mut() {
+                                Some(c) => {
+                                    let _ = c.next().await;
+                                }
+                                None => std::future::pending().await,
+                            }
+                        } => {
+                            desktop_closed();
+                            return;
+                        }
+                    }
+                }
             }
             let _ = session.close().await;
         }
@@ -658,7 +713,7 @@ fn pipewire_thread(
     node: u32,
     cfg: CaptureConfig,
     sink: EventSink,
-    quit: pw::channel::Receiver<()>,
+    quit: pw::channel::Receiver<PwMsg>,
     ready: &mpsc::Sender<Result<(), CaptureError>>,
 ) -> Result<(), CaptureError> {
     pw::init();
@@ -769,10 +824,18 @@ fn pipewire_thread(
         .map_err(|e| os("pw_stream_connect", e))?;
     let ml = mainloop.clone();
     let st = Rc::clone(&state);
-    let _quit = quit.attach(mainloop.loop_(), move |()| {
-        // Our own stop: the stream going Unconnected next is not the
-        // desktop ending the cast, so it is not reported as one.
-        st.borrow_mut().stopped = true;
+    let _quit = quit.attach(mainloop.loop_(), move |msg| {
+        let mut st = st.borrow_mut();
+        let already = std::mem::replace(&mut st.stopped, true);
+        // Our own stop (Quit) is not reported; the stream going Unconnected
+        // next is then not the desktop ending the cast.
+        if let PwMsg::DesktopClosed = msg
+            && !already
+        {
+            (st.sink)(CaptureEvent::Stopped(CaptureError::Refused(
+                "screen sharing was stopped on this computer".into(),
+            )));
+        }
         ml.quit();
     });
     let _ = ready.send(Ok(()));
