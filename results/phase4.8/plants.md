@@ -148,3 +148,29 @@ unviable, 2 timeouts. The 7: the resync window's `<` vs `<=` at exactly
 audible), the `audio:` line's timer (×2) and `Drop for Sound` (stderr
 only), `Output::start` on macOS (×2: the real device, live test) and its
 non-macOS stub (not compiled on the Mac).
+
+## Host framing, session/net audio paths, long fuzz runs (2026-11-03, night)
+
+| Scope | Caught | Missed | Notes |
+|---|---|---|---|
+| `remora-session` `send_audio`, `seal_for_active`, `audio_header`, `MediaIn::datagram` | 35 | 1 | `media.rs:232` `>` → `>=` (key rotation, phase 4 code): equivalent — older keys' retire times are only set while unset |
+| `remora-net` `HostServer::send_audio` | 1 | 0 | |
+| `remora-host/src/sound.rs`, first run (Mac) | 0 | **15** | all in the Linux-only `starter`: its framing had no test anywhere |
+| same after the `Framer` extraction (this commit) | 17 | 0 | 1 unviable, 1 timeout |
+
+Extracting the framing found two real faults (each planted back and
+caught): (1) a frame the encoder refused did **not** use up its
+sequence number, so the viewer saw no gap and could not conceal it
+(the comment claimed it would); (2) every packet was stamped "captured
+20 ms ago", although one PipeWire buffer (~43 ms) often completes two
+frames: the first was really ~40 ms old, skewing the AU1/AU3 timing.
+The `pending > 50 frames` cap was dead code (the loop always drains
+whole frames) and is gone.
+
+| ID | Planted failure | Caught by | Date |
+|---|---|---|---|
+| A1 (host framing) | A refused frame does not advance `seq` (the old code) | `crates/remora-host/src/sound.rs::framer_tests::a_frame_the_encoder_refuses_leaves_a_gap_the_viewer_can_see` | 2026-11-03 |
+| AU1/AU3 (host framing) | Every frame stamped `now - 20 ms` (the old code) | `sound.rs::framer_tests::whole_frames_go_out_in_order_with_their_own_capture_times` | 2026-11-03 |
+
+Fuzzing, 30 min each on the Mac: `opus_decode` 23 388 738 runs (cov 81,
+corpus 54), `audio_packet` 528 602 257 runs; no crash, no assertion.
