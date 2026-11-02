@@ -33,11 +33,13 @@ use remora_app::cli::{
     Looks, exit, format_sas, identity_hex, join_device_words, key_file_warning, misplaced,
     parse_identity, short_code_of, unix_now,
 };
+use remora_app::devices::{Device, DeviceList, MAX_NAME};
 use remora_app::keystore::{self, Role};
-use remora_crypto::identity::{DeviceId, IdentityPublic, ShortCode};
+use remora_crypto::identity::{DeviceId, IdentityCert, IdentityPublic, ShortCode};
 use remora_crypto::secret::Otp;
 use remora_net::{IDLE_TIMEOUT, ViewerEvent, connect};
 use remora_proto::code::{CodeKind, ConnectionCode};
+use remora_proto::display_text::display_name;
 use remora_session::{CloseCode, FailReason, Identity, ViewerConfig, ViewerMode};
 
 #[derive(Parser)]
@@ -61,6 +63,21 @@ enum Command {
         /// Name shown to the host (untrusted text, ≤ 64 bytes).
         #[arg(long, default_value = "Remora viewer")]
         name: String,
+    },
+    /// List the saved computers (phase4.7).
+    Saved {
+        /// Key file (default: the per-user config directory); the list is
+        /// kept next to it.
+        #[arg(long)]
+        identity_file: Option<PathBuf>,
+    },
+    /// Forget a saved computer by its device code.
+    Forget {
+        /// The device code, as `saved` lists it.
+        code: String,
+        /// Key file (default: the per-user config directory).
+        #[arg(long)]
+        identity_file: Option<PathBuf>,
     },
     /// Print this viewer's identity key and device code (created if needed).
     Identity {
@@ -95,6 +112,11 @@ struct ConnectArgs {
     /// other.
     #[arg(long, value_name = "DEVICE CODE")]
     device: Option<String>,
+    /// After the host approves, save it: next time `--device <code>`
+    /// connects without a password, in trusted mode against the saved key
+    /// (the host must remember this viewer too, and still approves).
+    #[arg(long)]
+    save: bool,
     /// Decode the video but open no window (tests and measurements); the
     /// decoder's counts are printed when the session ends.
     #[arg(long)]
@@ -125,6 +147,11 @@ fn main() -> ExitCode {
             Ok(exit::OK)
         }
         Some(Command::Identity { identity_file }) => identity(identity_file).map(|()| exit::OK),
+        Some(Command::Saved { identity_file }) => list_saved(identity_file).map(|()| exit::OK),
+        Some(Command::Forget {
+            code,
+            identity_file,
+        }) => forget_saved(&code, identity_file).map(|()| exit::OK),
         Some(Command::Connect(args)) => connect_command(args),
         #[cfg(target_os = "macos")]
         Some(Command::Gui {
@@ -372,8 +399,34 @@ async fn run_connect(args: ConnectArgs, display: Display) -> anyhow::Result<u8> 
         nonce,
     } = target;
 
-    let mode = match &args.pin {
-        Some(pin) => {
+    let key_path = match &args.identity_file {
+        Some(p) => p.clone(),
+        None => keystore::default_path(Role::Viewer)?,
+    };
+    let saved_path = saved_path(&key_path);
+    let saved = DeviceList::load(&saved_path)
+        .with_context(|| format!("saved computers in {}", saved_path.display()))?;
+    let use_saved = args.pin.is_none() && args.password.is_none();
+    let saved_choice = if use_saved {
+        saved_choice(&saved, host_id, host_key)
+    } else {
+        SavedChoice::NotSaved
+    };
+    let mode = match (&args.pin, saved_choice) {
+        (None, SavedChoice::Changed { saved_key }) => {
+            // C1 / A19: never re-save silently, never fall back to a password.
+            println!(
+                "this computer's identity changed: you saved {} but device {} now presents another key - not connecting. If it was reinstalled, 'remora-viewer forget' it and connect with its password again",
+                short_code_of(&saved_key),
+                host_id.short_code()
+            );
+            return Ok(exit::IDENTITY);
+        }
+        (None, SavedChoice::Saved { key }) => {
+            println!("saved computer: connecting without a password (the host still approves)");
+            ViewerMode::Trusted { pinned: key }
+        }
+        (Some(pin), _) => {
             let pinned = parse_identity(pin)
                 .map_err(|e| anyhow!("--pin: {e} - {}", misplaced(Looks::IdentityKey, pin)))?;
             // A19: the pinned device now presents another key. Hard failure,
@@ -390,7 +443,7 @@ async fn run_connect(args: ConnectArgs, display: Display) -> anyhow::Result<u8> 
             }
             ViewerMode::Trusted { pinned }
         }
-        None => {
+        (None, SavedChoice::NotSaved) => {
             let typed = match &args.password {
                 Some(p) => p.clone(),
                 None => ask_password()?,
@@ -406,10 +459,8 @@ async fn run_connect(args: ConnectArgs, display: Display) -> anyhow::Result<u8> 
         }
     };
 
-    let path = match args.identity_file {
-        Some(p) => p,
-        None => keystore::default_path(Role::Viewer)?,
-    };
+    let trusted_saved = matches!(mode, ViewerMode::Trusted { .. }) && args.pin.is_none();
+    let path = key_path;
     let (keys, _) = keystore::load_or_create(&path)?;
     // F-UX2: on every run that loads the key file.
     eprintln!("{}", key_file_warning(&path));
@@ -432,6 +483,30 @@ async fn run_connect(args: ConnectArgs, display: Display) -> anyhow::Result<u8> 
         decode::Decoder::start(client.clone(), display.show).context("decoder thread")?;
     (display.on_counters)(decoder.counters());
     (display.on_client)(client.clone());
+    let mut saved = saved;
+    let save = args.save;
+    let mut on_active = |host: &IdentityCert| {
+        if !save {
+            return;
+        }
+        let device = Device {
+            key: *host.identity(),
+            name: host.device_name().chars().take(MAX_NAME).collect(),
+            addr: Some(addr),
+        };
+        match saved
+            .remember(device)
+            .and_then(|()| saved.save(&saved_path))
+        {
+            Ok(()) => println!(
+                "saved {} (device {}): next time 'remora-viewer connect --device \"{}\"' needs no password - if the person at the host also types 'remember' there. The host still approves every connection",
+                display_name(host.device_name()),
+                short_code_of(host.identity()),
+                short_code_of(host.identity())
+            ),
+            Err(e) => println!("could not save this computer: {e}"),
+        }
+    };
     let code = session_loop(
         &client,
         &mut events,
@@ -439,8 +514,14 @@ async fn run_connect(args: ConnectArgs, display: Display) -> anyhow::Result<u8> 
         display.close,
         &*display.on_pause,
         timing,
+        &mut on_active,
     )
     .await;
+    if code == exit::AUTH && trusted_saved {
+        println!(
+            "the host does not (or no longer) know this viewer: connect once with its password and ask the person there to type 'remember <n>' - or 'remora-viewer forget' this computer"
+        );
+    }
     let t = decoder.finish();
     println!(
         "video: {} frames decoded, {} refused, {} waiting for a keyframe, {} failed, {} dropped",
@@ -458,8 +539,11 @@ async fn session_loop(
     mut close: Option<tokio::sync::oneshot::Receiver<()>>,
     on_pause: &(dyn Fn(Option<Pause>) + Send),
     timing: bool,
+    on_active: &mut dyn FnMut(&IdentityCert),
 ) -> u8 {
     let mut outcome: Option<u8> = None;
+    // The host's identity as the handshake verified it (for --save).
+    let mut verified: Option<IdentityCert> = None;
     let mut pause: Option<Pause> = None;
     // `--timing`: the media counts once a second, so a measurement can
     // check its own window (P3: 0 authentication failures, 0 frames
@@ -500,6 +584,7 @@ async fn session_loop(
         };
         match ev {
             ViewerEvent::ShowSas { sas, host } => {
+                verified = Some(host.clone());
                 println!(
                     "safety code: {} - compare it with the host's screen (host {:?}, device {})",
                     format_sas(sas),
@@ -511,7 +596,12 @@ async fn session_loop(
                     "waiting for the person at the host to accept or deny (nothing to type here)"
                 );
             }
-            ViewerEvent::Active => println!("SESSION ACTIVE"),
+            ViewerEvent::Active => {
+                println!("SESSION ACTIVE");
+                if let Some(host) = &verified {
+                    on_active(host);
+                }
+            }
             ViewerEvent::StreamPaused(reason) => {
                 let p = Pause::of(reason);
                 match p.deadline {
@@ -544,6 +634,81 @@ async fn session_loop(
         }
     }
     outcome.unwrap_or(exit::ERROR)
+}
+
+/// What a saved-computers list says about the host about to be reached
+/// (phase4.7-criteria C1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SavedChoice {
+    /// Not saved: the password as usual.
+    NotSaved,
+    /// Saved with this key: trusted mode, pinned to it.
+    Saved { key: IdentityPublic },
+    /// Saved, but the host now presents another identity: hard failure.
+    Changed { saved_key: IdentityPublic },
+}
+
+/// C1: a saved computer is reached only in trusted mode against the saved
+/// key. Matched by its device code; if the ID (or, from a connection code,
+/// the key) it presents is not the saved one, that is an identity change.
+fn saved_choice(
+    saved: &DeviceList,
+    host_id: DeviceId,
+    host_key: Option<IdentityPublic>,
+) -> SavedChoice {
+    let Some(d) = saved.find_code(&host_id.short_code()) else {
+        return SavedChoice::NotSaved;
+    };
+    let same = DeviceId::of(&d.key) == host_id && host_key.is_none_or(|k| k == d.key);
+    if same {
+        SavedChoice::Saved { key: d.key }
+    } else {
+        SavedChoice::Changed { saved_key: d.key }
+    }
+}
+
+/// The saved-computers file, next to the viewer's key file (phase4.7 Q4).
+fn saved_path(key_path: &std::path::Path) -> PathBuf {
+    key_path.with_file_name("saved-devices")
+}
+
+fn key_path(file: Option<PathBuf>) -> anyhow::Result<PathBuf> {
+    Ok(match file {
+        Some(p) => p,
+        None => keystore::default_path(Role::Viewer)?,
+    })
+}
+
+/// `remora-viewer saved` (names escaped: untrusted text, H6/C8).
+fn list_saved(file: Option<PathBuf>) -> anyhow::Result<()> {
+    let list = DeviceList::load(&saved_path(&key_path(file)?))?;
+    if list.is_empty() {
+        println!("no saved computers (connect with --save to save one)");
+    }
+    for d in list.iter() {
+        let addr = d.addr.map_or_else(|| "-".to_owned(), |a| a.to_string());
+        println!(
+            "saved: {} (device {}, last at {addr})",
+            display_name(&d.name),
+            d.code()
+        );
+    }
+    Ok(())
+}
+
+/// `remora-viewer forget <code>`.
+fn forget_saved(code: &str, file: Option<PathBuf>) -> anyhow::Result<()> {
+    let code = ShortCode::parse(code).map_err(|e| anyhow!("device code: {e}"))?;
+    let path = saved_path(&key_path(file)?);
+    let mut list = DeviceList::load(&path)?;
+    let Some(key) = list.find_code(&code).map(|d| d.key) else {
+        println!("no saved computer has device code {code} (see 'remora-viewer saved')");
+        return Ok(());
+    };
+    list.forget(&key);
+    list.save(&path)?;
+    println!("forgot device {code}: connecting to it needs its password again");
+    Ok(())
 }
 
 fn report_failure(reason: &FailReason) -> u8 {
@@ -631,4 +796,64 @@ fn init_logging() {
         .with_env_filter(filter)
         .with_writer(std::io::stderr)
         .try_init();
+}
+
+/// phase4.7-criteria C1: a saved computer only in trusted mode against
+/// the saved key; anything else under its code is an identity change.
+#[cfg(test)]
+mod c1_tests {
+    use rand_core::OsRng;
+    use remora_crypto::identity::IdentityKeypair;
+
+    use super::*;
+
+    fn key() -> IdentityPublic {
+        IdentityKeypair::generate(&mut OsRng).public()
+    }
+
+    #[test]
+    fn c1_saved_computers_are_pinned_and_a_changed_identity_is_refused() {
+        let (a, b) = (key(), key());
+        let mut saved = DeviceList::new();
+        saved
+            .remember(Device {
+                key: a,
+                name: "Fedora laptop".into(),
+                addr: None,
+            })
+            .expect("add");
+        let id_a = DeviceId::of(&a);
+        assert_eq!(
+            saved_choice(&DeviceList::new(), id_a, None),
+            SavedChoice::NotSaved
+        );
+        assert_eq!(
+            saved_choice(&saved, DeviceId::of(&b), None),
+            SavedChoice::NotSaved
+        );
+        // Found on the network (ID only) or from a code with the same key.
+        assert_eq!(
+            saved_choice(&saved, id_a, None),
+            SavedChoice::Saved { key: a }
+        );
+        assert_eq!(
+            saved_choice(&saved, id_a, Some(a)),
+            SavedChoice::Saved { key: a }
+        );
+        // A code for the same device ID but another key.
+        assert_eq!(
+            saved_choice(&saved, id_a, Some(b)),
+            SavedChoice::Changed { saved_key: a }
+        );
+        // Another ID with the same short code (the code uses its first 8
+        // bytes of 10): announced on the network, not the saved computer.
+        let mut bytes = *id_a.as_bytes();
+        bytes[9] ^= 1;
+        let impostor = DeviceId::from_bytes(bytes);
+        assert_eq!(impostor.short_code(), id_a.short_code());
+        assert_eq!(
+            saved_choice(&saved, impostor, None),
+            SavedChoice::Changed { saved_key: a }
+        );
+    }
 }
