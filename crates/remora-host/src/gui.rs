@@ -499,7 +499,7 @@ impl HostControl for Live {
     }
 
     fn session_started(&mut self, id: SessionId) {
-        self.video.active.insert(id);
+        self.video.session_active(id);
     }
 
     fn session_over(&mut self, id: SessionId) {

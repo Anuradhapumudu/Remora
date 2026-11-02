@@ -79,6 +79,10 @@ pub(crate) struct ServeArgs {
     /// it announces its device code, never its name, while it is ready).
     #[arg(long)]
     pub(crate) no_announce: bool,
+    /// Do not send this computer's sound (phase 4.8; on by default where
+    /// the host can record it).
+    #[arg(long)]
+    pub(crate) no_audio: bool,
 }
 
 /// `serve --source`.
@@ -226,6 +230,10 @@ async fn serve(args: ServeArgs) -> anyhow::Result<()> {
         );
     }
     ui.control = crate::control::Control::new(injector(&ui.video));
+    #[cfg(target_os = "linux")]
+    if !args.no_audio {
+        ui.video.sound_starter = Some(crate::sound::starter(Arc::clone(&ui.server)));
+    }
     if ui.control.can_control() {
         println!("control: an accepted viewer can use this computer's mouse and keyboard");
     } else {
@@ -481,7 +489,7 @@ impl Ui {
                         "note: type 'remember {n}' to let this viewer connect without a password next time (you still approve every connection)"
                     );
                 }
-                self.video.active.insert(id);
+                self.video.session_active(id);
             }
             // Applied (or not) by `control` above.
             HostEvent::Deliver { .. } => {}
@@ -723,6 +731,11 @@ pub(crate) struct Video {
     /// screen, while it runs (the injector is opened from it, D48).
     #[cfg(target_os = "linux")]
     portal_input: Arc<std::sync::Mutex<Option<remora_capture::PortalInput>>>,
+    /// Starts this computer's sound (phase 4.8); `None`: no sound here or
+    /// `--no-audio`.
+    pub(crate) sound_starter: Option<crate::sound::SoundStarter>,
+    /// The running sound; dropping it stops recording (A1).
+    sound: Option<Box<dyn std::any::Any + Send>>,
 }
 
 impl Video {
@@ -744,6 +757,27 @@ impl Video {
             running: None,
             #[cfg(target_os = "linux")]
             portal_input: Arc::default(),
+            sound_starter: None,
+            sound: None,
+        }
+    }
+
+    /// Session `id` became Active: from now on (and not before) this
+    /// computer's sound is recorded and sent (A1).
+    pub(crate) fn session_active(&mut self, id: SessionId) {
+        self.active.insert(id);
+        if self.sound.is_some() {
+            return;
+        }
+        let Some(start) = self.sound_starter.as_mut() else {
+            return;
+        };
+        match start() {
+            Ok(s) => {
+                self.sound = Some(s);
+                println!("sound: sending this computer's sound to the viewer");
+            }
+            Err(e) => println!("sound: off ({e:#})"),
         }
     }
 
@@ -846,6 +880,9 @@ impl Video {
     }
 
     pub(crate) fn stop(&mut self) {
+        if self.sound.take().is_some() {
+            println!("sound stopped");
+        }
         #[cfg(any(target_os = "macos", target_os = "linux"))]
         if let Some(s) = self.running.take() {
             s.stop();
@@ -1217,5 +1254,56 @@ mod c8_tests {
             "a newline in a name made a second line: {lines:?}"
         );
         assert!(!lines[0].contains('\u{202e}'), "bidi override shown raw");
+    }
+}
+
+/// phase4.8-criteria A1: this computer's sound is recorded only while a
+/// session is Active - not at start, not while a viewer waits at the
+/// prompt, and no longer once the last session ended.
+#[cfg(test)]
+mod a1_tests {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use super::*;
+
+    /// Counts live recordings: +1 when started, -1 when dropped.
+    struct Live(Arc<AtomicUsize>);
+
+    impl Drop for Live {
+        fn drop(&mut self) {
+            self.0.fetch_sub(1, Ordering::SeqCst);
+        }
+    }
+
+    #[tokio::test]
+    async fn a1_sound_runs_only_while_a_session_is_active() {
+        let dir = std::env::temp_dir().join(format!("remora-a1-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let (mut ui, _events) = super::c2_tests::ui_with_events_for_c3(&dir).await;
+        let live = Arc::new(AtomicUsize::new(0));
+        let l = Arc::clone(&live);
+        ui.video.sound_starter = Some(Box::new(move || {
+            l.fetch_add(1, Ordering::SeqCst);
+            Ok(Box::new(Live(Arc::clone(&l))) as Box<dyn std::any::Any + Send>)
+        }));
+        let now = || live.load(Ordering::SeqCst);
+        assert_eq!(now(), 0, "recording before anyone connected");
+        let v = remora_crypto::identity::IdentityKeypair::generate(&mut rand_core::OsRng).public();
+        ui.handle_event(HostEvent::Prompt {
+            id: SessionId(1),
+            sas: remora_crypto::sas::sas(&[1; 32], &[2; 32], &[3; 32]),
+            viewer_name: "viewer".into(),
+            viewer_key: v,
+        });
+        assert_eq!(now(), 0, "recording while the viewer waits at the prompt");
+        ui.handle_event(HostEvent::Active { id: SessionId(1) });
+        assert_eq!(now(), 1, "not recording in an Active session");
+        ui.handle_event(HostEvent::Closed {
+            id: SessionId(1),
+            code: remora_session::CloseCode::Normal,
+        });
+        assert_eq!(now(), 0, "still recording after the session ended");
+        let _ = std::fs::remove_dir_all(dir);
     }
 }
