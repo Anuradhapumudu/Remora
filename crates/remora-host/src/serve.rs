@@ -38,6 +38,10 @@ use remora_crypto::secret::Otp;
 use remora_net::{HostEvent, HostServer, IDLE_TIMEOUT};
 use remora_session::{HostConfig, Identity, SessionId};
 
+/// The announced nonce is replaced this often, before it expires
+/// ([`CODE_TTL`]).
+const ANNOUNCE_REFRESH: Duration = Duration::from_secs(240);
+
 /// How long each printed connection code is valid (protocol.md §2: ≤ 5 min).
 pub(crate) const CODE_TTL: Duration = Duration::from_secs(300);
 
@@ -71,6 +75,10 @@ pub(crate) struct ServeArgs {
     /// phase4-criteria P1/P2). Times only.
     #[arg(long)]
     pub(crate) timing: bool,
+    /// Do not announce this host on the home network (phase4.7: by default
+    /// it announces its device code, never its name, while it is ready).
+    #[arg(long)]
+    pub(crate) no_announce: bool,
 }
 
 /// `serve --source`.
@@ -197,7 +205,20 @@ async fn serve(args: ServeArgs) -> anyhow::Result<()> {
         flagged,
         known,
         known_path,
+        announcer: None,
     };
+    if !args.no_announce {
+        match remora_net::discovery::Announcer::new(addr.ip()) {
+            Ok(a) => {
+                ui.announcer = Some(a);
+                println!(
+                    "announce: findable on this network by device code {} while ready (not by name; --no-announce turns it off)",
+                    short_code_of(&public)
+                );
+            }
+            Err(e) => println!("announce: off ({e})"),
+        }
+    }
     if !ui.known.is_empty() {
         println!(
             "known: {} remembered viewer(s) may connect without a password - you still approve each one (type 'known')",
@@ -211,13 +232,18 @@ async fn serve(args: ServeArgs) -> anyhow::Result<()> {
         println!("control: view only (no remote control on this system yet)");
     }
     ui.print_code(false);
+    ui.refresh_announcement();
 
     let mut stdin = stdin_lines();
     // D-29: while the captured display is unavailable, say how long is left.
+    // A fresh announced nonce before the last one expires (CODE_TTL).
+    let mut announce_every = tokio::time::interval(ANNOUNCE_REFRESH);
+    announce_every.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let mut wait_line = tokio::time::interval(remora_app::cli::WAIT_LINE_EVERY);
     wait_line.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     loop {
         tokio::select! {
+            _ = announce_every.tick() => ui.refresh_announcement(),
             _ = wait_line.tick() => {
                 if let Some(left) = ui.server.pause_remaining() {
                     println!("{}", remora_app::cli::display_unavailable_text(left));
@@ -306,6 +332,9 @@ struct Ui {
     /// and `forget` typed here.
     known: DeviceList,
     known_path: PathBuf,
+    /// Home-network announcement (phase4.7 C5): only while ready, i.e. no
+    /// session Active; a fresh nonce after every attempt.
+    announcer: Option<remora_net::discovery::Announcer>,
 }
 
 impl Ui {
@@ -342,7 +371,44 @@ impl Ui {
         self.book.numbers_where(|e| e.pending.is_some())
     }
 
+    /// Announces a fresh nonce, or nothing while a session is Active (C5).
+    fn refresh_announcement(&mut self) {
+        let busy = !self.video.active.is_empty();
+        let Some(a) = self.announcer.as_mut() else {
+            return;
+        };
+        if busy {
+            a.withdraw();
+            return;
+        }
+        let announcement = remora_net::discovery::Announcement {
+            id: remora_crypto::identity::DeviceId::of(&self.public),
+            nonce: self.server.issue_nonce(CODE_TTL),
+            port: self.addr.port(),
+        };
+        if let Err(e) = a.announce(&announcement) {
+            println!("announce: {e}");
+        }
+    }
+
     fn handle_event(&mut self, ev: HostEvent) {
+        // Every attempt may have used the announced nonce; a session
+        // starting or ending changes whether the host is ready (C5).
+        let refresh = matches!(
+            ev,
+            HostEvent::Prompt { .. }
+                | HostEvent::Active { .. }
+                | HostEvent::Failed { .. }
+                | HostEvent::Closed { .. }
+                | HostEvent::Lost { .. }
+        );
+        self.handle_event_inner(ev);
+        if refresh {
+            self.refresh_announcement();
+        }
+    }
+
+    fn handle_event_inner(&mut self, ev: HostEvent) {
         let outcome = self.control.on_event(&ev, Instant::now());
         self.control_outcome(outcome);
         match ev {
@@ -1003,6 +1069,7 @@ mod c2_tests {
             flagged: vec![],
             known: DeviceList::new(),
             known_path: dir.join("known-viewers"),
+            announcer: None,
         }
     }
 

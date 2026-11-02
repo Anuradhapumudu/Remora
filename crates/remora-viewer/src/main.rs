@@ -73,7 +73,10 @@ enum Command {
 #[derive(clap::Args)]
 struct ConnectArgs {
     /// The host's connection code (its `code:` line, `remora1:...`).
-    code: String,
+    /// Leave it out and give `--device` to find the host on this network
+    /// instead (phase4.7).
+    #[arg(required_unless_present = "device")]
+    code: Option<String>,
     /// Key file (default: the per-user config directory).
     #[arg(long)]
     identity_file: Option<PathBuf>,
@@ -269,13 +272,62 @@ fn identity(file: Option<PathBuf>) -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn run_connect(args: ConnectArgs, display: Display) -> anyhow::Result<u8> {
-    let timing = args.timing;
+/// How long the viewer looks for a device on the network: an announcing
+/// host answers within about 1 s, but one that has just started is silent
+/// for its first few seconds while its name is checked (spike S-C1: 7 s).
+const FIND_WAIT: std::time::Duration = std::time::Duration::from_secs(8);
+
+/// Where and whom to connect to.
+struct Target {
+    host_id: DeviceId,
+    /// Known only from a connection code (the network gives the ID).
+    host_key: Option<IdentityPublic>,
+    addr: std::net::SocketAddr,
+    nonce: [u8; 16],
+}
+
+/// From the connection code, or (no code, `--device` given) by finding the
+/// host on this network (phase4.7 step 5). `None` after printing why the
+/// device asked for is not the one reached (A16).
+fn resolve_target(args: &ConnectArgs) -> anyhow::Result<Option<Target>> {
+    let want = match &args.device {
+        Some(typed) => Some(
+            ShortCode::parse(typed)
+                .map_err(|e| anyhow!("--device: {e} - {}", misplaced(Looks::DeviceCode, typed)))?,
+        ),
+        None => None,
+    };
+    let Some(text) = &args.code else {
+        let Some(want) = want else {
+            return Err(anyhow!(
+                "give the host's connection code, or --device to find it on this network"
+            ));
+        };
+        println!("looking for device {want} on this network...");
+        let found = remora_net::discovery::find(&want, FIND_WAIT).map_err(|e| anyhow!("{e}"))?;
+        let Some((addrs, a)) = found else {
+            return Err(anyhow!(
+                "device {want} was not found on this network - is its host running and ready (and on the same Wi-Fi)? Its connection code still works"
+            ));
+        };
+        let ip = addrs
+            .first()
+            .copied()
+            .ok_or_else(|| anyhow!("device {want} announced no address"))?;
+        // `find` returns only an announcement whose full ID gives `want`;
+        // the handshake then expects that full ID (A16).
+        return Ok(Some(Target {
+            host_id: a.id,
+            host_key: None,
+            addr: std::net::SocketAddr::new(ip, a.port),
+            nonce: a.nonce,
+        }));
+    };
     // The code is checked before any network traffic (A07: expiry).
-    let code = ConnectionCode::parse(args.code.trim(), unix_now()).map_err(|e| {
+    let code = ConnectionCode::parse(text.trim(), unix_now()).map_err(|e| {
         anyhow!(
             "connection code: {e} - {}",
-            misplaced(Looks::ConnectionCode, &args.code)
+            misplaced(Looks::ConnectionCode, text)
         )
     })?;
     if code.kind != CodeKind::Offer {
@@ -288,21 +340,37 @@ async fn run_connect(args: ConnectArgs, display: Display) -> anyhow::Result<u8> 
         .first()
         .map(|c| c.addr)
         .ok_or_else(|| anyhow!("connection code has no address"))?;
-
     // A16: the user asked for a specific device; refuse a code for another
     // one before connecting at all.
-    if let Some(typed) = &args.device {
-        let want = ShortCode::parse(typed)
-            .map_err(|e| anyhow!("--device: {e} - {}", misplaced(Looks::DeviceCode, typed)))?;
-        if !want.matches(&host_id) {
-            println!(
-                "identity mismatch: this code is for device {}, not {} which you asked for - not connecting",
-                host_id.short_code(),
-                want
-            );
-            return Ok(exit::IDENTITY);
-        }
+    if let Some(want) = want
+        && !want.matches(&host_id)
+    {
+        println!(
+            "identity mismatch: this code is for device {}, not {} which you asked for - not connecting",
+            host_id.short_code(),
+            want
+        );
+        return Ok(None);
     }
+    Ok(Some(Target {
+        host_id,
+        host_key: Some(host_key),
+        addr,
+        nonce: code.nonce,
+    }))
+}
+
+async fn run_connect(args: ConnectArgs, display: Display) -> anyhow::Result<u8> {
+    let timing = args.timing;
+    let Some(target) = resolve_target(&args)? else {
+        return Ok(exit::IDENTITY);
+    };
+    let Target {
+        host_id,
+        host_key,
+        addr,
+        nonce,
+    } = target;
 
     let mode = match &args.pin {
         Some(pin) => {
@@ -310,7 +378,9 @@ async fn run_connect(args: ConnectArgs, display: Display) -> anyhow::Result<u8> 
                 .map_err(|e| anyhow!("--pin: {e} - {}", misplaced(Looks::IdentityKey, pin)))?;
             // A19: the pinned device now presents another key. Hard failure,
             // never a silent re-pin and never a fallback to a password.
-            if pinned != host_key {
+            // (Found on the network, only the ID is known before the
+            // handshake; the handshake then checks the key itself.)
+            if host_key.map_or(DeviceId::of(&pinned) != host_id, |k| k != pinned) {
                 println!(
                     "this device's identity changed: you trust {} but the code is for {} - not connecting",
                     short_code_of(&pinned),
@@ -357,7 +427,7 @@ async fn run_connect(args: ConnectArgs, display: Display) -> anyhow::Result<u8> 
         "connecting to {addr} (host device {})",
         host_id.short_code()
     );
-    let (client, mut events) = connect(addr, config, code.nonce).await?;
+    let (client, mut events) = connect(addr, config, nonce).await?;
     let mut decoder =
         decode::Decoder::start(client.clone(), display.show).context("decoder thread")?;
     (display.on_counters)(decoder.counters());

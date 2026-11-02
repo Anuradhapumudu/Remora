@@ -158,9 +158,12 @@ impl Announcer {
         })
     }
 
-    /// Announces (or replaces the announcement with) `a`.
+    /// Announces (or replaces the announcement with) `a`. Replacing does
+    /// not withdraw first: registering the same name again updates it in
+    /// place (mdns-sd 0.21.6 service_daemon.rs:544), so the host stays
+    /// findable. A withdraw-then-register made it unfindable for seconds
+    /// after every connection attempt while the name was probed again.
     pub fn announce(&mut self, a: &Announcement) -> Result<(), DiscoveryError> {
-        self.withdraw();
         let props = txt(a);
         let props: Vec<(&str, &str)> = props
             .iter()

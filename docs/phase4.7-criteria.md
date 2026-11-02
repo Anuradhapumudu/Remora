@@ -127,6 +127,17 @@ dependency.
 6. One app on the Mac (share + connect).
 7. Live test Mac ↔ laptop; report; roadmap.
 
+## 6a. Clarification while building (2026-11-02)
+
+C5 says the host announces `{device code, nonce, port}`. Built, the
+announcement is: instance name = the device code, TXT `id` = the full
+80-bit device ID that code is computed from, `nonce`, `v`, and the port.
+The full ID is the same identifier in its long form (every host already
+sends it in its hello), not the computer's name. It is what lets the
+viewer connect *expecting that exact ID*, so the handshake's A16 check
+refuses a host whose key does not match. A short code alone is "an
+address, not a credential" (`remora_crypto::identity::ShortCode`).
+
 ## 7. Known limitations (stated plainly)
 
 - Short codes work on the home network only until Phase 8.
