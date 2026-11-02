@@ -317,6 +317,17 @@ impl Host {
         }
     }
 
+    /// Replaces the viewer keys allowed in trusted (password-less) mode
+    /// (phase4.7-criteria C2, C7: the person at the host remembered or
+    /// forgot a viewer). It applies to every connection whose
+    /// `ViewerHello` arrives afterwards; a session already past its hello
+    /// keeps the list it started with (end it with `disconnect` to cut it
+    /// off). Trusted viewers are still prompted for approval like everyone
+    /// else (threat model §4 item 6).
+    pub fn set_trusted(&mut self, keys: Vec<IdentityPublic>) {
+        self.config.trusted = keys;
+    }
+
     /// Rotates every session's media key after `packets` packets instead
     /// of 2³² (clamped to 1..=2³²). Shorter key lives only, for testing
     /// rotation (phase4-criteria M8); keys still also rotate hourly.

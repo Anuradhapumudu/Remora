@@ -178,6 +178,12 @@ impl HostServer {
         nonce
     }
 
+    /// Replaces the viewer keys allowed in trusted mode; see
+    /// [`remora_session::Host::set_trusted`].
+    pub fn set_trusted(&self, keys: Vec<IdentityPublic>) {
+        lock(&self.shared.host).set_trusted(keys);
+    }
+
     /// Accept on the prompt for `id` showing `sas`.
     pub fn approve(&self, id: SessionId, sas: Sas) -> Result<(), ApproveError> {
         let now = self.shared.now();
