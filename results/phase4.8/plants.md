@@ -124,3 +124,20 @@ The criteria (§3 A3, §7) relied on a fuzz target "around" libopus, but
 | ID | Planted failure | Caught by | Date |
 |---|---|---|---|
 | A3 | The decoder wrapper returns more than one 20 ms frame (`resize(FRAME*CHANNELS + 1)`) | `fuzz/fuzz_targets/opus_decode.rs` — libFuzzer "deadly signal" on the size assertion within seconds | 2026-11-03 |
+
+## Viewer `sound.rs` + `quit.rs`, mutation run after the night's changes (2026-11-03)
+
+First run: 174 mutants, 133 caught, **31 missed**, 8 unviable, 2
+timeouts. Real gaps (tests added in this commit): timing bookkeeping on
+cap drops and resyncs, packets not exactly 20 ms apart, the 1 s
+catch-up and 500 ms resync windows, the catch-up speed, concealed
+sound's capture times, the arrival record and the `audio:` line, and
+the sample caps. One test found a **real bug** (the planted failure was
+the existing code): `pull_timed` measured the age *before* a resync
+dropped the backlog, so the timing line described sound that was then
+thrown away (1 060 ms reported for sound played at 1 000 ms). Timing
+tool only; what is heard was right. Fixed by watching the level first.
+Left, with reasons: `Output::start` (opens the real device: live test
+only), the 1 s timer of the `audio:` line and `Drop for Sound` (both
+change only stderr lines; the thread ends when its sender drops either
+way).

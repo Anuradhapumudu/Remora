@@ -165,8 +165,14 @@ impl Jitter {
         muted: bool,
         speaker_us: Option<u64>,
     ) {
+        let channels = channels.max(1);
         if !self.playing && self.held.len() >= START {
             self.playing = true;
+        }
+        if self.playing {
+            // First: a resync may drop a backlog, and the age measured
+            // below must be that of the sound actually played.
+            self.watch_level((out.len() / channels) as u64);
         }
         if self.playing
             && let Some(at) = speaker_us
@@ -175,20 +181,19 @@ impl Jitter {
         {
             self.ages.push(at as i64 - c as i64);
         }
-        self.pull(out, channels, muted);
+        self.fill(out, channels, muted);
     }
 
     /// Fills `out` (interleaved, `channels` per frame) for the device.
     /// Silence before enough sound arrived, after running dry, and always
     /// when `muted` (A6) - muted, sound is still consumed.
+    #[cfg(test)]
     pub(crate) fn pull(&mut self, out: &mut [f32], channels: usize, muted: bool) {
-        let channels = channels.max(1);
-        if !self.playing && self.held.len() >= START {
-            self.playing = true;
-        }
-        if self.playing {
-            self.watch_level((out.len() / channels) as u64);
-        }
+        self.pull_timed(out, channels, muted, None);
+    }
+
+    /// The samples themselves (after the level was watched).
+    fn fill(&mut self, out: &mut [f32], channels: usize, muted: bool) {
         for frame in out.chunks_mut(channels) {
             let (l, r) = if self.playing {
                 match self.next() {
@@ -859,5 +864,171 @@ mod tests {
         assert_eq!(j.held(), 4 * FRAME);
         f.feed(&p1, &mut j); // arrives late: not played
         assert_eq!(j.held(), 4 * FRAME);
+    }
+
+    // --- Mutation gaps (2026-11-03, night): timing bookkeeping ---
+
+    /// Pulls `ms` of output at 48 kHz stereo; returns the ages recorded,
+    /// with the speaker time advancing from `speaker_us`.
+    fn pull_ms(j: &mut Jitter, ms: usize, speaker_us: u64) -> Vec<i64> {
+        let mut out = vec![0.0; 2 * 48 * ms];
+        j.pull_timed(&mut out, 2, false, Some(speaker_us));
+        std::mem::take(&mut j.ages)
+    }
+
+    #[test]
+    fn the_age_uses_each_packets_own_capture_time() {
+        // Host timestamps are not exactly 20 ms apart (capture jitter):
+        // the second packet's own time counts, not the first's + 20 ms.
+        let mut j = Jitter::new(RATE);
+        j.push_at(&frame(0.1), Some(1_000_000));
+        j.push_at(&frame(0.1), Some(1_050_000));
+        assert_eq!(pull_ms(&mut j, 20, 1_100_000), vec![100_000]);
+        assert_eq!(pull_ms(&mut j, 10, 1_120_000), vec![70_000]);
+    }
+
+    #[test]
+    fn sound_dropped_at_the_cap_or_by_a_resync_keeps_the_age_right() {
+        // Cap: 8 packets pushed, 2 dropped (MAX_HELD = 6); the first heard
+        // is packet 2, captured at 40 ms.
+        let mut j = Jitter::new(RATE);
+        for k in 0..8u64 {
+            j.push_at(&frame(0.1), Some(k * 20_000));
+        }
+        assert_eq!(j.dropped, 2 * FRAME as u64);
+        j.since_dry = None; // past the start window: no resync here
+        assert_eq!(pull_ms(&mut j, 10, 1_040_000), vec![1_000_000]);
+        // Resync: right after (re)starting, 5 packets queued -> 3 dropped.
+        let mut j = Jitter::new(RATE);
+        for k in 0..5u64 {
+            j.push_at(&frame(0.1), Some(k * 20_000));
+        }
+        assert_eq!(pull_ms(&mut j, 10, 1_060_000), vec![1_000_000]);
+        assert_eq!((j.resyncs, j.dropped), (1, 3 * FRAME as u64));
+    }
+
+    #[test]
+    fn concealed_sound_is_timed_where_the_lost_packets_were() {
+        use remora_codec::audio::{AudioEncoder, DEFAULT_BITRATE};
+        let mut enc = AudioEncoder::new(DEFAULT_BITRATE).expect("enc");
+        let mut pkt = |seq: u32| AudioPacket {
+            seq,
+            capture_ts_us: 1_000_000 + u64::from(seq) * 20_000,
+            data: enc.encode(&frame(0.1)).expect("encode"),
+        };
+        let (p0, p3) = (pkt(0), pkt(3));
+        let mut f = Feeder::new().expect("feeder");
+        let mut j = Jitter::new(RATE);
+        f.feed(&p0, &mut j);
+        f.feed(&p3, &mut j); // 1 and 2 concealed
+        j.since_dry = None;
+        // Each 20 ms pulled at speaker time = capture + 100 ms.
+        let ages: Vec<i64> = (0..4u64)
+            .flat_map(|k| pull_ms(&mut j, 20, 1_100_000 + k * 20_000))
+            .collect();
+        assert_eq!(ages, vec![100_000; 4], "concealed sound mis-timed");
+    }
+
+    #[test]
+    fn catching_up_plays_one_percent_fast() {
+        let mut j = Jitter::new(RATE);
+        for _ in 0..6 {
+            j.push(&frame(0.1));
+        }
+        j.since_dry = None;
+        j.catching_up = true;
+        let before = j.consumed;
+        let mut out = vec![0.0; 2 * 4800]; // 100 ms of output
+        j.pull(&mut out, 2, false);
+        let used = j.consumed - before;
+        assert!((4840..=4856).contains(&used), "{used} frames for 100 ms");
+    }
+
+    #[test]
+    fn the_catch_up_window_is_one_second_and_the_resync_window_half() {
+        // Held above TARGET for 0.6 s only, then back to normal: no
+        // catch-up (the window is a whole second, counted in frames).
+        let (_, mut j) = steady(2, 2);
+        let mut out = vec![0.0; 2 * FRAME];
+        for _ in 0..2 {
+            j.push(&frame(0.1));
+        }
+        for _ in 0..30 {
+            j.push(&frame(0.1));
+            j.pull(&mut out, 2, false);
+        }
+        for _ in 0..2 {
+            j.pull(&mut out, 2, false);
+        }
+        for _ in 0..100 {
+            j.push(&frame(0.1));
+            j.pull(&mut out, 2, false);
+        }
+        assert_eq!(j.catch_ups, 0, "sped up for a short burst");
+        // A backlog 400 ms after a restart is dropped; one at 600 ms is not.
+        for (after_ms, resyncs) in [(400usize, 1u64), (600, 0)] {
+            let (_, mut j) = steady(2, 2);
+            for _ in 0..4 {
+                j.pull(&mut out, 2, false); // runs dry
+            }
+            j.push(&frame(0.1));
+            j.push(&frame(0.1));
+            for _ in 0..after_ms / 20 {
+                j.push(&frame(0.1));
+                j.pull(&mut out, 2, false);
+            }
+            let before = j.resyncs;
+            for _ in 0..4 {
+                j.push(&frame(0.1));
+            }
+            j.pull(&mut out, 2, false);
+            assert_eq!(
+                j.resyncs - before,
+                resyncs,
+                "backlog {after_ms} ms after restarting"
+            );
+        }
+    }
+
+    #[test]
+    fn timing_samples_are_capped() {
+        let mut j = Jitter::new(RATE);
+        for _ in 0..6 {
+            j.push_at(&frame(0.1), Some(0));
+        }
+        j.since_dry = None;
+        let mut out = vec![0.0; 2];
+        for _ in 0..MAX_AGES + 10 {
+            j.pull_timed(&mut out, 2, false, Some(1));
+            j.push_at(&[0.0, 0.0], Some(0));
+        }
+        assert_eq!(j.ages.len(), MAX_AGES);
+    }
+
+    #[test]
+    fn the_timing_line_reports_arrivals() {
+        let mut o = silent_output().expect("output");
+        let now_us = remora_app::clock::monotonic_ns().expect("clock") / 1000;
+        let mut p = packets(1).remove(0);
+        p.capture_ts_us = now_us - 30_000; // captured 30 ms ago
+        o.play(&p);
+        let line = o.timing_line().expect("line");
+        let min = line
+            .split("arrival_minus_capture_ms min ")
+            .nth(1)
+            .and_then(|r| r.split(' ').next())
+            .and_then(|v| v.parse::<f64>().ok())
+            .expect("arrival figure");
+        assert!((30.0..40.0).contains(&min), "{line}");
+        assert!(line.contains("(n 1)"), "{line}");
+        // Capped too.
+        for _ in 0..MAX_AGES + 5 {
+            o.play(&p);
+        }
+        assert!(
+            o.timing_line()
+                .expect("line")
+                .contains(&format!("(n {MAX_AGES})"))
+        );
     }
 }
