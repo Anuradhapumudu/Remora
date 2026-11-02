@@ -23,3 +23,4 @@ Process note: while speeding the A2 scan up (a set of windows instead of a
 quadratic search) an edit left the test not compiling, and a first plant
 run printed nothing - read for a moment as "no failure". Plant runs now
 always show the test's own lines.
+| A3 (codec) | The Opus decoder wrapper hands any size to libopus | `crates/remora-codec/src/audio.rs::tests::wrong_sizes_are_refused_and_loss_is_concealed` | 2026-11-02 |

@@ -11,6 +11,7 @@
 
 use std::time::{Duration, Instant};
 
+pub mod audio;
 pub mod barcode;
 pub mod bitstream;
 pub mod h264;

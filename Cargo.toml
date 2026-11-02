@@ -76,6 +76,14 @@ futures-util = { version = "0.3.34", default-features = false }
 # newest release at least 14 days old on 2026-11-02.
 mdns-sd = { version = "0.21.6", default-features = false }
 
+# Sound (phase4.8-criteria, spike S-A1): Opus. opus 0.4.0 builds libopus
+# 1.6.1 from source shipped in opusic-sys (bundled, cmake); opusic-sys is
+# locked to 0.7.5 (0.7.6 < 14 days). BSD-3-Clause (libopus), MIT/Apache.
+opus = "0.4.0"
+# Playing sound on the Mac viewer: the objc2 0.3 audio crates we already use
+# underneath, so the CoreAudio `unsafe` stays in this widely used crate.
+cpal = { version = "0.18.2", default-features = false }
+
 # protocol
 base64 = "0.23.1"
 prost = "0.14.4"

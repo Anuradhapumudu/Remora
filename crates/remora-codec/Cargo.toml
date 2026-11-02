@@ -11,6 +11,9 @@ publish.workspace = true
 license = "MIT OR Apache-2.0"
 
 [dependencies]
+remora-proto = { workspace = true }
+# Sound: Opus encode (host) and decode (viewer), phase 4.8.
+opus = { workspace = true }
 remora-capture = { workspace = true }
 thiserror = { workspace = true }
 
