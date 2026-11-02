@@ -334,7 +334,7 @@ fn resolve_target(args: &ConnectArgs) -> anyhow::Result<Option<Target>> {
         let found = remora_net::discovery::find(&want, FIND_WAIT).map_err(|e| anyhow!("{e}"))?;
         let Some((addrs, a)) = found else {
             return Err(anyhow!(
-                "device {want} was not found on this network - is its host running and ready (and on the same Wi-Fi)? Its connection code still works"
+                "device {want} was not found on this network. Is its host running, on the same Wi-Fi, and free? A host serving another viewer does not announce itself until that session ends (up to 30 s after a viewer vanishes). Its connection code still works"
             ));
         };
         let ip = addrs
@@ -542,6 +542,7 @@ async fn session_loop(
     on_active: &mut dyn FnMut(&IdentityCert),
 ) -> u8 {
     let mut outcome: Option<u8> = None;
+    let mut interrupted = false;
     // The host's identity as the handshake verified it (for --save).
     let mut verified: Option<IdentityCert> = None;
     let mut pause: Option<Pause> = None;
@@ -574,6 +575,19 @@ async fn session_loop(
                 Some(ev) => ev,
                 None => break,
             },
+            // Ctrl-C: say goodbye, so the host ends the session at once
+            // (and announces itself again) instead of after 30 s of
+            // silence (owner's laptop, 2026-11-02). A second Ctrl-C quits
+            // at once (tokio now owns the signal, so it would not by itself).
+            _ = tokio::signal::ctrl_c() => {
+                if interrupted {
+                    std::process::exit(130);
+                }
+                interrupted = true;
+                println!("ending the session...");
+                client.disconnect();
+                continue;
+            }
             // The window was closed: end the session the normal way and
             // keep reading until the connection reports how it ended.
             _ = async { if let Some(c) = close.as_mut() { let _ = c.await; } }, if close.is_some() => {

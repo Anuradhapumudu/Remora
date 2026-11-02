@@ -19,7 +19,9 @@ remora-proto = { workspace = true }
 remora-session = { workspace = true }
 anyhow = { workspace = true }
 clap = { workspace = true }
-tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync", "time"] }
+# "signal": Ctrl-C ends the session with a Goodbye (signal-hook-registry is
+# already in the lock).
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync", "time", "signal"] }
 tracing-subscriber = { workspace = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
