@@ -118,14 +118,14 @@ sessions). Plants: `results/phase4.6/plants.md`; numbers:
 
 | ID | Status | Evidence |
 |---|---|---|
-| L1 | **Met** (unit level) | `remora-host/src/control.rs::l1_input_reaches_the_os_only_while_active` (plant: input before Active opens an injector, caught); the session layer's own refusal before Active is A20/A21. A host-binary network test was not written: the injector is reached only through `Control`, which this test covers |
-| L2 | **Met** (event level) | `control.rs::l2_every_end_path_releases_held_keys` (Normal, ProtocolViolation, CaptureStopped, Timeout, Lost, Failed; plant on Lost caught), `l2_host_stopping_releases_held_keys`; guard: `remora-input/tests/l2_l4_guard.rs` (5 plants, one first NOT caught then fixed). Live: GNOME's Stop ended a session with keys released (`session ended 1 (CaptureStopped)`) |
-| L3 | **Met** | decode checks `remora-proto/tests/l3_input.rs`; key table drop `l2_l4_guard.rs::l3_unknown_keys_are_dropped_and_counted`; fuzz target `input_event` (first version did NOT catch its plant; rewritten, caught) |
+| L1 | **Met** (unit level) | `crates/remora-host/src/control.rs::l1_input_reaches_the_os_only_while_active` (plant: input before Active opens an injector, caught); the session layer's own refusal before Active is A20/A21. A host-binary network test was not written: the injector is reached only through `Control`, which this test covers |
+| L2 | **Met** (event level) | `control.rs::l2_every_end_path_releases_held_keys` (Normal, ProtocolViolation, CaptureStopped, Timeout, Lost, Failed; plant on Lost caught), `l2_host_stopping_releases_held_keys`; guard: `crates/remora-input/tests/l2_l4_guard.rs` (5 plants, one first NOT caught then fixed). Live: GNOME's Stop ended a session with keys released (`session ended 1 (CaptureStopped)`) |
+| L3 | **Met** | decode checks `crates/remora-proto/tests/l3_input.rs`; key table drop `l2_l4_guard.rs::l3_unknown_keys_are_dropped_and_counted`; fuzz target `input_event` (first version did NOT catch its plant; rewritten, caught) |
 | L4 | **Met** | `l2_l4_guard.rs::l4_*`, `control.rs::l4_a_flood_ends_the_session_and_releases` |
 | L5 | **Met** (as specified) | H9 unit test (one active session); manual: only `accept`/`deny`/`disconnect` typed in the host terminal act, and a second viewer is refused while one is Active |
 | L6 | **Met, with a finding** | GNOME's indicator shows during every session; one click ends it at once since 0ae615c (seen live). **Finding D-54:** hidden while an app is full screen |
-| L7 | **Met** | `remora-net/tests/l7_input_sealed.rs`: a real session over QUIC sends every input kind with a random canary; no 8-byte window of any input's plaintext appears in the frames handed to QUIC, and the host receives each input intact. The plant (input sent as plaintext) is kept as a test that must see the plaintext and no delivery |
-| L8 | **Met** | file: `remora-app/src/token_file.rs::l8_the_token_file_is_owner_only_and_round_trips` (plant 0644 caught); `Debug`: `remora-capture/src/sys/linux.rs::l8_the_restore_token_is_never_printed` (plant caught). The file is written by remora-app, never by remora-capture (the policy test refused the first version that did) |
+| L7 | **Met** | `crates/remora-net/tests/l7_input_sealed.rs`: a real session over QUIC sends every input kind with a random canary; no 8-byte window of any input's plaintext appears in the frames handed to QUIC, and the host receives each input intact. The plant (input sent as plaintext) is kept as a test that must see the plaintext and no delivery |
+| L8 | **Met** | file: `crates/remora-app/src/token_file.rs::l8_the_token_file_is_owner_only_and_round_trips` (plant 0644 caught); `Debug`: `crates/remora-capture/src/sys/linux.rs::l8_the_restore_token_is_never_printed` (plant caught). The file is written by remora-app, never by remora-capture (the policy test refused the first version that did) |
 
 ### Performance targets
 
