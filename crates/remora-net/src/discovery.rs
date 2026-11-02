@@ -190,11 +190,6 @@ impl Announcer {
             let _ = self.daemon.unregister(&name);
         }
     }
-
-    /// Whether something is being announced.
-    pub fn is_announcing(&self) -> bool {
-        self.current.is_some()
-    }
 }
 
 impl Drop for Announcer {
@@ -308,6 +303,65 @@ mod tests {
         let long = with("nonce", &"0".repeat(65));
         assert_eq!(
             parse(&name, &props(&long), 1),
+            Err(DiscoveryError::TooLarge)
+        );
+    }
+
+    #[test]
+    fn c4_signed_hex_is_refused_even_when_everything_else_agrees() {
+        // "+0" parses as 0 with from_str_radix; an ID of all zeros written
+        // with signs, under its own (matching) name, must still be refused.
+        let zero = DeviceId::from_bytes([0; DEVICE_ID_LEN]);
+        let t = vec![
+            ("v".to_owned(), "1".to_owned()),
+            ("id".to_owned(), "+0".repeat(DEVICE_ID_LEN)),
+            ("nonce".to_owned(), "07".repeat(16)),
+        ];
+        assert_eq!(
+            parse(&instance_name(&zero), &props(&t), 1),
+            Err(DiscoveryError::Malformed("id"))
+        );
+    }
+
+    #[test]
+    fn c4_limits_hold_exactly_at_the_boundary() {
+        let a = announcement();
+        let name = instance_name(&a.id);
+        let mut t = txt(&a);
+        // Exactly MAX_PROPS entries, a value and a key of exactly MAX_VALUE.
+        t.push(("x".repeat(MAX_VALUE), "y".repeat(MAX_VALUE)));
+        while t.len() < MAX_PROPS {
+            t.push((format!("k{}", t.len()), String::new()));
+        }
+        assert_eq!(parse(&name, &props(&t), a.port), Ok(a), "at the limits");
+        let mut over = t.clone();
+        over.push(("one".into(), "more".into()));
+        assert_eq!(
+            parse(&name, &props(&over), a.port),
+            Err(DiscoveryError::TooLarge)
+        );
+        let mut long_key = t.clone();
+        long_key[3].0.push('x');
+        assert_eq!(
+            parse(&name, &props(&long_key), a.port),
+            Err(DiscoveryError::TooLarge)
+        );
+        let mut long_val = t.clone();
+        long_val[3].1.push('y');
+        assert_eq!(
+            parse(&name, &props(&long_val), a.port),
+            Err(DiscoveryError::TooLarge)
+        );
+        // A name of exactly MAX_VALUE is read (and is then the wrong name);
+        // one more is too large.
+        let plain = txt(&a);
+        let base = props(&plain);
+        assert_eq!(
+            parse(&"n".repeat(MAX_VALUE), &base, a.port),
+            Err(DiscoveryError::NameMismatch)
+        );
+        assert_eq!(
+            parse(&"n".repeat(MAX_VALUE + 1), &base, a.port),
             Err(DiscoveryError::TooLarge)
         );
     }

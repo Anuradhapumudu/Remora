@@ -41,9 +41,71 @@ fn cu2_a_host_is_found_by_its_code_and_c5_not_after_it_withdraws() {
     );
     assert_eq!(got, a);
     assert!(addrs.contains(&ip()));
+    assert_eq!(format!("{ann:?}"), "Announcer { announcing: true, .. }");
     // C5: withdrawn means not found any more.
     ann.withdraw();
+    assert_eq!(format!("{ann:?}"), "Announcer { announcing: false, .. }");
     std::thread::sleep(Duration::from_secs(2));
     let gone = find(&id.short_code(), Duration::from_secs(3)).expect("browse");
     assert!(gone.is_none(), "still announced after withdraw: {gone:?}");
+}
+
+#[test]
+#[ignore = "needs a network that passes mDNS"]
+fn c5_dropping_the_announcer_withdraws_it() {
+    let id = DeviceId::of(&IdentityKeypair::generate(&mut OsRng).public());
+    let mut ann = Announcer::new(ip()).expect("announcer");
+    ann.announce(&Announcement {
+        id,
+        nonce: [3; 16],
+        port: 40002,
+    })
+    .expect("announce");
+    std::thread::sleep(Duration::from_secs(3));
+    assert!(
+        find(&id.short_code(), Duration::from_secs(5))
+            .expect("browse")
+            .is_some()
+    );
+    drop(ann);
+    std::thread::sleep(Duration::from_secs(2));
+    let gone = find(&id.short_code(), Duration::from_secs(3)).expect("browse");
+    assert!(gone.is_none(), "still announced after drop: {gone:?}");
+}
+
+/// C4 over the network: an answer with more TXT entries than an
+/// announcement has is ignored, even if its fields are otherwise right.
+#[test]
+#[ignore = "needs a network that passes mDNS"]
+fn c4_an_oversized_announcement_is_ignored() {
+    use remora_net::discovery::{HOST_NAME, SERVICE, instance_name, txt};
+    let id = DeviceId::of(&IdentityKeypair::generate(&mut OsRng).public());
+    let a = Announcement {
+        id,
+        nonce: [5; 16],
+        port: 40003,
+    };
+    let mut props = txt(&a);
+    for i in 0..6 {
+        props.push((format!("extra{i}"), "x".into())); // 9 entries in all
+    }
+    let props: Vec<(&str, &str)> = props
+        .iter()
+        .map(|(k, v)| (k.as_str(), v.as_str()))
+        .collect();
+    let daemon = mdns_sd::ServiceDaemon::new().expect("daemon");
+    let info = mdns_sd::ServiceInfo::new(
+        SERVICE,
+        &instance_name(&id),
+        HOST_NAME,
+        ip(),
+        a.port,
+        &props[..],
+    )
+    .expect("info");
+    daemon.register(info).expect("register");
+    std::thread::sleep(Duration::from_secs(3));
+    let got = find(&id.short_code(), Duration::from_secs(4)).expect("browse");
+    let _ = daemon.shutdown();
+    assert!(got.is_none(), "an oversized announcement was used: {got:?}");
 }
