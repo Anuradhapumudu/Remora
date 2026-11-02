@@ -55,5 +55,5 @@ fi
 echo "accept $n" > in
 sleep 4
 echo "codes match ($have): accepted $n"
-grep -E "^(SESSION ACTIVE $n|streaming|cannot|failed $n)" host.log | tail -3
+grep -E "^(SESSION ACTIVE $n|streaming|cannot|failed $n|sound|speakers)" host.log | tail -5
 EOF
