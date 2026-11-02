@@ -126,6 +126,7 @@ by hand was wrong once (roadmap D-37, 2026-10-27).
 | 2026-10-18 | rustls | 0.23.46 | RUSTSEC-2026-0346, -0347, -0348, -0349 | 2026-10-14 | 2026-10-28 | 2026-10-30 (roadmap D-42) |
 | 2026-10-21 | rustls-webpki | 0.103.16 (transitive, via rustls/quinn) | RUSTSEC-2026-0382 (distrusted emSign intermediates accepted in certificate paths). **Not reachable here:** our QUIC client accepts any certificate and never builds a path (`remora-net/src/tls.rs` `AnyCertificate`, D1); adopted anyway — the CI advisory check fails on it and staying on a flagged version is the worse habit | 2026-10-20 | 2026-11-03 | — |
 | 2026-10-25 | tokio | 1.53.3 | RUSTSEC-2026-0386 (`AsyncFd`'s safe constructors accept a file descriptor the caller does not own: an I/O-safety violation that can lead to a use-after-free). Our code never calls `AsyncFd`; whether our dependencies do was not checked — adopted either way (owner, 2026-10-25). Found when `cargo deny` failed CI on `1ceef72`. Only tokio's lock entry changed: `cargo update -p tokio` also moved four crates' `windows-sys` 0.61.2 → 0.52.0, which was not part of the fix, so the lock was edited to tokio alone and checked with `--locked` | 2026-10-13 | 2026-10-27 | 2026-10-30 (roadmap D-37) |
+| 2026-11-03 | pulldown-cmark | 0.13.6 (transitive, via Slint) | RUSTSEC-2026-0433 (quadratic parsing of nested image wikilinks with `ENABLE_WIKILINKS`). **Not reachable here:** Slint's only parser (`i-slint-common` 1.18.1 `styled_text.rs:320-322`, read 2026-11-03) enables `ENABLE_STRIKETHROUGH` alone. Adopted anyway, as with rustls-webpki. Found when `cargo deny` failed on `85e98e0` (and on the commit before it: not caused by that change). Only its lock entry changed | 2026-10-30 | 2026-11-13 | — |
 
 **Remembering the rule was not enough.** When the check first ran over the
 phase-3 branch it found five more violations that earlier steps had locked
@@ -200,7 +201,7 @@ it in (one shortest path from our crates; R8 checks that each is here):
 | `ash` | 0.38.0+1.3.281 | MIT OR Apache-2.0 | `wgpu-hal` |
 | `async-broadcast` | 0.7.2 | MIT OR Apache-2.0 | `zbus` |
 | `async-channel` | 2.5.0 | Apache-2.0 OR MIT | `accesskit_unix` |
-| `async-executor` | 1.14.0 | Apache-2.0 OR MIT | `zbus` |
+| `async-executor` | 1.13.3 (1.14.0 was yanked; 1.14.1 is < 14 days old, 2026-11-03) | Apache-2.0 OR MIT | `zbus`, `accesskit_unix` (Linux only) |
 | `async-io` | 2.6.0 | Apache-2.0 OR MIT | `zbus` |
 | `async-lock` | 3.4.2 | Apache-2.0 OR MIT | `zbus` |
 | `async-process` | 2.5.0 | Apache-2.0 OR MIT | `zbus` |
@@ -364,7 +365,7 @@ it in (one shortest path from our crates; R8 checks that each is here):
 | `potential_utf` | 0.1.6 | Unicode-3.0 | `icu_locale_fallback` |
 | `presser` | 0.3.1 | MIT OR Apache-2.0 | `gpu-allocator` |
 | `prettyplease` | 0.2.37 | MIT OR Apache-2.0 | `bindgen` |
-| `pulldown-cmark` | 0.13.5 | MIT | `i-slint-common` |
+| `pulldown-cmark` | 0.13.6 (security-fix exception, RUSTSEC-2026-0433) | MIT | `i-slint-common` |
 | `pxfm` | 0.1.30 | BSD-3-Clause OR Apache-2.0 | `moxcms` |
 | `quick-error` | 2.0.1 | MIT/Apache-2.0 | `image-webp` |
 | `quick-xml` | 0.41.0 | MIT | `wayland-scanner` |

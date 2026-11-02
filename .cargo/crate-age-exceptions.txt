@@ -7,3 +7,9 @@
 # distrusted emSign intermediates. Not reachable in Remora (our client never
 # builds certificate paths: tls.rs AnyCertificate, D1), adopted per policy.
 rustls-webpki 0.103.16 RUSTSEC-2026-0382
+
+# 2026-11-03: pulldown-cmark < 0.13.6 parses nested image wikilinks in
+# quadratic time when ENABLE_WIKILINKS is set. Not reachable in Remora: its
+# only user, Slint (i-slint-common 1.18.1 styled_text.rs:320-322), enables
+# only ENABLE_STRIKETHROUGH. Adopted per policy (cargo deny fails on it).
+pulldown-cmark 0.13.6 RUSTSEC-2026-0433
