@@ -1,7 +1,10 @@
 # Phase 4.8 (D-51): Sound — the host's audio plays on the viewer — criteria
 
-**Status: DRAFT for the owner's approval (2026-11-02).** Building starts
-only after approval, with spike S-A1.
+**Status: APPROVED by the owner, 2026-11-02**, with the recommended answer
+to every decision in §2: Q1 "Keep playing" (the host's speakers are not
+muted), Q2 + Q3 "Yes to both" (sound on by default with a mute key in the
+viewer; libopus bundled at a pinned version behind our size checks and
+fuzzing). Building starts with spike S-A1.
 
 ## 0. What exists, and what is not verified yet
 
