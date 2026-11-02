@@ -633,7 +633,7 @@ async fn session_loop(
             ViewerEvent::Active => {
                 println!("SESSION ACTIVE");
                 if audio && sound.is_none() {
-                    sound = Some(sound::Sound::start());
+                    sound = Some(sound::Sound::start(timing));
                 }
                 if let Some(host) = &verified {
                     on_active(host);

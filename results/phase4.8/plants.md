@@ -76,3 +76,4 @@ ended the session, as the input rules require.
 | ID | Planted failure | Caught by | Date |
 |---|---|---|---|
 | (4.6 input) | The old conversion `v.clamp(0, 1) * side` (1.0 -> `side`) | `crates/remora-input/src/sys/linux.rs::tests::positions_stay_on_the_picture` (left 1920.0, right 1919.0; run on the laptop, Linux-only module) | 2026-11-03 |
+| AU1/AU3 tool | The playout buffer stops counting consumed sound, so the measured age drifts (100, 110, 120 ms instead of 100) | `crates/remora-viewer/src/sound.rs::tests::the_age_follows_the_sound_through_the_buffer` | 2026-11-03 |

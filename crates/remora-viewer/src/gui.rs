@@ -373,7 +373,7 @@ async fn run(
             }
             ViewerEvent::Active => {
                 if sound.is_none() {
-                    sound = Some(crate::sound::Sound::start());
+                    sound = Some(crate::sound::Sound::start(false));
                 }
                 report(ViewerEvent::Active);
             }

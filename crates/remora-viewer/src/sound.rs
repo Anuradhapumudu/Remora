@@ -39,7 +39,21 @@ pub(crate) struct Jitter {
     pub(crate) concealed: u64,
     pub(crate) dropped: u64,
     pub(crate) underruns: u64,
+    /// Timing (`--timing`, AU1/AU3): 48 kHz frames pushed and consumed
+    /// since the start, and where each packet's sound begins with its
+    /// capture time on the host's clock (µs).
+    pushed: u64,
+    consumed: u64,
+    marks: VecDeque<(u64, u64)>,
+    /// Speaker time (viewer clock) minus capture time (host clock), µs,
+    /// one per device callback while playing; taken by the stats line.
+    pub(crate) ages: Vec<i64>,
+    /// The output device's own delay (buffer + reported latency), µs.
+    pub(crate) device_delay_us: u64,
 }
+
+/// Most timing samples kept between two stats lines.
+const MAX_AGES: usize = 4096;
 
 /// A4 (INV9): counts only, never the samples.
 impl std::fmt::Debug for Jitter {
@@ -65,18 +79,68 @@ impl Jitter {
             concealed: 0,
             dropped: 0,
             underruns: 0,
+            pushed: 0,
+            consumed: 0,
+            marks: VecDeque::new(),
+            ages: Vec::new(),
+            device_delay_us: 0,
         }
     }
 
     /// One decoded frame (interleaved stereo at 48 kHz).
+    #[cfg(test)]
     pub(crate) fn push(&mut self, pcm: &[f32]) {
-        for [l, r] in pcm.as_chunks::<CHANNELS>().0 {
+        self.push_at(pcm, None);
+    }
+
+    /// One decoded frame whose first sample was captured at `capture_us`
+    /// (host clock), when known.
+    pub(crate) fn push_at(&mut self, pcm: &[f32], capture_us: Option<u64>) {
+        if let Some(c) = capture_us {
+            self.marks.push_back((self.pushed, c));
+        }
+        let frames = pcm.as_chunks::<CHANNELS>().0;
+        for [l, r] in frames {
             self.held.push_back((*l, *r));
         }
+        self.pushed += frames.len() as u64;
         while self.held.len() > MAX_HELD {
             self.held.pop_front();
+            self.consumed += 1;
             self.dropped += 1;
         }
+    }
+
+    /// Capture time (host clock, µs) of the sound about to play.
+    fn head_capture_us(&mut self) -> Option<u64> {
+        while self.marks.len() >= 2 && self.marks[1].0 <= self.consumed {
+            self.marks.pop_front();
+        }
+        let (start, c) = *self.marks.front()?;
+        let into = self.consumed.checked_sub(start)?;
+        Some(c + into * 1_000_000 / u64::from(RATE))
+    }
+
+    /// [`Self::pull`], and with `speaker_us` (when this buffer reaches the
+    /// speaker, viewer clock) records one age for `--timing`.
+    pub(crate) fn pull_timed(
+        &mut self,
+        out: &mut [f32],
+        channels: usize,
+        muted: bool,
+        speaker_us: Option<u64>,
+    ) {
+        if !self.playing && self.held.len() >= START {
+            self.playing = true;
+        }
+        if self.playing
+            && let Some(at) = speaker_us
+            && let Some(c) = self.head_capture_us()
+            && self.ages.len() < MAX_AGES
+        {
+            self.ages.push(at as i64 - c as i64);
+        }
+        self.pull(out, channels, muted);
     }
 
     /// Fills `out` (interleaved, `channels` per frame) for the device.
@@ -123,6 +187,7 @@ impl Jitter {
         self.pos += self.step;
         while self.pos >= 1.0 && !self.held.is_empty() {
             self.held.pop_front();
+            self.consumed += 1;
             self.pos -= 1.0;
         }
         Some(v)
@@ -158,16 +223,21 @@ impl Feeder {
                 return; // older than the last played: late or reordered
             }
             if missing <= MAX_CONCEAL {
-                for _ in 0..missing {
+                for k in 0..missing {
+                    // The lost packet's sound would have been captured 20 ms
+                    // per packet before this one.
+                    let at = p
+                        .capture_ts_us
+                        .saturating_sub(u64::from(missing - k) * 20_000);
                     if let Ok(pcm) = self.decoder.conceal() {
-                        jitter.push(&pcm);
+                        jitter.push_at(&pcm, Some(at));
                         jitter.concealed += 1;
                     }
                 }
             }
         }
         if let Ok(pcm) = self.decoder.decode(&p.data) {
-            jitter.push(&pcm);
+            jitter.push_at(&pcm, Some(p.capture_ts_us));
         }
         self.next_seq = Some(p.seq.wrapping_add(1));
     }
@@ -217,11 +287,12 @@ pub(crate) struct Sound {
 impl Sound {
     /// Starts the thread on the default output device; problems with it
     /// are printed once and the session goes on without sound.
-    pub(crate) fn start() -> Self {
-        Self::start_with(Output::start)
+    /// `timing`: one `audio:` line a second on stderr (AU1/AU3).
+    pub(crate) fn start(timing: bool) -> Self {
+        Self::start_with(Output::start, timing)
     }
 
-    fn start_with(open: fn() -> anyhow::Result<Output>) -> Self {
+    fn start_with(open: fn() -> anyhow::Result<Output>, timing: bool) -> Self {
         let (tx, rx) = std::sync::mpsc::sync_channel::<AudioPacket>(QUEUE);
         let thread = std::thread::Builder::new()
             .name("remora-sound".into())
@@ -235,9 +306,22 @@ impl Sound {
                     }
                 };
                 let mut packets = 0u64;
-                while let Ok(p) = rx.recv() {
-                    packets += 1;
-                    out.play(&p);
+                let mut last_line = std::time::Instant::now();
+                loop {
+                    match rx.recv_timeout(std::time::Duration::from_millis(250)) {
+                        Ok(p) => {
+                            packets += 1;
+                            out.play(&p);
+                        }
+                        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+                        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+                    }
+                    if timing && last_line.elapsed() >= std::time::Duration::from_secs(1) {
+                        last_line = std::time::Instant::now();
+                        if let Some(line) = out.timing_line() {
+                            eprintln!("{line}");
+                        }
+                    }
                 }
                 out.counts(packets)
             })
@@ -277,6 +361,8 @@ impl Drop for Sound {
 struct Output {
     jitter: Arc<Mutex<Jitter>>,
     feeder: Feeder,
+    /// Arrival (viewer clock) minus capture (host clock), µs, per packet.
+    arrivals: Vec<i64>,
     /// Plays while held (macOS); `None` in tests.
     #[cfg(target_os = "macos")]
     _stream: Option<cpal::Stream>,
@@ -296,9 +382,22 @@ impl Output {
         let j = Arc::clone(&jitter);
         let stream = device.build_output_stream(
             config,
-            move |out: &mut [f32], _| match j.lock() {
-                Ok(mut j) => j.pull(out, channels, MUTED.load(Ordering::Relaxed)),
-                Err(_) => out.fill(0.0),
+            move |out: &mut [f32], info: &cpal::OutputCallbackInfo| {
+                // When this buffer reaches the speaker, on our clock: now
+                // plus the device's own delay (cpal 0.18.2: buffer +
+                // kAudioDevicePropertyLatency + SafetyOffset).
+                let ts = info.timestamp();
+                let delay = ts.playback.duration_since(ts.callback);
+                let delay_us = u64::try_from(delay.as_micros()).unwrap_or(u64::MAX);
+                let speaker_us =
+                    remora_app::clock::monotonic_ns().map(|n| (n / 1000).saturating_add(delay_us));
+                match j.lock() {
+                    Ok(mut j) => {
+                        j.device_delay_us = delay_us;
+                        j.pull_timed(out, channels, MUTED.load(Ordering::Relaxed), speaker_us);
+                    }
+                    Err(_) => out.fill(0.0),
+                }
             },
             |e| eprintln!("sound output: {e}"),
             None,
@@ -307,6 +406,7 @@ impl Output {
         Ok(Self {
             jitter,
             feeder: Feeder::new()?,
+            arrivals: Vec::new(),
             _stream: Some(stream),
         })
     }
@@ -318,9 +418,28 @@ impl Output {
     }
 
     fn play(&mut self, p: &AudioPacket) {
+        if self.arrivals.len() < MAX_AGES
+            && let Some(now) = remora_app::clock::monotonic_ns()
+        {
+            self.arrivals
+                .push((now / 1000) as i64 - p.capture_ts_us as i64);
+        }
         if let Ok(mut j) = self.jitter.lock() {
             self.feeder.feed(p, &mut j);
         }
+    }
+
+    /// `--timing`: the ages since the last line (times only: INV9).
+    fn timing_line(&mut self) -> Option<String> {
+        let mut j = self.jitter.lock().ok()?;
+        let ages = std::mem::take(&mut j.ages);
+        let arrivals = std::mem::take(&mut self.arrivals);
+        Some(timing_line(
+            &ages,
+            &arrivals,
+            j.device_delay_us,
+            j.held.len(),
+        ))
     }
 
     /// Counts (no sound content: INV9).
@@ -336,6 +455,35 @@ impl Output {
     }
 }
 
+/// p-th percentile (0..=1) of `v` in ms, or "-" when empty.
+fn pct_ms(v: &mut [i64], p: f64) -> String {
+    if v.is_empty() {
+        return "-".into();
+    }
+    v.sort_unstable();
+    let i = ((v.len() - 1) as f64 * p).round() as usize;
+    format!("{:.1}", v[i] as f64 / 1000.0)
+}
+
+/// One `audio:` line. `speaker` and `arrival` mix two clocks (viewer
+/// minus host), so each alone is off by the clocks' difference; the
+/// difference of the two, and the same speaker figure against the
+/// video's `presented_us - capture_us`, are exact (AU3).
+pub(crate) fn timing_line(ages: &[i64], arrivals: &[i64], device_us: u64, held: usize) -> String {
+    let (mut a, mut r) = (ages.to_vec(), arrivals.to_vec());
+    format!(
+        "audio: speaker_minus_capture_ms p50 {} p95 {} (n {}), arrival_minus_capture_ms min {} p50 {} (n {}), device_delay_ms {:.1}, held_ms {:.1}",
+        pct_ms(&mut a, 0.5),
+        pct_ms(&mut a, 0.95),
+        a.len(),
+        pct_ms(&mut r, 0.0),
+        pct_ms(&mut r, 0.5),
+        r.len(),
+        device_us as f64 / 1000.0,
+        held as f64 * 1000.0 / f64::from(RATE)
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -349,6 +497,7 @@ mod tests {
         Ok(Output {
             jitter: Arc::new(Mutex::new(Jitter::new(RATE))),
             feeder: Feeder::new()?,
+            arrivals: Vec::new(),
             #[cfg(target_os = "macos")]
             _stream: None,
         })
@@ -368,7 +517,7 @@ mod tests {
 
     #[test]
     fn the_sound_thread_decodes_what_it_is_offered() {
-        let mut s = Sound::start_with(silent_output);
+        let mut s = Sound::start_with(silent_output, false);
         for p in packets(3) {
             s.offer(p);
         }
@@ -380,7 +529,7 @@ mod tests {
 
     #[test]
     fn a_missing_device_plays_nothing_and_does_not_hang() {
-        let mut s = Sound::start_with(|| anyhow::bail!("no device"));
+        let mut s = Sound::start_with(|| anyhow::bail!("no device"), false);
         for p in packets(2) {
             s.offer(p);
         }
@@ -464,6 +613,43 @@ mod tests {
         let text = format!("{j:?}");
         assert!(!text.contains("0.123"), "samples in Debug: {text}");
         assert!(text.contains("held_frames: 960"), "{text}");
+    }
+
+    #[test]
+    fn the_age_follows_the_sound_through_the_buffer() {
+        // Two packets captured at 1.000 s and 1.020 s (host clock).
+        let mut j = Jitter::new(RATE);
+        j.push_at(&frame(0.1), Some(1_000_000));
+        j.push_at(&frame(0.1), Some(1_020_000));
+        let mut out = vec![0.0; 2 * FRAME / 2]; // 10 ms
+        // Reaches the speaker at 1.100 s (viewer clock): 100 ms old.
+        j.pull_timed(&mut out, 2, false, Some(1_100_000));
+        // Next buffer starts 10 ms into the first packet, at 1.110 s.
+        j.pull_timed(&mut out, 2, false, Some(1_110_000));
+        // Then 20 ms in: the second packet's start, at 1.120 s.
+        j.pull_timed(&mut out, 2, false, Some(1_120_000));
+        assert_eq!(j.ages, vec![100_000, 100_000, 100_000]);
+    }
+
+    #[test]
+    fn no_age_before_playing_or_without_a_capture_time() {
+        let mut j = Jitter::new(RATE);
+        j.push_at(&frame(0.1), Some(5));
+        let mut out = vec![0.0; 2 * 10];
+        j.pull_timed(&mut out, 2, false, Some(10)); // under START
+        j.push(&frame(0.1));
+        j.pull_timed(&mut out, 2, false, None);
+        assert!(j.ages.is_empty());
+    }
+
+    #[test]
+    fn the_timing_line_is_numbers_only() {
+        let line = timing_line(&[30_000, 10_000, 20_000], &[5_000], 12_500, 1920);
+        assert_eq!(
+            line,
+            "audio: speaker_minus_capture_ms p50 20.0 p95 30.0 (n 3), arrival_minus_capture_ms min 5.0 p50 5.0 (n 1), device_delay_ms 12.5, held_ms 40.0"
+        );
+        assert!(timing_line(&[], &[], 0, 0).contains("p50 - p95 -"));
     }
 
     #[test]
