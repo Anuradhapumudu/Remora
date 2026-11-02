@@ -9,6 +9,8 @@
 //! * [`cli`] — formatting and parsing shared by the two command-line apps.
 //! * [`clock`] — the monotonic clock both apps stamp latency with (P0).
 //! * [`prompts`] — short prompt numbers and the commands typed at the host.
+//! * [`devices`] — remembered devices: the viewer's saved computers and
+//!   the host's known viewers (phase4.7-criteria C6).
 //! * [`token_file`] — the desktop portal's saved permission (Linux), in an
 //!   owner-only file.
 //! * [`decide`] — the GUI's decisions (dialogs, indicator, viewer
@@ -19,6 +21,7 @@
 pub mod cli;
 pub mod clock;
 pub mod decide;
+pub mod devices;
 pub mod keystore;
 pub mod prompts;
 mod sys;
