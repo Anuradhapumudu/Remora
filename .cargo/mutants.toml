@@ -39,6 +39,9 @@ examine_globs = [
     "crates/remora-app/src/decide/**/*.rs",
     # Remote input: INV10 release, key allowlist, flood limits (phase4.6 L2-L4).
     "crates/remora-input/src/guard.rs",
+    # Host side of remote control: input only while Active, release on every
+    # session end (phase4.6 L1, L2).
+    "crates/remora-host/src/control.rs",
 ]
 
 # Test-only modules inside src/ (they ARE the tests; mutating them is noise).

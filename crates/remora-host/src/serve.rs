@@ -11,17 +11,18 @@
 //! `note:` line saying why (F-UX3).
 //!
 //! Remote input is NOT echoed: a keystroke could be someone typing a
-//! password; Phase 3 has no injector, so the CLI only counts events.
+//! password. Where this OS has an injector (Linux, phase 4.6) input goes
+//! through one guard per Active session (`control.rs`); elsewhere the CLI
+//! only says that input is arriving.
 //!
 //! Phase 4: once a viewer is accepted the host streams `--source` (the
 //! screen by default on macOS; architecture D42) and prints `streaming:`,
 //! `capture paused/resumed/stopped` and `streaming stopped` lines.
 
-use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, bail};
 use remora_app::cli::{
@@ -181,10 +182,15 @@ async fn serve(args: ServeArgs) -> anyhow::Result<()> {
         addr,
         public,
         book: SessionBook::new(),
-        inputs: HashMap::new(),
+        control: crate::control::Control::new(injector()),
         rotated: false,
         video: Video::new(args.source, args.width, args.timing, Arc::clone(&ui_server)),
     };
+    if ui.control.can_control() {
+        println!("control: an accepted viewer can use this computer's mouse and keyboard");
+    } else {
+        println!("control: view only (no remote control on this system yet)");
+    }
     ui.print_code(false);
 
     let mut stdin = stdin_lines();
@@ -257,7 +263,8 @@ struct Ui {
     addr: SocketAddr,
     public: IdentityPublic,
     book: SessionBook<Entry>,
-    inputs: HashMap<SessionId, u64>,
+    /// Remote control: one input guard per Active session.
+    control: crate::control::Control<Injector>,
     /// The password last printed, to explain a change (F-UX3).
     shown_password: Otp,
     /// The host replaced the password after failed attempts since it was
@@ -301,6 +308,8 @@ impl Ui {
     }
 
     fn handle_event(&mut self, ev: HostEvent) {
+        let outcome = self.control.on_event(&ev, Instant::now());
+        self.control_outcome(outcome);
         match ev {
             HostEvent::Prompt {
                 id,
@@ -343,16 +352,8 @@ impl Ui {
                 );
                 self.video.active.insert(id);
             }
-            HostEvent::Deliver { id, .. } => {
-                let count = self.inputs.entry(id).or_default();
-                *count += 1;
-                if *count == 1 {
-                    match self.number_of(id) {
-                        Some(n) => println!("input {n}: receiving input events (not shown)"),
-                        None => println!("input: receiving input events (not shown)"),
-                    }
-                }
-            }
+            // Applied (or not) by `control` above.
+            HostEvent::Deliver { .. } => {}
             HostEvent::Failed { id, reason, .. } => {
                 match self.number_of(id) {
                     Some(n) => println!("failed {n}: {reason}"),
@@ -376,7 +377,6 @@ impl Ui {
             // session) or capture resumed.
             HostEvent::ForceKeyframe => self.video.force_keyframe(),
             HostEvent::Closed { id, code } => {
-                self.inputs.remove(&id);
                 self.video.ended(id);
                 if let Some(n) = self.number_of(id) {
                     self.book.remove(n);
@@ -386,7 +386,6 @@ impl Ui {
             // Walkthrough 2026-10-21: a dead connection used to be printed
             // as "session ended (Normal)".
             HostEvent::Lost { id } => {
-                self.inputs.remove(&id);
                 self.video.ended(id);
                 if let Some(n) = self.number_of(id) {
                     self.book.remove(n);
@@ -395,6 +394,36 @@ impl Ui {
                         IDLE_TIMEOUT.as_secs()
                     );
                 }
+            }
+        }
+    }
+
+    /// Prints what remote control did; ends a session the guard refused.
+    fn control_outcome(&mut self, outcome: crate::control::Outcome) {
+        use crate::control::Outcome;
+        let n = |ui: &Self, id| ui.number_of(id).map_or(String::new(), |n| format!(" {n}"));
+        match outcome {
+            Outcome::None => {}
+            // What was typed is never shown (INV9): it could be a password.
+            Outcome::FirstInput(id) => {
+                println!(
+                    "input{}: the viewer is controlling this computer (input not shown)",
+                    n(self, id)
+                )
+            }
+            Outcome::NoInjector(id) => println!(
+                "input{}: receiving input events (not applied: no remote control on this system yet)",
+                n(self, id)
+            ),
+            Outcome::ConnectFailed(id, e) => {
+                println!(
+                    "control{}: remote control unavailable, view only ({e})",
+                    n(self, id)
+                )
+            }
+            Outcome::End(id, why) => {
+                println!("input refused{}: {why} - ending the session", n(self, id));
+                self.server.disconnect(id);
             }
         }
     }
@@ -635,6 +664,15 @@ impl crate::stream::VideoOut for Out {
         }
         self.server.capture_changed(status);
     }
+}
+
+/// The OS input injector behind the guard.
+type Injector = Box<dyn remora_input::guard::Backend + Send>;
+
+/// How this OS opens its injector for a session; `None` where there is
+/// none yet (macOS: Phase 6).
+fn injector() -> Option<crate::control::Connect<Injector>> {
+    None
 }
 
 /// Lines typed on stdin, read on a plain thread (stdin is blocking).

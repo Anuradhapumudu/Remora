@@ -175,3 +175,19 @@ impl<B: Backend> Drop for Guard<B> {
         self.release_all();
     }
 }
+
+/// So a host can pick its backend at run time (`Guard<Box<dyn Backend>>`).
+impl<B: Backend + ?Sized> Backend for Box<B> {
+    fn move_to(&mut self, x: f32, y: f32) -> Result<(), BackendError> {
+        (**self).move_to(x, y)
+    }
+    fn button(&mut self, button: u32, down: bool) -> Result<(), BackendError> {
+        (**self).button(button, down)
+    }
+    fn key(&mut self, usb_hid_usage: u32, down: bool) -> Result<(), BackendError> {
+        (**self).key(usb_hid_usage, down)
+    }
+    fn scroll(&mut self, dx: f32, dy: f32, precise: bool) -> Result<(), BackendError> {
+        (**self).scroll(dx, dy, precise)
+    }
+}

@@ -11,6 +11,7 @@ use clap::{Parser, Subcommand};
 
 #[cfg(target_os = "macos")]
 mod bench;
+mod control;
 mod serve;
 #[cfg(target_os = "macos")]
 mod stream;

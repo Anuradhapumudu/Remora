@@ -38,3 +38,19 @@ hangs instead of failing is slower evidence, noted here, not fixed in 4.6.
 
 Clean run after removing the plants: 1.45 M runs in 60 s, no finding.
 Corpus minimised (`cargo fuzz cmin`, max length 512): 545 inputs, 69 KB.
+
+## Host remote control (`crates/remora-host/src/control.rs`), 2026-11-02
+
+| Row | Plant (the real failure) | Caught by |
+|---|---|---|
+| L1 | Input for a session that is not Active opens an injector on demand and is applied ("deliver in Pending") | `control.rs::l1_input_reaches_the_os_only_while_active` |
+| L2 | `Lost` (viewer crash, network gone, idle timeout) drops nothing: held keys stay pressed | `control.rs::l2_every_end_path_releases_held_keys` (names the end path) |
+| L4 | A refused flood ends the session but releases only when the close comes back | `control.rs::l4_a_flood_ends_the_session_and_releases` |
+
+The first plants also showed a test flaw: the fake injector panicked again
+on a poisoned lock while a failed assertion unwound (the guard's `Drop`
+runs then), which aborts the whole test binary. Fixed before recording.
+
+Mutation testing: 7 caught, 1 **missed** (`can_control` → `false`: no test
+had an injector configured and checked it); test added; rerun 8 caught,
+0 missed, 1 unviable.

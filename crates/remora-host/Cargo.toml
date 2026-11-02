@@ -16,6 +16,8 @@ remora-crypto = { workspace = true }
 remora-net = { workspace = true }
 remora-proto = { workspace = true }
 remora-session = { workspace = true }
+# Remote control: the input guard (phase4.6 L2-L4) and, per OS, the injector.
+remora-input = { workspace = true }
 anyhow = { workspace = true }
 clap = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync", "time"] }
@@ -24,8 +26,6 @@ tracing-subscriber = { workspace = true }
 [target.'cfg(target_os = "macos")'.dependencies]
 # The Phase 4.5 GUI: the screens (remora-ui, D45) and Slint's runtime API.
 remora-ui = { workspace = true }
-# I3: the session indicator on every Space (architecture D46).
-remora-input = { workspace = true }
 slint = { workspace = true }
 remora-capture = { workspace = true }
 remora-codec = { workspace = true }
