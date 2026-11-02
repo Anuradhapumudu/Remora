@@ -1,0 +1,22 @@
+== S-C1: mDNS discovery with mdns-sd 0.21.6 (2026-11-02)
+
+Library (read): src/lib.rs:157 `#![forbid(unsafe_code)]`; runtime deps
+fastrand, flume, if-addrs, mio, socket-pktinfo, socket2 (+ libc, lock_api,
+log, scopeguard, spin, windows-*). MIT OR Apache-2.0. 0.21.6 released
+2026-10-19 (passes the 14-day rule on 2026-11-02; 0.21.7 is newer).
+
+Announced: `_remora._udp.local.`, instance = the device code, host name a
+fixed "remora-host.local." (the computer's name is never announced),
+TXT {code, nonce (32 hex), v=1}, port.
+
+Mac only (announcer and finder on the M4, Wi-Fi interface 192.168.8.102):
+  started together:            found after 7.03 s (announcer still probing)
+  announcer running 3 s first: found after 0.09 s, 1.05 s, 1.06 s
+  -> CU2 (<= 2 s) met when the host is already announcing, which is the
+     real case; the 1 s ones are mDNS's once-per-second answer limit.
+  macOS showed no Local Network prompt (run from Terminal, which already
+  has the permission; the bundled app will be asked once - to check).
+
+NOT DONE YET: Mac <-> Fedora laptop across the home Wi-Fi (router
+multicast, firewalld on 5353). The SSH connection to the laptop was down;
+to run when it is back.
