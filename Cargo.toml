@@ -71,6 +71,11 @@ rustix = { version = "1.1.5", default-features = false, features = ["std", "time
 # The portal session's Closed signal is a Stream (already in the graph).
 futures-util = { version = "0.3.34", default-features = false }
 
+# Home-network discovery (phase4.7-criteria, spike S-C1): mDNS announce and
+# browse. The crate forbids unsafe code itself (src/lib.rs:157). 0.21.6:
+# newest release at least 14 days old on 2026-11-02.
+mdns-sd = { version = "0.21.6", default-features = false }
+
 # protocol
 base64 = "0.23.1"
 prost = "0.14.4"

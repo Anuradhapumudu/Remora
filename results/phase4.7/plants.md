@@ -18,3 +18,5 @@ approval gate lives in `remora-session` (`Host::approve`, mutation-tested
 since Phase 3); C3 is re-checked by the session crate's mutation run at
 the end of this phase, and a plant inside the session layer is to do.
 | C2 | The host remembers every viewer it accepts (auto-remember) | `crates/remora-host/src/serve.rs::c2_tests::c2_accepting_never_remembers_only_the_remember_command_does` ("accepting alone remembered the viewer") | 2026-11-02 |
+| C4 | An answer whose instance name is not its own ID's code is accepted (name check removed) | `crates/remora-net/src/discovery.rs::tests::c4_a_name_that_is_not_the_ids_code_is_refused` | 2026-11-02 |
+| C5 | `withdraw` does nothing: the host stays findable after it stops being ready | `crates/remora-net/tests/cu2_discovery.rs::cu2_a_host_is_found_by_its_code_and_c5_not_after_it_withdraws` ("still announced after withdraw"; real mDNS on the Mac, ignored in CI) | 2026-11-02 |

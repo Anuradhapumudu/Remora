@@ -11,6 +11,7 @@ publish.workspace = true
 license = "MIT OR Apache-2.0"
 
 [dependencies]
+mdns-sd = { workspace = true }
 remora-crypto = { workspace = true }
 remora-proto = { workspace = true }
 remora-session = { workspace = true }

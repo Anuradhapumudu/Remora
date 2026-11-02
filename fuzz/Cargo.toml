@@ -18,6 +18,7 @@ remora-session = { path = "../crates/remora-session" }
 remora-codec = { path = "../crates/remora-codec" }
 remora-input = { path = "../crates/remora-input" }
 remora-app = { path = "../crates/remora-app" }
+remora-net = { path = "../crates/remora-net" }
 # Encodes the built Input messages (already locked via remora-proto).
 prost = "0.14.4"
 rand_core = { version = "0.6", features = ["getrandom"] }
@@ -119,6 +120,13 @@ bench = false
 [[bin]]
 name = "device_list"
 path = "fuzz_targets/device_list.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "mdns_record"
+path = "fuzz_targets/mdns_record.rs"
 test = false
 doc = false
 bench = false
