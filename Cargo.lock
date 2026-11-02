@@ -4372,6 +4372,7 @@ dependencies = [
  "objc2 0.6.4",
  "objc2-app-kit 0.3.2",
  "raw-window-handle",
+ "remora-proto",
  "thiserror 2.0.21",
  "winit",
 ]
@@ -4445,6 +4446,7 @@ dependencies = [
  "clap",
  "i-slint-backend-testing",
  "pollster",
+ "prost",
  "rand_core 0.6.4",
  "remora-app",
  "remora-codec",

@@ -11,6 +11,7 @@ publish.workspace = true
 license = "MIT OR Apache-2.0"
 
 [dependencies]
+remora-proto = { workspace = true }
 raw-window-handle = { workspace = true }
 thiserror = { workspace = true }
 
