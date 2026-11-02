@@ -176,6 +176,8 @@ struct App {
     video: VideoWindow,
     close: Option<CloseRequest>,
     exit_code: Option<u8>,
+    /// Signalled when the session thread has finished (Cmd+Q waits for it).
+    done: std::sync::mpsc::Receiver<()>,
 }
 
 /// A presented frame: CPU time for acquire + draw + present, and with
@@ -199,13 +201,18 @@ pub(crate) fn run(
     let event_loop = EventLoop::<Event>::with_user_event().build()?;
     let proxy = event_loop.create_proxy();
     let (close_tx, close_rx) = tokio::sync::oneshot::channel();
+    let (done_tx, done) = std::sync::mpsc::channel();
     let thread = std::thread::Builder::new()
         .name("remora-session".into())
-        .spawn(move || session(proxy, close_rx))?;
+        .spawn(move || {
+            session(proxy, close_rx);
+            let _ = done_tx.send(());
+        })?;
     let mut app = App {
         video: VideoWindow::new(timing),
         close: Some(close_tx),
         exit_code: None,
+        done,
     };
     event_loop.run_app(&mut app)?;
     let _ = thread.join();
@@ -557,6 +564,21 @@ impl VideoWindow {
 
 impl ApplicationHandler<Event> for App {
     fn resumed(&mut self, _el: &ActiveEventLoop) {}
+
+    /// Also on Cmd+Q, after which macOS ends the process: say goodbye
+    /// first (see `quit.rs`). After a normal end the thread is already done.
+    fn exiting(&mut self, _el: &ActiveEventLoop) {
+        let close = self.close.take();
+        crate::quit::goodbye(
+            || {
+                if let Some(c) = close {
+                    let _ = c.send(());
+                }
+            },
+            &self.done,
+            crate::quit::QUIT_WAIT,
+        );
+    }
 
     /// While paused, wake once a second to update the title's countdown.
     fn about_to_wait(&mut self, el: &ActiveEventLoop) {

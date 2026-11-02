@@ -20,6 +20,8 @@ mod gui;
 mod input;
 #[cfg(target_os = "macos")]
 mod keymap;
+#[cfg(target_os = "macos")]
+mod quit;
 mod sound;
 #[cfg(target_os = "macos")]
 mod window;

@@ -60,6 +60,9 @@ pub(crate) struct ViewerGui {
     client: Option<ViewerClient>,
     options: Options,
     started: Instant,
+    /// Signalled when the current session thread has finished (Cmd+Q
+    /// waits for it, see `quit.rs`).
+    done: Option<std::sync::mpsc::Receiver<()>>,
 }
 
 thread_local! {
@@ -133,6 +136,7 @@ impl ViewerGui {
             client: None,
             options,
             started: Instant::now(),
+            done: None,
         }));
         GUI.with(|g| *g.borrow_mut() = Some(Rc::clone(&gui)));
         gui.borrow().refresh();
@@ -201,9 +205,14 @@ impl ViewerGui {
         });
         self.desk.connecting();
         let options = self.options.clone();
+        let (done_tx, done) = std::sync::mpsc::channel();
+        self.done = Some(done);
         let started = std::thread::Builder::new()
             .name("remora-session".into())
-            .spawn(move || session(target, otp, options));
+            .spawn(move || {
+                session(target, otp, options);
+                let _ = done_tx.send(());
+            });
         if let Err(e) = started {
             self.desk.error(&e.to_string());
         }
@@ -392,6 +401,28 @@ async fn run(
 struct Hook;
 
 impl slint::winit_030::CustomApplicationHandler for Hook {
+    /// Also on Cmd+Q, after which macOS ends the process: say goodbye
+    /// first (see `quit.rs`).
+    fn exiting(&mut self, _el: &ActiveEventLoop) -> slint::winit_030::EventResult {
+        let parts = GUI.with(|g| {
+            let g = g.borrow().as_ref().map(Rc::clone)?;
+            let mut g = g.try_borrow_mut().ok()?;
+            Some((g.client.take(), g.done.take()))
+        });
+        if let Some((client, Some(done))) = parts {
+            crate::quit::goodbye(
+                || {
+                    if let Some(c) = client {
+                        c.disconnect();
+                    }
+                },
+                &done,
+                crate::quit::QUIT_WAIT,
+            );
+        }
+        slint::winit_030::EventResult::Propagate
+    }
+
     fn window_event(
         &mut self,
         _el: &ActiveEventLoop,
