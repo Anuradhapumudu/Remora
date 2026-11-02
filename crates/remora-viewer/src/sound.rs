@@ -23,6 +23,14 @@ use remora_proto::audio::AudioPacket;
 pub(crate) const START: usize = 2 * FRAME; // 40 ms
 /// Most sound held; older is dropped (bounds the delay: AU1).
 pub(crate) const MAX_HELD: usize = 6 * FRAME; // 120 ms
+/// Sound held for a whole second above this makes playback catch up
+/// (live, 2026-11-03: the buffer filled to ~110 ms while the earbuds
+/// started and never drained, since sound arrives as fast as it plays).
+pub(crate) const TARGET: usize = 3 * FRAME; // 60 ms
+/// Catching up plays this much faster (1 %: ~17 cents, not heard as a
+/// pitch change); it stops once the buffer is back at [`START`].
+pub(crate) const CATCH_UP: f64 = 1.01;
+
 /// Most packets concealed for one gap; a longer gap restarts cleanly.
 pub(crate) const MAX_CONCEAL: u32 = 5;
 
@@ -50,6 +58,15 @@ pub(crate) struct Jitter {
     pub(crate) ages: Vec<i64>,
     /// The output device's own delay (buffer + reported latency), µs.
     pub(crate) device_delay_us: u64,
+    /// Catch-up: the device's rate, the least held in the current
+    /// one-second window, output frames counted in it, and whether
+    /// playback is running fast.
+    device_rate: u32,
+    window_min: usize,
+    window_frames: u64,
+    catching_up: bool,
+    /// Times catch-up started (stats).
+    pub(crate) catch_ups: u64,
 }
 
 /// Most timing samples kept between two stats lines.
@@ -84,6 +101,11 @@ impl Jitter {
             marks: VecDeque::new(),
             ages: Vec::new(),
             device_delay_us: 0,
+            device_rate: device_rate.max(1),
+            window_min: usize::MAX,
+            window_frames: 0,
+            catching_up: false,
+            catch_ups: 0,
         }
     }
 
@@ -151,6 +173,9 @@ impl Jitter {
         if !self.playing && self.held.len() >= START {
             self.playing = true;
         }
+        if self.playing {
+            self.watch_level((out.len() / channels) as u64);
+        }
         for frame in out.chunks_mut(channels) {
             let (l, r) = if self.playing {
                 match self.next() {
@@ -178,13 +203,36 @@ impl Jitter {
         }
     }
 
+    /// Starts catching up when a whole second never went down to
+    /// [`TARGET`]; stops at [`START`].
+    fn watch_level(&mut self, frames: u64) {
+        let held = self.held.len();
+        self.window_min = self.window_min.min(held);
+        self.window_frames += frames;
+        if self.window_frames >= u64::from(self.device_rate) {
+            if self.window_min > TARGET && !self.catching_up {
+                self.catching_up = true;
+                self.catch_ups += 1;
+            }
+            self.window_min = usize::MAX;
+            self.window_frames = 0;
+        }
+        if self.catching_up && held <= START {
+            self.catching_up = false;
+        }
+    }
+
     /// The next device sample, interpolated between 48 kHz samples.
     fn next(&mut self) -> Option<(f32, f32)> {
         let a = *self.held.front()?;
         let b = self.held.get(1).copied().unwrap_or(a);
         let t = self.pos as f32;
         let v = (a.0 + (b.0 - a.0) * t, a.1 + (b.1 - a.1) * t);
-        self.pos += self.step;
+        self.pos += if self.catching_up {
+            self.step * CATCH_UP
+        } else {
+            self.step
+        };
         while self.pos >= 1.0 && !self.held.is_empty() {
             self.held.pop_front();
             self.consumed += 1;
@@ -650,6 +698,37 @@ mod tests {
             "audio: speaker_minus_capture_ms p50 20.0 p95 30.0 (n 3), arrival_minus_capture_ms min 5.0 p50 5.0 (n 1), device_delay_ms 12.5, held_ms 40.0"
         );
         assert!(timing_line(&[], &[], 0, 0).contains("p50 - p95 -"));
+    }
+
+    /// A steady stream (one packet per 20 ms of playback) starting with
+    /// `start` packets held; returns the sound held after `secs`.
+    fn steady(start: usize, secs: usize) -> (usize, Jitter) {
+        let mut j = Jitter::new(RATE);
+        for _ in 0..start {
+            j.push(&frame(0.1));
+        }
+        let mut out = vec![0.0; 2 * FRAME];
+        for _ in 0..secs * 50 {
+            j.push(&frame(0.1));
+            j.pull(&mut out, 2, false);
+        }
+        (j.held(), j)
+    }
+
+    #[test]
+    fn a_full_buffer_drains_back_to_start() {
+        // Live: ~110 ms held for the whole session. Within 10 s of steady
+        // sound it is back near START (+ one packet in flight).
+        let (held, j) = steady(5, 10);
+        assert!(held <= START + FRAME, "still holding {held} frames");
+        assert_eq!(j.catch_ups, 1);
+    }
+
+    #[test]
+    fn a_normal_buffer_never_speeds_up() {
+        let (held, j) = steady(2, 10);
+        assert_eq!(j.catch_ups, 0, "sped up at the normal level");
+        assert!(held <= TARGET, "{held}");
     }
 
     #[test]
