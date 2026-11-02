@@ -1045,19 +1045,31 @@ mod c2_tests {
     use super::*;
 
     async fn ui(dir: &std::path::Path) -> Ui {
+        ui_with_events(dir).await.0
+    }
+
+    pub(super) async fn ui_with_events_for_c3(
+        dir: &std::path::Path,
+    ) -> (Ui, tokio::sync::mpsc::UnboundedReceiver<HostEvent>) {
+        ui_with_events(dir).await
+    }
+
+    async fn ui_with_events(
+        dir: &std::path::Path,
+    ) -> (Ui, tokio::sync::mpsc::UnboundedReceiver<HostEvent>) {
         let keys = remora_crypto::identity::DeviceKeys::generate(&mut rand_core::OsRng);
         let identity = Identity {
             cert: keys.cert("host", 0).expect("short name"),
             noise: keys.noise,
         };
-        let (server, _events) = HostServer::bind(
+        let (server, events) = HostServer::bind(
             "127.0.0.1:0".parse().expect("addr"),
             host_config(identity, vec![]),
         )
         .await
         .expect("bind");
         let server = Arc::new(server);
-        Ui {
+        let ui = Ui {
             shown_password: server.otp(),
             addr: server.local_addr().expect("addr"),
             public: keys.identity.public(),
@@ -1070,7 +1082,8 @@ mod c2_tests {
             known: DeviceList::new(),
             known_path: dir.join("known-viewers"),
             announcer: None,
-        }
+        };
+        (ui, events)
     }
 
     fn prompt(id: u64, key: IdentityPublic) -> HostEvent {
@@ -1113,6 +1126,58 @@ mod c2_tests {
         ui.handle_command(&format!("forget {code}"));
         assert!(ui.known.is_empty());
         assert!(DeviceList::load(&ui.known_path).expect("saved").is_empty());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+}
+
+/// phase4.7-criteria C3 through the real host app: a remembered viewer,
+/// connecting for real in trusted mode, is prompted and never Active
+/// until the person types `accept`.
+#[cfg(test)]
+mod c3_tests {
+    use std::time::Duration;
+
+    use remora_crypto::identity::DeviceKeys;
+    use remora_session::{ViewerConfig, ViewerMode};
+
+    use super::c2_tests::ui_with_events_for_c3 as ui_with_events;
+    use super::*;
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn c3_a_remembered_viewer_waits_for_accept_in_the_host_app() {
+        let dir = std::env::temp_dir().join(format!("remora-c3-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let (mut ui, mut events) = ui_with_events(&dir).await;
+        let viewer = DeviceKeys::generate(&mut rand_core::OsRng);
+        let viewer_key = viewer.identity.public();
+        ui.known
+            .remember(remora_app::devices::Device {
+                key: viewer_key,
+                name: "viewer".into(),
+                addr: None,
+            })
+            .expect("remember");
+        ui.server.set_trusted(trusted_keys(&ui.flagged, &ui.known));
+        let config = ViewerConfig {
+            identity: Arc::new(Identity {
+                cert: viewer.cert("viewer", 0).expect("name"),
+                noise: viewer.noise,
+            }),
+            mode: ViewerMode::Trusted { pinned: ui.public },
+        };
+        let nonce = ui.server.issue_nonce(CODE_TTL);
+        let (_client, _viewer_events) = remora_net::connect(ui.addr, config, nonce)
+            .await
+            .expect("connect");
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(4);
+        let (mut prompted, mut active) = (false, false);
+        while let Ok(Some(ev)) = tokio::time::timeout_at(deadline, events.recv()).await {
+            prompted |= matches!(ev, HostEvent::Prompt { .. });
+            active |= matches!(ev, HostEvent::Active { .. });
+            ui.handle_event(ev);
+        }
+        assert!(prompted, "a remembered viewer is still prompted");
+        assert!(!active, "Active without anyone typing accept");
         let _ = std::fs::remove_dir_all(dir);
     }
 }
