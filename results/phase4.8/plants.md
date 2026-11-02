@@ -141,3 +141,10 @@ Left, with reasons: `Output::start` (opens the real device: live test
 only), the 1 s timer of the `audio:` line and `Drop for Sound` (both
 change only stderr lines; the thread ends when its sender drops either
 way).
+
+Rerun after 943a884: 171 mutants, **154 caught, 7 missed**, 8
+unviable, 2 timeouts. The 7: the resync window's `<` vs `<=` at exactly
+500 ms (one sample frame of difference: equivalent for anything
+audible), the `audio:` line's timer (×2) and `Drop for Sound` (stderr
+only), `Output::start` on macOS (×2: the real device, live test) and its
+non-macOS stub (not compiled on the Mac).
