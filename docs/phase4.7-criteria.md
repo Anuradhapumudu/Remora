@@ -156,3 +156,79 @@ address, not a credential" (`remora_crypto::identity::ShortCode`).
   a password (or a remembered key) and the host's Accept.
 - With nobody at the host, approving still needs the developer script
   (Q1) until a real remote-approval design exists.
+
+## 8. Report (2026-11-02)
+
+**Result:** on the owner's home Wi-Fi the Mac connects to the Fedora
+laptop by its short device code alone, saves it, and reconnects with no
+password while the laptop still asks for approval. All in the terminal
+apps; the one-app GUI moved to D-55 (§6b). Commits b2f615f … fce32c5.
+Plants: `results/phase4.7/plants.md`; numbers:
+`results/phase4.7/measurements.md`; spike:
+`spikes/connect-mdns/results/sc1-20261102.txt`.
+
+### Security requirements
+
+| ID | Status | Evidence |
+|---|---|---|
+| C1 | **Met** | `crates/remora-viewer/src/main.rs::c1_tests::c1_saved_computers_are_pinned_and_a_changed_identity_is_refused` (another key, or another ID with the same short code, is a hard stop; plant "always same" caught). The handshake also pins the saved key (trusted mode) |
+| C2 | **Met** | `crates/remora-host/src/serve.rs::c2_tests::c2_accepting_never_remembers_only_the_remember_command_does` (plant auto-remember caught) |
+| C3 | **Met** | `crates/remora-host/src/serve.rs::c3_tests::c3_a_remembered_viewer_waits_for_accept_in_the_host_app` (real viewer, real host app; plant auto-approve caught); `crates/remora-net/tests/c3_c7_known_viewers.rs`; live: prompt 3 on the laptop for the saved Mac viewer |
+| C4 | **Met** | `crates/remora-net/src/discovery.rs` tests (limits at both sides of each boundary, signed hex, name ≠ ID's code); fuzz target `mdns_record`; real-network test that an oversized announcement is ignored; plant (name check removed) caught |
+| C5 | **Met** | `crates/remora-net/tests/cu2_discovery.rs` (withdraw and drop make the host unfindable; plant no-op withdraw caught); `dns-sd`: seen while ready, not during a session, seen after |
+| C6 | **Met** | `crates/remora-app/src/devices.rs` tests (0600 file, 0700 folder, refused when others can read, limits, exact boundaries); fuzz target `device_list`; three plants caught |
+| C7 | **Met** | `crates/remora-net/tests/c3_c7_known_viewers.rs::c7_a_forgotten_viewer_is_refused_in_trusted_mode_at_once`; `crates/remora-session/tests/flow.rs::c7_set_trusted_remembers_and_forgets_for_the_next_connection` (plants caught) |
+| C8 | **Met** | `crates/remora-viewer/src/main.rs::c8_tests::c8_saved_names_are_shown_escaped`, `crates/remora-host/src/serve.rs::c8_tests::c8_known_viewer_names_are_shown_escaped` (raw-name plants showed a forged second line; caught) |
+
+### Targets
+
+| ID | Result |
+|---|---|
+| CU1 | **Met in the terminal**: `connect --device <code>` reconnects a saved computer with no password; the host approves (live). "One click" is D-55's GUI |
+| CU2 | **Met**: laptop found from the Mac in 0.07–1.1 s (spike), 1.09 s (test). A host that has just started is silent for a few seconds; the viewer looks for 8 s |
+| CU3 | **Met**: `dns-sd` sees nothing from a host while its session is Active |
+
+### Mutation testing (focused runs)
+
+`devices.rs`: first 47 caught / **12 missed** (real gaps; tests added),
+then **56 caught / 0 missed**. `discovery.rs`: first 40 caught / **13
+missed** (boundaries, a masked sign test, the network side; tests added;
+`is_announcing` removed as unused), rerun **51 caught / 0 missed** (5 unviable; real-network tests included, one at a time).
+`set_trusted`: session 1/1, net 1/1 caught.
+
+### Found while building
+
+- Re-registering the announcement after every connection attempt made the
+  host silent for seconds while mDNS checked its name again: it is now
+  updated in place (mdns-sd's own docs).
+- Closing the viewer with Ctrl-C left the host "busy" for 30 s, so it did
+  not announce itself: Ctrl-C now says goodbye.
+- An integer parser accepting `+` signs (Rust's `from_str_radix`) meant our
+  hex pre-checks were the only defence: now tested everywhere we parse hex.
+- The first C3 plant (in remora-net) deadlocked instead of failing and did
+  not count; the host-app plant replaced it.
+
+### Manual steps (as the owner ran them)
+
+1. Laptop: `remora-host serve --bind <ip>:0` (prints `announce: …`).
+2. Mac: `remora-viewer connect --device "7266 055 4675-2" --save`, type
+   the password, compare safety codes; at the host `accept <n>`, then
+   `remember <n>`.
+3. Ctrl-C the viewer. Then `remora-viewer connect --device "7266 055
+   4675-2"`: no password asked; compare codes; `accept <n>` at the host.
+4. `remora-viewer saved` / `forget <code>`; host `known` / `forget <code>`.
+
+### Known limitations
+
+- Home network only; across the internet the short code needs Phase 8.
+- Someone on the same Wi-Fi can see that a Remora host is ready and its
+  device code (never its name).
+- Approving with nobody at the host still uses the developer script (Q1).
+- The one Mac app, with buttons for all of this, is D-55.
+
+### Deferred items, row by row
+
+- **D-52** (Connect simply): delivered as above in the terminal apps;
+  closes when the owner accepts this phase.
+- **D-55** (one Mac app): new, after sound.
+- **D-51** sound: next (Phase 4.8). D-53, D-54 unchanged.

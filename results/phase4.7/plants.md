@@ -38,6 +38,9 @@ test drives that app with a real remembered viewer.
 | `crates/remora-app/src/devices.rs`, first run | 47 | **12** | 4 |
 | same, after the tests below | 56 | **0** | 4 |
 | `crates/remora-net/src/host.rs` `set_trusted` | 1 | 0 | 0 |
+| `crates/remora-net/src/discovery.rs`, first run (with the real-network tests) | 40 | **13** | 5 |
+| same, after the tests in fce32c5 | 51 | **0** | 5 |
+| `crates/remora-session/src/host.rs` `set_trusted` | 1 | 0 | 0 |
 
 The 12 first misses were real gaps: boundaries (a name of exactly 64
 bytes, a file of exactly MAX_FILE bytes), counts that no test read
