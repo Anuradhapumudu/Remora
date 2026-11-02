@@ -13,7 +13,7 @@ use clap::{Parser, Subcommand};
 mod bench;
 mod control;
 mod serve;
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 mod stream;
 // Used by the macOS benchmark; pure Rust, so their tests run on every platform.
 #[cfg(target_os = "macos")]
@@ -44,6 +44,10 @@ enum Command {
         #[arg(long)]
         identity_file: Option<std::path::PathBuf>,
     },
+    /// Linux: delete the saved screen-sharing / remote-control permission,
+    /// so the next session asks at this computer again.
+    #[cfg(target_os = "linux")]
+    ForgetPermission,
     /// Phase 2: capture the screen, hardware-encode to .h264, print measured stats.
     #[cfg(target_os = "macos")]
     BenchCapture(bench::BenchArgs),
@@ -97,6 +101,8 @@ fn main() -> ExitCode {
         #[cfg(target_os = "macos")]
         Some(Command::Gui(args)) => gui::run(args),
         Some(Command::Identity { identity_file }) => serve::identity(identity_file),
+        #[cfg(target_os = "linux")]
+        Some(Command::ForgetPermission) => serve::forget_permission(),
         #[cfg(target_os = "macos")]
         Some(Command::BenchCapture(args)) => bench::run(args),
         #[cfg(target_os = "macos")]

@@ -60,6 +60,15 @@ keyring = "4.2"
 # NFKC for the unattended-password policy (A30). Locked to 0.1.25: 0.1.26 is < 14 days old.
 unicode-normalization = "0.1.25"
 
+# Linux host (phase4.6-criteria §5, architecture D48): the desktop portal
+# (screen cast + remote desktop over D-Bus), PipeWire for the pictures, and
+# Cisco's openh264 (below, with the platform crates) as the encoder. Used
+# only under cfg(target_os = "linux").
+ashpd = { version = "0.13.13", default-features = false, features = ["tokio", "screencast", "remote_desktop"] }
+pipewire = "0.10.1"
+# The portal session's Closed signal is a Stream (already in the graph).
+futures-util = { version = "0.3.34", default-features = false }
+
 # protocol
 base64 = "0.23.1"
 prost = "0.14.4"

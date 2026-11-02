@@ -54,3 +54,13 @@ runs then), which aborts the whole test binary. Fixed before recording.
 Mutation testing: 7 caught, 1 **missed** (`can_control` → `false`: no test
 had an injector configured and checked it); test added; rerun 8 caught,
 0 missed, 1 unviable.
+
+## Linux capture, encoder, injector (step 5), 2026-11-02, on the owner's laptop
+
+| Row | Plant (the real failure) | Caught by |
+|---|---|---|
+| L8 | Restore-token file created 0644 | `crates/remora-capture/src/sys/linux.rs::l8_the_restore_token_is_never_printed_and_saved_0600` ("token file mode 100644") |
+| L8 | Restore token's `Debug` prints the token | same test (`left: "RestoreToken(secret-capability)"`) |
+| L3 (buffer) | PipeWire picture copied without checking its length | `crates/remora-capture/src/sys/linux.rs::copy_picture_refuses_numbers_that_do_not_fit` (panicked: index out of range) |
+| — (colour) | Not planted: **found**. The spike's chroma coefficients (-26, -87, 112) sum to -1, tinting every grey (U = 127) | `crates/remora-codec/src/yuv.rs::colours_match_bt709_video_range_within_one_step` failed on first run; fixed to -86 |
+| — (portal) | Not planted: **seen for real** with the first version (one tokio runtime per portal session): the second session in one host process hung 120 s with no dialog (host log 2026-11-02 09:30-09:32 UTC) | `crates/remora-capture/tests/portal_sessions.rs::two_portal_sessions_in_one_process` (ignored in CI: needs a desktop; laptop: 3 sessions, 23-30 ms each, 1920x1080 pictures) |

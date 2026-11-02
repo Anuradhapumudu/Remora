@@ -17,3 +17,6 @@ pub mod guard;
 pub mod keymap;
 mod sys;
 pub mod window;
+
+#[cfg(target_os = "linux")]
+pub use sys::linux::PortalBackend;

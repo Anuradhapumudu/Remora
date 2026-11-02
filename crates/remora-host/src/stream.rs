@@ -18,15 +18,27 @@
 //! Nothing here logs frame content (INV9): only counts and states.
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+#[cfg(target_os = "macos")]
 use std::thread::JoinHandle;
-use std::time::{Duration, Instant};
+#[cfg(target_os = "macos")]
+use std::time::Duration;
+use std::time::Instant;
 
 use anyhow::Context;
-use remora_capture::{
-    CaptureError, CaptureEvent, CapturedFrame, EventSink, FrameStatus, InterruptReason,
-    ScreenCapture,
-};
-use remora_codec::{EncoderConfig, EncoderEvent, SyntheticSource, VtEncoder};
+use remora_capture::{CaptureEvent, InterruptReason, ScreenCapture};
+// The macOS test pattern (SyntheticCapture) only.
+#[cfg(target_os = "macos")]
+use remora_capture::{CaptureError, CapturedFrame, EventSink, FrameStatus};
+#[cfg(target_os = "macos")]
+use remora_codec::SyntheticSource;
+use remora_codec::{EncoderConfig, EncoderEvent};
+
+/// The encoder for this OS: the Mac's hardware encoder (VideoToolbox), or
+/// openh264 in software on Linux (phase 4.6). Same calls on both.
+#[cfg(target_os = "macos")]
+type VideoEncoder = remora_codec::VtEncoder;
+#[cfg(target_os = "linux")]
+type VideoEncoder = remora_codec::OpenH264Encoder;
 use remora_session::{CaptureStatus, PauseReason};
 
 /// Where encoded frames and capture state go: the host server, or a
@@ -71,7 +83,7 @@ struct Shared {
 /// A running capture → encode → send pipeline.
 pub(crate) struct Streamer {
     capture: Box<dyn ScreenCapture>,
-    encoder: Arc<Mutex<VtEncoder>>,
+    encoder: Arc<Mutex<VideoEncoder>>,
     shared: Arc<Shared>,
 }
 
@@ -92,7 +104,7 @@ impl Streamer {
             display_us: std::array::from_fn(|_| AtomicU64::new(0)),
         });
         let s = Arc::clone(&shared);
-        let encoder = VtEncoder::new(
+        let encoder = VideoEncoder::new(
             EncoderConfig {
                 width,
                 height,
@@ -123,7 +135,7 @@ impl Streamer {
                 }
             }),
         )
-        .context("hardware encoder")?;
+        .context("video encoder")?;
         let encoder = Arc::new(Mutex::new(encoder));
         let (enc, s) = (Arc::clone(&encoder), Arc::clone(&shared));
         // The encoder numbers frames 0, 1, 2, … by calls to `encode`
@@ -212,10 +224,12 @@ fn pause_reason(r: InterruptReason) -> PauseReason {
     }
 }
 
-/// A test pattern instead of the screen: frames numbered by a barcode
+/// A test pattern instead of the screen (macOS: the pattern is drawn by
+/// VideoToolbox's pixel buffers): frames numbered by a barcode
 /// strip (`SyntheticSource::next_frame_marked`) at a fixed rate. Needs no
 /// Screen Recording permission, so CI can stream end to end; everything
 /// after the source (encoder, sealing, network) is the real path.
+#[cfg(target_os = "macos")]
 pub(crate) struct SyntheticCapture {
     width: u32,
     height: u32,
@@ -224,6 +238,7 @@ pub(crate) struct SyntheticCapture {
     thread: Option<JoinHandle<()>>,
 }
 
+#[cfg(target_os = "macos")]
 impl SyntheticCapture {
     /// `width × height` (even) at `fps` frames per second.
     pub(crate) fn new(width: u32, height: u32, fps: u32) -> Self {
@@ -237,6 +252,7 @@ impl SyntheticCapture {
     }
 }
 
+#[cfg(target_os = "macos")]
 impl ScreenCapture for SyntheticCapture {
     fn start(&mut self, mut sink: EventSink) -> Result<(), CaptureError> {
         if self.thread.is_some() {
@@ -296,7 +312,9 @@ impl ScreenCapture for SyntheticCapture {
     }
 }
 
-#[cfg(test)]
+// The tests drive the macOS pipeline (pixel buffers from SyntheticSource);
+// the Linux pipeline is checked end to end on the laptop (phase 4.6 step 6).
+#[cfg(all(test, target_os = "macos"))]
 mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used)] // test code
 

@@ -14,8 +14,56 @@ use std::time::{Duration, Instant};
 
 mod sys;
 
+#[cfg(target_os = "linux")]
+pub use sys::linux::{PortalCapture, PortalInput, PortalOptions};
 #[cfg(target_os = "macos")]
 pub use sys::macos::{MacScreenCapture, PixelBufferRef};
+
+/// A captured picture in ordinary memory: 4 bytes per pixel, B G R x
+/// (the x byte is ignored), `height` rows of `width` pixels with no
+/// padding. The Linux backend copies each PipeWire buffer into one.
+pub struct CpuImage {
+    width: u32,
+    height: u32,
+    bgrx: Vec<u8>,
+}
+
+impl CpuImage {
+    /// `bgrx` must hold exactly `width × height × 4` bytes; anything else
+    /// is refused, so an encoder never reads past a short picture.
+    pub fn new(width: u32, height: u32, bgrx: Vec<u8>) -> Option<Self> {
+        let want = (width as usize)
+            .checked_mul(height as usize)?
+            .checked_mul(4)?;
+        (width > 0 && height > 0 && bgrx.len() == want).then_some(Self {
+            width,
+            height,
+            bgrx,
+        })
+    }
+
+    /// Width in pixels.
+    pub fn width(&self) -> u32 {
+        self.width
+    }
+
+    /// Height in pixels.
+    pub fn height(&self) -> u32 {
+        self.height
+    }
+
+    /// The pixels, B G R x, row after row.
+    pub fn bgrx(&self) -> &[u8] {
+        &self.bgrx
+    }
+}
+
+impl std::fmt::Debug for CpuImage {
+    // Never the pixels (threat model INV9: never log screen content).
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "CpuImage({}x{})", self.width, self.height)
+    }
+}
 
 /// What to capture and how.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -190,6 +238,9 @@ pub struct CapturedFrame {
     /// The image, present for [`FrameStatus::Complete`] frames.
     #[cfg(target_os = "macos")]
     pub image: Option<PixelBufferRef>,
+    /// The image, present for [`FrameStatus::Complete`] frames.
+    #[cfg(target_os = "linux")]
+    pub image: Option<CpuImage>,
 }
 
 impl CapturedFrame {
@@ -294,6 +345,10 @@ pub enum CaptureError {
     /// The OS didn't answer in time.
     #[error("{0} timed out")]
     Timeout(&'static str),
+    /// The person refused in the system's dialog, or the desktop's portal
+    /// is missing (Linux).
+    #[error("the desktop refused screen sharing: {0}")]
+    Refused(String),
     /// Not implemented on this OS yet.
     #[error("screen capture is not supported on this platform yet")]
     Unsupported,
@@ -380,7 +435,7 @@ mod tests {
                 w: 3.0,
                 h: 4.0,
             }],
-            #[cfg(target_os = "macos")]
+            #[cfg(any(target_os = "macos", target_os = "linux"))]
             image: None,
         };
         assert_eq!(
@@ -390,6 +445,24 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    fn cpu_image_refuses_a_buffer_of_the_wrong_size() {
+        assert!(CpuImage::new(2, 2, vec![0; 16]).is_some());
+        assert!(CpuImage::new(2, 2, vec![0; 15]).is_none(), "short");
+        assert!(CpuImage::new(2, 2, vec![0; 17]).is_none(), "long");
+        assert!(CpuImage::new(0, 2, vec![]).is_none(), "empty");
+        assert!(
+            CpuImage::new(u32::MAX, u32::MAX, vec![]).is_none(),
+            "overflow"
+        );
+        let i = CpuImage::new(2, 1, vec![9; 8]).expect("valid");
+        assert_eq!(
+            format!("{i:?}"),
+            "CpuImage(2x1)",
+            "no pixels in Debug (INV9)"
+        );
+    }
 
     fn cfg(width: u32, height: u32) -> CaptureConfig {
         CaptureConfig {

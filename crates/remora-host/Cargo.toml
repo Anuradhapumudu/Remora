@@ -31,6 +31,11 @@ remora-capture = { workspace = true }
 remora-codec = { workspace = true }
 objc2-foundation = { workspace = true, features = ["NSProcessInfo"] }
 
+[target.'cfg(target_os = "linux")'.dependencies]
+# Phase 4.6: the screen through the desktop portal, openh264 (D48).
+remora-capture = { workspace = true }
+remora-codec = { workspace = true }
+
 [target.'cfg(target_os = "macos")'.dev-dependencies]
 # Drives the GUI from Rust tests (D-4, phase4.5-criteria §5).
 i-slint-backend-testing = { workspace = true }

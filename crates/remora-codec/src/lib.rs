@@ -15,7 +15,10 @@ pub mod barcode;
 pub mod bitstream;
 pub mod h264;
 mod sys;
+pub mod yuv;
 
+#[cfg(target_os = "linux")]
+pub use sys::linux::OpenH264Encoder;
 #[cfg(target_os = "macos")]
 pub use sys::macos::{
     DecodedFrame, EncoderInfo, PictureCount, Probe444, PropertyReport, SyntheticSource, VtDecoder,

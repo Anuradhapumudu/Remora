@@ -46,6 +46,13 @@ jobs:
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
 
+      # Phase 4.6 (architecture D48): the Linux host links PipeWire, whose Rust
+      # bindings are generated with bindgen at build time (libclang + the
+      # libpipewire-0.3 headers; docs/dependencies.md `pipewire`).
+      - name: Install PipeWire headers and libclang (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update -q && sudo apt-get install -y -q --no-install-recommends libpipewire-0.3-dev libclang-dev pkg-config
+
       - name: Format
         run: cargo fmt --all --check
 

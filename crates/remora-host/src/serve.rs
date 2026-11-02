@@ -84,10 +84,10 @@ pub(crate) enum Source {
 }
 
 impl Default for Source {
-    /// The screen where this build can capture it (macOS); nothing
-    /// elsewhere until those backends exist (Phase 6.5).
+    /// The screen where this build can capture it (macOS; Linux through
+    /// the desktop portal, phase 4.6); nothing elsewhere yet.
     fn default() -> Self {
-        if cfg!(target_os = "macos") {
+        if cfg!(any(target_os = "macos", target_os = "linux")) {
             Source::Screen
         } else {
             Source::None
@@ -182,10 +182,11 @@ async fn serve(args: ServeArgs) -> anyhow::Result<()> {
         addr,
         public,
         book: SessionBook::new(),
-        control: crate::control::Control::new(injector()),
+        control: crate::control::Control::new(None),
         rotated: false,
         video: Video::new(args.source, args.width, args.timing, Arc::clone(&ui_server)),
     };
+    ui.control = crate::control::Control::new(injector(&ui.video));
     if ui.control.can_control() {
         println!("control: an accepted viewer can use this computer's mouse and keyboard");
     } else {
@@ -487,10 +488,13 @@ fn check_source(source: Source, width: u32) -> anyhow::Result<()> {
     if source == Source::None {
         return Ok(());
     }
-    if !cfg!(target_os = "macos") {
+    if !cfg!(any(target_os = "macos", target_os = "linux")) {
         bail!(
             "--source {source:?}: no screen capture or encoder on this OS yet (Phase 6.5); use --source none"
         );
+    }
+    if cfg!(target_os = "linux") && source == Source::Synthetic {
+        bail!("--source synthetic is macOS-only for now; use --source screen or none");
     }
     // The barcode strip that numbers each test frame (P7) is 704 pixels wide.
     if source == Source::Synthetic && width < 704 {
@@ -502,70 +506,72 @@ fn check_source(source: Source, width: u32) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// The video stream (macOS): started when the person accepts a viewer,
+/// The video stream (macOS, Linux): started when the person accepts a viewer,
 /// stopped when the last session ends, so nothing is captured while
 /// nobody is connected.
 pub(crate) struct Video {
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
     source: Source,
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
     width: u32,
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
     server: Arc<HostServer>,
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
     timing: bool,
     /// Sessions that are Active.
     pub(crate) active: std::collections::HashSet<SessionId>,
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
     running: Option<crate::stream::Streamer>,
+    /// Linux: the input side of the portal session that is showing the
+    /// screen, while it runs (the injector is opened from it, D48).
+    #[cfg(target_os = "linux")]
+    portal_input: Arc<std::sync::Mutex<Option<remora_capture::PortalInput>>>,
 }
 
 impl Video {
     pub(crate) fn new(source: Source, width: u32, timing: bool, server: Arc<HostServer>) -> Self {
         // Other systems stream nothing yet (`check_source` refused it).
-        #[cfg(not(target_os = "macos"))]
+        #[cfg(not(any(target_os = "macos", target_os = "linux")))]
         let _ = (source, width, timing, server);
         Self {
-            #[cfg(target_os = "macos")]
+            #[cfg(any(target_os = "macos", target_os = "linux"))]
             source,
-            #[cfg(target_os = "macos")]
+            #[cfg(any(target_os = "macos", target_os = "linux"))]
             width,
-            #[cfg(target_os = "macos")]
+            #[cfg(any(target_os = "macos", target_os = "linux"))]
             server,
-            #[cfg(target_os = "macos")]
+            #[cfg(any(target_os = "macos", target_os = "linux"))]
             timing,
             active: std::collections::HashSet::new(),
-            #[cfg(target_os = "macos")]
+            #[cfg(any(target_os = "macos", target_os = "linux"))]
             running: None,
+            #[cfg(target_os = "linux")]
+            portal_input: Arc::default(),
         }
     }
 
     /// Makes sure the stream runs before a viewer is approved, and tells
     /// the session layer whether capture works.
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
     pub(crate) fn prepare(&mut self) {
-        use remora_capture::{MacScreenCapture, ScreenCapture};
         use remora_session::CaptureStatus;
 
         if self.running.is_some() || self.source == Source::None {
             return;
         }
-        let capture: anyhow::Result<Box<dyn ScreenCapture>> = match self.source {
-            Source::Screen => MacScreenCapture::main_display(screen_capture_config(self.width))
-                .map(|c| Box::new(c) as Box<dyn ScreenCapture>)
-                .map_err(anyhow::Error::from),
-            // 16:9, as a typical screen.
-            _ => Ok(Box::new(crate::stream::SyntheticCapture::new(
-                self.width,
-                self.width * 9 / 16,
-                60,
-            ))),
+        let capture = match self.open_capture() {
+            Ok(c) => c,
+            Err(e) => {
+                println!("cannot stream: {e:#}");
+                self.server.capture_changed(CaptureStatus::Stopped);
+                return;
+            }
         };
         let out: Arc<dyn crate::stream::VideoOut> = Arc::new(Out {
             server: Arc::clone(&self.server),
             timing: self.timing,
         });
-        match capture.and_then(|c| crate::stream::Streamer::start(c, out)) {
+        match crate::stream::Streamer::start(capture, out) {
             Ok(s) => {
                 println!("streaming: {:?}, H.264", self.source);
                 self.running = Some(s);
@@ -578,11 +584,51 @@ impl Video {
         }
     }
 
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
     fn prepare(&mut self) {}
 
+    /// The screen (or the macOS test pattern) to stream.
+    #[cfg(target_os = "macos")]
+    fn open_capture(&mut self) -> anyhow::Result<Box<dyn remora_capture::ScreenCapture>> {
+        use remora_capture::MacScreenCapture;
+        Ok(match self.source {
+            Source::Screen => Box::new(MacScreenCapture::main_display(screen_capture_config(
+                self.width,
+            ))?),
+            // 16:9, as a typical screen.
+            _ => Box::new(crate::stream::SyntheticCapture::new(
+                self.width,
+                self.width * 9 / 16,
+                60,
+            )),
+        })
+    }
+
+    /// Linux: one portal session for the screen and remote control (D48).
+    /// The first time GNOME asks the person at this computer; the answer
+    /// is saved (restore token, 0600) so later sessions start without it.
+    #[cfg(target_os = "linux")]
+    fn open_capture(&mut self) -> anyhow::Result<Box<dyn remora_capture::ScreenCapture>> {
+        use remora_capture::{CaptureConfig, PortalCapture, PortalOptions};
+        let capture = PortalCapture::open(
+            CaptureConfig {
+                width: self.width,
+                show_cursor: true,
+                ..CaptureConfig::default()
+            },
+            PortalOptions {
+                token_file: portal_token_path().ok(),
+                control: true,
+            },
+        )?;
+        if let Ok(mut slot) = self.portal_input.lock() {
+            *slot = capture.input();
+        }
+        Ok(Box::new(capture))
+    }
+
     pub(crate) fn force_keyframe(&self) {
-        #[cfg(target_os = "macos")]
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
         if let Some(s) = &self.running {
             s.force_keyframe();
         }
@@ -602,22 +648,26 @@ impl Video {
     }
 
     pub(crate) fn stop(&mut self) {
-        #[cfg(target_os = "macos")]
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
         if let Some(s) = self.running.take() {
             s.stop();
             println!("streaming stopped");
         }
+        #[cfg(target_os = "linux")]
+        if let Ok(mut slot) = self.portal_input.lock() {
+            *slot = None;
+        }
     }
 }
 
-/// Frames and capture state into the host server (macOS).
-#[cfg(target_os = "macos")]
+/// Frames and capture state into the host server.
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 struct Out {
     server: Arc<HostServer>,
     timing: bool,
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 impl crate::stream::VideoOut for Out {
     fn video(&self, keyframe: bool, capture_ts_us: u64, data: &[u8]) {
         let now_us = || remora_app::clock::monotonic_ns().map_or(0, |n| n / 1000);
@@ -671,8 +721,55 @@ type Injector = Box<dyn remora_input::guard::Backend + Send>;
 
 /// How this OS opens its injector for a session; `None` where there is
 /// none yet (macOS: Phase 6).
-fn injector() -> Option<crate::control::Connect<Injector>> {
+#[cfg(not(target_os = "linux"))]
+fn injector(_video: &Video) -> Option<crate::control::Connect<Injector>> {
     None
+}
+
+/// Linux: input goes into the portal session that is showing the screen
+/// (it exists from `accept`, before the session is Active).
+#[cfg(target_os = "linux")]
+fn injector(video: &Video) -> Option<crate::control::Connect<Injector>> {
+    use remora_input::guard::BackendError;
+    let slot = Arc::clone(&video.portal_input);
+    Some(Box::new(move || {
+        let input = slot
+            .lock()
+            .ok()
+            .and_then(|s| s.clone())
+            .ok_or_else(|| BackendError("the screen is not being shared".into()))?;
+        Ok(Box::new(remora_input::PortalBackend::new(input)) as Injector)
+    }))
+}
+
+/// Where the desktop portal's saved permission (restore token) is kept:
+/// next to the host's key file, readable by this user only (L8).
+#[cfg(target_os = "linux")]
+pub(crate) fn portal_token_path() -> anyhow::Result<PathBuf> {
+    let key = keystore::default_path(Role::Host)?;
+    Ok(key.with_file_name("portal-restore-token"))
+}
+
+/// `remora-host forget-permission`: deletes the saved screen-sharing and
+/// remote-control permission, so the next session asks at this computer
+/// again (phase4.6-criteria Q5).
+#[cfg(target_os = "linux")]
+pub(crate) fn forget_permission() -> anyhow::Result<()> {
+    let path = portal_token_path()?;
+    match std::fs::remove_file(&path) {
+        Ok(()) => println!(
+            "deleted {}: the next session asks on this computer again",
+            path.display()
+        ),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            println!("nothing saved at {}", path.display())
+        }
+        Err(e) => return Err(e).with_context(|| format!("deleting {}", path.display())),
+    }
+    println!(
+        "GNOME may also list Remora under Settings > Privacy > Screen Sharing / Remote Desktop."
+    );
+    Ok(())
 }
 
 /// Lines typed on stdin, read on a plain thread (stdin is blocking).
