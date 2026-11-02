@@ -6,6 +6,14 @@ muted), Q2 + Q3 "Yes to both" (sound on by default with a mute key in the
 viewer; libopus bundled at a pinned version behind our size checks and
 fuzzing). Building starts with spike S-A1.
 
+**Amended by the owner, 2026-11-03** (after hearing the laptop's sound on
+the Mac: "can we implement a feature which is only me can hear the voice
+instead of playing on that laptop too ?"): a **host setting** silences
+the laptop's speakers while a session is active (chose "Host setting"
+over a viewer request or always-on), built **now, inside 4.8** (chose
+"Now, inside 4.8"). Q1's default stays: without the setting the speakers
+keep playing. New requirement A7 (§3) and step 5b (§6).
+
 ## 0. What exists, and what is not verified yet
 
 **Exists:**
@@ -73,6 +81,7 @@ Mac's current output device (including Bluetooth).
 | A4 | INV9: no audio content in logs, ever; counts and times only | grep lint + `Debug` tests |
 | A5 | Replay/old packets refused (shared media replay window) | unit (reuse M-tests' style) |
 | A6 | The viewer's mute is real: no audio is played when muted (the host may still send) | unit |
+| A7 | `serve --mute-speakers` (owner, 2026-11-03): the host's own speakers are silent exactly while sound is being sent (from approval to the end of the last session, A1's span) and restored afterwards to how they were; never un-muted if the person had muted them; if they cannot be muted the session goes on and the host says so. Only the person at the host can turn it on: no viewer message can mute a host | unit with a fake mixer; plants: mute engaged before approval, not restored at the end, an already-muted speaker un-muted at the end |
 
 ## 4. Targets
 
@@ -97,6 +106,12 @@ commit.
 3. Host: capture + encode during Active only (A1, A4).
 4. Viewer: decode + jitter buffer + playback + mute (A6).
 5. Sync with the picture (AU3); A2 test.
+5b. `--mute-speakers` (A7). Spike, 2026-11-03 on the laptop (PipeWire
+   1.x with WirePlumber): a 0.02-peak test tone captured through
+   `stream.capture.sink` measured peak 0.0200 with the speakers normal,
+   **muted**, and at **volume 0** - the copy Remora records is taken
+   before the sink's mute and volume, so muting the speakers does not
+   silence what the viewer hears.
 6. Live test Mac ↔ laptop with your earbuds; report; roadmap.
 
 ## 7. Known limitations (stated plainly)
