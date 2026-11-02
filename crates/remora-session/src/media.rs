@@ -20,6 +20,7 @@ use remora_crypto::media::{
     SealedDatagram,
 };
 use remora_crypto::secret::MediaKey;
+use remora_proto::audio::AudioPacket;
 use remora_proto::datagram::{DatagramHeader, DatagramKind};
 use remora_proto::messages::MediaKeyAnnounce;
 use remora_proto::video::{Reassembler, ReassemblyEvent, VideoFrame};
@@ -141,6 +142,10 @@ pub struct MediaStats {
     pub frames: u64,
     /// Frames given up (incomplete when a newer one completed, limits).
     pub frames_dropped: u64,
+    /// Audio packets delivered (phase 4.8).
+    pub audio_packets: u64,
+    /// Opened audio datagrams whose body was refused (A3).
+    pub bad_audio: u64,
 }
 
 impl MediaStats {
@@ -212,8 +217,9 @@ impl MediaIn {
         Ok(())
     }
 
-    /// Opens one datagram; returns the frames it completed.
-    pub(crate) fn datagram(&mut self, datagram: &[u8], now: Millis) -> Vec<VideoFrame> {
+    /// Opens one datagram; returns the video frames it completed or the
+    /// audio packet it carried.
+    pub(crate) fn datagram(&mut self, datagram: &[u8], now: Millis) -> Vec<MediaItem> {
         let mut frames = Vec::new();
         let (header, body) = match self.rx.open(datagram) {
             Ok(x) => x,
@@ -232,6 +238,20 @@ impl MediaIn {
                 }
             }
         }
+        if header.kind == DatagramKind::AudioPacket
+            && header.stream_id == VIDEO_STREAM
+            && header.layer_id == 0
+        {
+            // A3: the body is parsed with its limits before anything else.
+            match AudioPacket::parse(&body) {
+                Ok(p) => {
+                    self.stats.audio_packets += 1;
+                    frames.push(MediaItem::Audio(p));
+                }
+                Err(_) => self.stats.bad_audio += 1,
+            }
+            return frames;
+        }
         if header.kind != DatagramKind::VideoFragment
             || header.stream_id != VIDEO_STREAM
             || header.layer_id != 0
@@ -243,7 +263,7 @@ impl MediaIn {
             match event {
                 ReassemblyEvent::Frame(f) => {
                     self.stats.frames += 1;
-                    frames.push(f);
+                    frames.push(MediaItem::Video(f));
                 }
                 ReassemblyEvent::Dropped { .. } => self.stats.frames_dropped += 1,
                 ReassemblyEvent::Rejected(_) => self.stats.bad_fragments += 1,
@@ -269,6 +289,27 @@ impl MediaIn {
     fn forget(&mut self, id: u16) {
         self.rx.remove_key(id);
         self.live.retain(|&(k, _)| k != id);
+    }
+}
+
+/// What one opened media datagram gave the viewer.
+#[derive(Debug)]
+pub(crate) enum MediaItem {
+    /// A completed video frame.
+    Video(VideoFrame),
+    /// One audio packet (phase 4.8).
+    Audio(AudioPacket),
+}
+
+/// The clear header of an audio packet on stream 0 (phase 4.8).
+pub(crate) fn audio_header() -> DatagramHeader {
+    DatagramHeader {
+        kind: DatagramKind::AudioPacket,
+        flags: 0,
+        key_id: 0,
+        counter: 0,
+        stream_id: VIDEO_STREAM,
+        layer_id: 0,
     }
 }
 

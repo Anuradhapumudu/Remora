@@ -28,11 +28,12 @@ use remora_proto::video::{PacketizeError, packetize};
 
 use crate::fail::{AuthDetail, Violation};
 use crate::limiter::Limiter;
-use crate::media::{KEYFRAME_REQUEST_INTERVAL_MS, MediaOut, video_header};
+use crate::media::{KEYFRAME_REQUEST_INTERVAL_MS, MediaOut, audio_header, video_header};
 use crate::{
     AppMessage, CloseCode, FailReason, HANDSHAKE_TIMEOUT_MS, Millis, PROMPT_TIMEOUT_MS,
     PROTOCOL_VERSION, State, Step,
 };
+use remora_proto::datagram::DatagramHeader;
 
 /// `SessionReject.reason` values (protocol.md §3.4).
 const REJECT_DENIED: u32 = 1;
@@ -354,17 +355,46 @@ impl Host {
         self.next_frame_id = frame_id
             .checked_add(1)
             .ok_or(SendVideoError::FrameIdsExhausted)?;
+        let bodies: Vec<(DatagramHeader, &[u8])> = fragments
+            .iter()
+            .map(|f| (video_header(f.flags), f.body.as_slice()))
+            .collect();
+        Ok(self.seal_for_active(&bodies, now, rng))
+    }
+
+    /// Sends one 20 ms audio packet (phase 4.8) to every `Active` session,
+    /// sealed under each session's own media key exactly like video: the
+    /// same counters, replay window and key rotation. Sessions in any
+    /// other state get nothing (A1, like M3 for video).
+    pub fn send_audio<R: RngCore + CryptoRng>(
+        &mut self,
+        packet: &remora_proto::audio::AudioPacket,
+        now: Millis,
+        rng: &mut R,
+    ) -> Vec<HostAction> {
+        let body = packet.encode();
+        self.seal_for_active(&[(audio_header(), body.as_slice())], now, rng)
+    }
+
+    /// Seals `bodies` for every `Active` session, with any new media-key
+    /// announcements; a session whose keys run out is failed.
+    fn seal_for_active<R: RngCore + CryptoRng>(
+        &mut self,
+        bodies: &[(DatagramHeader, &[u8])],
+        now: Millis,
+        rng: &mut R,
+    ) -> Vec<HostAction> {
         let mut out = Vec::new();
         for id in self.active_sessions() {
-            let mut datagrams = Vec::with_capacity(fragments.len());
+            let mut datagrams = Vec::with_capacity(bodies.len());
             let mut failed = None;
             if let Some(HostSession {
                 state: HostSessionState::Active { est, media },
                 ..
             }) = self.sessions.get_mut(&id)
             {
-                for f in &fragments {
-                    match media.seal(video_header(f.flags), &f.body, self.rotate_after, now, rng) {
+                for (header, body) in bodies {
+                    match media.seal(*header, body, self.rotate_after, now, rng) {
                         Ok(datagram) => datagrams.push(HostAction::Media { id, datagram }),
                         Err(_) => {
                             failed = Some(Violation::MediaKey("key ids used up"));
@@ -391,7 +421,7 @@ impl Host {
                 ),
             }
         }
-        Ok(out)
+        out
     }
 
     /// The current one-time password (for the host's screen only).
