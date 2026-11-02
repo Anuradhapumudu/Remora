@@ -11,6 +11,8 @@ use clap::{Parser, Subcommand};
 
 #[cfg(target_os = "macos")]
 mod bench;
+#[cfg(target_os = "linux")]
+mod bench_linux;
 mod control;
 mod serve;
 #[cfg(any(target_os = "macos", target_os = "linux"))]
@@ -48,6 +50,14 @@ enum Command {
     /// so the next session asks at this computer again.
     #[cfg(target_os = "linux")]
     ForgetPermission,
+    /// Linux: compare openh264 settings on the live screen (times and
+    /// sizes only; nothing is saved or sent).
+    #[cfg(target_os = "linux")]
+    BenchEncoder {
+        /// How long to measure.
+        #[arg(long, default_value_t = 30)]
+        seconds: u64,
+    },
     /// Phase 2: capture the screen, hardware-encode to .h264, print measured stats.
     #[cfg(target_os = "macos")]
     BenchCapture(bench::BenchArgs),
@@ -103,6 +113,8 @@ fn main() -> ExitCode {
         Some(Command::Identity { identity_file }) => serve::identity(identity_file),
         #[cfg(target_os = "linux")]
         Some(Command::ForgetPermission) => serve::forget_permission(),
+        #[cfg(target_os = "linux")]
+        Some(Command::BenchEncoder { seconds }) => bench_linux::run(seconds),
         #[cfg(target_os = "macos")]
         Some(Command::BenchCapture(args)) => bench::run(args),
         #[cfg(target_os = "macos")]

@@ -30,6 +30,29 @@ const THREADS: u16 = 8;
 const MAX_W: u32 = 3840;
 const MAX_H: u32 = 2160;
 
+/// The rate settings that trade sharpness against encode time and picture
+/// size (and so loss on Wi-Fi). Measured with `remora-host bench-encoder`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OpenH264Tuning {
+    /// Target bitrate, bits per second.
+    pub bitrate_bps: u32,
+    /// Finest quantiser allowed (lower = larger pictures).
+    pub qp_min: u8,
+    /// Coarsest quantiser allowed (higher = blurrier text).
+    pub qp_max: u8,
+}
+
+impl OpenH264Tuning {
+    /// What the host uses: the balance measured with bench-encoder on the
+    /// owner's laptop (results/phase4.6/measurements.md): half the picture
+    /// size of 8 Mbit/s QP 10-36 (so less Wi-Fi loss), text at QP <= 34.
+    pub const DEFAULT: Self = Self {
+        bitrate_bps: 4_000_000,
+        qp_min: 20,
+        qp_max: 34,
+    };
+}
+
 /// A software H.264 encoder.
 pub struct OpenH264Encoder {
     encoder: Encoder,
@@ -55,6 +78,19 @@ impl OpenH264Encoder {
     /// An encoder; `cfg.width × cfg.height` is a hint (openh264 adapts to
     /// each picture's size).
     pub fn new(cfg: EncoderConfig, sink: EncoderSink) -> Result<Self, CodecError> {
+        Self::with_tuning(cfg, OpenH264Tuning::DEFAULT, sink)
+    }
+
+    /// As [`new`](Self::new) with explicit rate settings.
+    pub fn with_tuning(
+        cfg: EncoderConfig,
+        tuning: OpenH264Tuning,
+        sink: EncoderSink,
+    ) -> Result<Self, CodecError> {
+        // QpRange::new panics outside these (openh264 encoder.rs).
+        if tuning.qp_max > 51 || tuning.qp_min > tuning.qp_max {
+            return Err(CodecError::Unsupported("QP range outside 0..=51"));
+        }
         let config = openh264::encoder::EncoderConfig::new()
             .usage_type(UsageType::ScreenContentRealTime)
             .complexity(Complexity::Low)
@@ -65,10 +101,9 @@ impl OpenH264Encoder {
             // The crate's default target is 120 kbit/s (encoder.rs
             // `EncoderConfig::new`), far too little for a desktop: text
             // came out soft (owner, 2026-11-02, "can we improve the video
-            // quality?"). Use Remora's bitrate (8 Mbit/s by default) and
-            // never quantise coarser than QP 36, so text stays readable.
-            .bitrate(BitRate::from_bps(cfg.bitrate_bps))
-            .qp(QpRange::new(10, 36))
+            // quality?"). OpenH264Tuning::DEFAULT is the measured balance.
+            .bitrate(BitRate::from_bps(tuning.bitrate_bps))
+            .qp(QpRange::new(tuning.qp_min, tuning.qp_max))
             .vui(VuiConfig::bt709());
         let encoder = Encoder::with_api_config(openh264::OpenH264API::from_source(), config)
             .map_err(err("openh264 WelsCreateSVCEncoder"))?;
