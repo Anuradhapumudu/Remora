@@ -16,6 +16,9 @@ remora-proto = { path = "../crates/remora-proto" }
 remora-crypto = { path = "../crates/remora-crypto" }
 remora-session = { path = "../crates/remora-session" }
 remora-codec = { path = "../crates/remora-codec" }
+remora-input = { path = "../crates/remora-input" }
+# Encodes the built Input messages (already locked via remora-proto).
+prost = "0.14.4"
 rand_core = { version = "0.6", features = ["getrandom"] }
 
 [workspace]
@@ -101,6 +104,13 @@ bench = false
 [[bin]]
 name = "display_name"
 path = "fuzz_targets/display_name.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "input_event"
+path = "fuzz_targets/input_event.rs"
 test = false
 doc = false
 bench = false

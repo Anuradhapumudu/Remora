@@ -28,3 +28,13 @@ hang past cargo-mutants' 65 s limit (e.g. a key every session refuses, so
 a test waits for a session that never starts) rather than fail quickly.
 A hang is not a pass, so none of these is a missed mutant; but a test that
 hangs instead of failing is slower evidence, noted here, not fixed in 4.6.
+
+## Fuzz target `input_event` (L3), 2026-11-02
+
+| Plant (the real failure) | Result |
+|---|---|
+| Guard's key-table check removed (unknown keys reach the OS) | First version of the target (raw bytes → `decode_envelope`) **NOT caught** in 60 s / 4.6 M runs: random bytes almost never form a nested Envelope → Input → Key, so the guard was barely reached. Rewritten to build an `Input` from the bytes, encode it, then decode and guard it (the host's path); caught at once: `key 0x1 reached the OS` |
+| Held-keys cap removed (`MAX_HELD`) | Not found by the fuzzer in 120 s (it needs 33 distinct table keys pressed in one input); caught by the unit test `l2_l4_guard.rs::l4_too_many_keys_held_is_refused` (row above). The fuzz target's job is L3, field validity |
+
+Clean run after removing the plants: 1.45 M runs in 60 s, no finding.
+Corpus minimised (`cargo fuzz cmin`, max length 512): 545 inputs, 69 KB.
