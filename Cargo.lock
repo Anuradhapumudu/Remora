@@ -4411,6 +4411,7 @@ dependencies = [
  "remora-proto",
  "remora-session",
  "remora-testkit",
+ "rustix 1.1.5",
  "thiserror 2.0.21",
  "zeroize",
 ]

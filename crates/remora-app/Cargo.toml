@@ -18,6 +18,10 @@ rand_core = { workspace = true }
 thiserror = { workspace = true }
 zeroize = { workspace = true }
 
+[target.'cfg(target_os = "linux")'.dependencies]
+# The shared monotonic clock (clock.rs) without `unsafe`: clock_gettime.
+rustix = { workspace = true }
+
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2-core-video = { workspace = true, features = ["CVHostTime", "CVBase"] }
 
