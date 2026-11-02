@@ -235,14 +235,28 @@ async fn serve(args: ServeArgs) -> anyhow::Result<()> {
         );
     }
     ui.control = crate::control::Control::new(injector(&ui.video));
+    // A7: speakers an earlier run muted and never restored (killed, or a
+    // restore that did not take) are unmuted now, whatever the flags.
+    #[cfg(target_os = "linux")]
+    let note_path = speakers_note_path()?;
+    #[cfg(target_os = "linux")]
+    if let Some(msg) = crate::speakers::repair_left_muted(
+        &mut crate::speakers::Wpctl,
+        &mut crate::speakers::FileNote(note_path.clone()),
+    ) {
+        println!("{msg}");
+    }
     #[cfg(target_os = "linux")]
     if !args.no_audio {
         let mut starter = crate::sound::starter(Arc::clone(&ui.server));
         if args.mute_speakers {
             starter = crate::sound::with_speakers_muted(
                 starter,
-                Box::new(|| {
-                    let muted = crate::speakers::mute_speakers(Box::new(crate::speakers::Wpctl))?;
+                Box::new(move || {
+                    let muted = crate::speakers::mute_speakers(
+                        Box::new(crate::speakers::Wpctl),
+                        Box::new(crate::speakers::FileNote(note_path.clone())),
+                    )?;
                     Ok(muted.map(|m| Box::new(m) as Box<dyn std::any::Any + Send>))
                 }),
             );
@@ -1006,6 +1020,14 @@ pub(crate) fn portal_token_path() -> anyhow::Result<PathBuf> {
     Ok(key.with_file_name("portal-restore-token"))
 }
 
+/// Where `--mute-speakers` notes the output it muted until it has
+/// restored it (A7): next to the host's key, owner-only.
+#[cfg(target_os = "linux")]
+pub(crate) fn speakers_note_path() -> anyhow::Result<PathBuf> {
+    let key = keystore::default_path(Role::Host)?;
+    Ok(key.with_file_name("speakers-muted"))
+}
+
 /// The saved permission, if there is one (L8: never printed).
 #[cfg(target_os = "linux")]
 pub(crate) fn load_portal_token() -> Option<remora_capture::RestoreToken> {
@@ -1330,7 +1352,7 @@ mod a1_tests {
 
     #[tokio::test]
     async fn a7_speakers_are_silent_only_while_a_session_is_active() {
-        use crate::speakers::tests::{FakeMixer, fake};
+        use crate::speakers::tests::fake;
         let dir = std::env::temp_dir().join(format!("remora-a7-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let (mut ui, _events) = super::c2_tests::ui_with_events_for_c3(&dir).await;
@@ -1339,7 +1361,7 @@ mod a1_tests {
         ui.video.sound_starter = Some(crate::sound::with_speakers_muted(
             Box::new(|| Ok(Box::new(()) as Box<dyn std::any::Any + Send>)),
             Box::new(move || {
-                let g = crate::speakers::mute_speakers(Box::new(FakeMixer(Arc::clone(&m))))?;
+                let g = crate::speakers::tests::mute(&m, &crate::speakers::tests::note())?;
                 Ok(g.map(|g| Box::new(g) as Box<dyn std::any::Any + Send>))
             }),
         ));
@@ -1364,13 +1386,13 @@ mod a1_tests {
 
     #[test]
     fn a7_a_host_that_cannot_record_never_mutes() {
-        use crate::speakers::tests::{FakeMixer, fake};
+        use crate::speakers::tests::fake;
         let mixer = fake(62, false);
         let m = Arc::clone(&mixer);
         let mut start = crate::sound::with_speakers_muted(
             Box::new(|| anyhow::bail!("no PipeWire")),
             Box::new(move || {
-                let g = crate::speakers::mute_speakers(Box::new(FakeMixer(Arc::clone(&m))))?;
+                let g = crate::speakers::tests::mute(&m, &crate::speakers::tests::note())?;
                 Ok(g.map(|g| Box::new(g) as Box<dyn std::any::Any + Send>))
             }),
         );

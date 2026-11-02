@@ -57,6 +57,11 @@ pub fn save(path: &Path, token: &str) -> std::io::Result<()> {
     std::fs::rename(&tmp, path)
 }
 
+/// Deletes the file (a missing file is fine).
+pub fn remove(path: &Path) {
+    let _ = std::fs::remove_file(path);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

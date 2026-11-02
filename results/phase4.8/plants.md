@@ -105,3 +105,12 @@ although the owner did not mute them. WirePlumber's
 refused" and printed "speakers: restored". The next host (01:45:30)
 found them muted and, by design, left them alone. A7 is not "met" until
 this is explained; the restore is not verified today.
+
+## A7 fix: verified restore, note, repair at start (2026-11-03, night)
+
+| ID | Planted failure | Caught by | Date |
+|---|---|---|---|
+| A7 | Restore without its check-and-retry (one lost unmute leaves the speakers muted) | `crates/remora-host/src/speakers.rs::tests::a7_a_restore_that_does_not_take_is_retried` (and the never-takes test) | 2026-11-03 |
+| A7 | The note is cleared although the restore failed (nothing could repair it) | `speakers.rs::tests::a7_a_restore_that_never_takes_keeps_the_note_and_the_next_start_repairs_it` | 2026-11-03 |
+| A7 | The repair trusts the noted number without the name (after a reboot it would unmute another output) | `speakers.rs::tests::a7_repair_finds_the_output_by_name_after_a_restart`, `a7_repair_leaves_alone_what_it_cannot_identify_or_what_plays` | 2026-11-03 |
+| A7 | Mutes even when the note could not be written | `speakers.rs::tests::a7_no_note_no_mute` | 2026-11-03 |
