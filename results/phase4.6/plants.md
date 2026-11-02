@@ -64,3 +64,13 @@ had an injector configured and checked it); test added; rerun 8 caught,
 | L3 (buffer) | PipeWire picture copied without checking its length | `crates/remora-capture/src/sys/linux.rs::copy_picture_refuses_numbers_that_do_not_fit` (panicked: index out of range) |
 | — (colour) | Not planted: **found**. The spike's chroma coefficients (-26, -87, 112) sum to -1, tinting every grey (U = 127) | `crates/remora-codec/src/yuv.rs::colours_match_bt709_video_range_within_one_step` failed on first run; fixed to -86 |
 | — (portal) | Not planted: **seen for real** with the first version (one tokio runtime per portal session): the second session in one host process hung 120 s with no dialog (host log 2026-11-02 09:30-09:32 UTC) | `crates/remora-capture/tests/portal_sessions.rs::two_portal_sessions_in_one_process` (ignored in CI: needs a desktop; laptop: 3 sessions, 23-30 ms each, 1920x1080 pictures) |
+
+## LP4: keyframe on a still screen (Linux), 2026-11-02
+
+| Row | Plant (the real failure) | Caught by |
+|---|---|---|
+| LP4 | Repeat thread never acts (a keyframe asked for on a still screen waits for the next screen change, as before) | `crates/remora-host/src/stream.rs::linux_tests::lp4_a_keyframe_asked_for_on_a_still_screen_comes_from_the_last_picture` ("a keyframe within 300 ms on a still screen") |
+
+The test's first version failed for a test reason: its fake screen changed
+every pixel between pictures, which openh264's scene-change detection
+answers with IDRs; the fake now changes one pixel, as a still desktop does.
