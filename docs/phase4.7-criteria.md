@@ -1,8 +1,10 @@
 # Phase 4.7 (D-52): Connect simply — saved devices, a short code at home, one app — criteria
 
-**Status: DRAFT for the owner's approval (2026-11-02).** Building starts
-only after approval. Decisions already taken with the owner on
-2026-11-02 (roadmap D-52) are marked *(decided)*; the open ones are §2.
+**Status: APPROVED by the owner, 2026-11-02**, with the recommended
+answer to every decision in §2: Q1 "Person approves; script for now",
+Q2 "Announce it with the code", Q3 "Mac first", and Q4 as drafted
+("Approve 4.7 + accept 4.6"). Building may start with spike S-C1.
+Decisions taken earlier the same day (roadmap D-52) are marked *(decided)*.
 Sound (D-51) moves to Phase 4.8, after this one, as the owner chose.
 
 ## 0. What exists, and what is not verified yet
