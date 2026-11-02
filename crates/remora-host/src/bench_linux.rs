@@ -44,10 +44,11 @@ pub(crate) fn run(seconds: u64) -> anyhow::Result<()> {
             ..CaptureConfig::default()
         },
         PortalOptions {
-            token_file: crate::serve::portal_token_path().ok(),
+            restore_token: crate::serve::load_portal_token(),
             control: true, // the saved permission is for screen + control
         },
     )?;
+    crate::serve::save_portal_token(cap.take_new_token());
     let runs: Arc<Mutex<Vec<Run>>> =
         Arc::new(Mutex::new(TUNINGS.iter().map(|_| Run::default()).collect()));
     let mut encoders = Vec::new();

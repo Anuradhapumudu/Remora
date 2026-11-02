@@ -610,17 +610,18 @@ impl Video {
     #[cfg(target_os = "linux")]
     fn open_capture(&mut self) -> anyhow::Result<Box<dyn remora_capture::ScreenCapture>> {
         use remora_capture::{CaptureConfig, PortalCapture, PortalOptions};
-        let capture = PortalCapture::open(
+        let mut capture = PortalCapture::open(
             CaptureConfig {
                 width: self.width,
                 show_cursor: true,
                 ..CaptureConfig::default()
             },
             PortalOptions {
-                token_file: portal_token_path().ok(),
+                restore_token: load_portal_token(),
                 control: true,
             },
         )?;
+        save_portal_token(capture.take_new_token());
         if let Ok(mut slot) = self.portal_input.lock() {
             *slot = capture.input();
         }
@@ -748,6 +749,28 @@ fn injector(video: &Video) -> Option<crate::control::Connect<Injector>> {
 pub(crate) fn portal_token_path() -> anyhow::Result<PathBuf> {
     let key = keystore::default_path(Role::Host)?;
     Ok(key.with_file_name("portal-restore-token"))
+}
+
+/// The saved permission, if there is one (L8: never printed).
+#[cfg(target_os = "linux")]
+pub(crate) fn load_portal_token() -> Option<remora_capture::RestoreToken> {
+    let path = portal_token_path().ok()?;
+    remora_app::token_file::load(&path).and_then(|t| remora_capture::RestoreToken::new(&t))
+}
+
+/// Keeps GNOME's newest token for the next session (owner-only file).
+#[cfg(target_os = "linux")]
+pub(crate) fn save_portal_token(token: Option<remora_capture::RestoreToken>) {
+    let (Some(token), Ok(path)) = (token, portal_token_path()) else {
+        return;
+    };
+    if let Err(e) = remora_app::token_file::save(&path, token.expose()) {
+        // The path and the error, never the token (L8).
+        eprintln!(
+            "could not save the screen-sharing permission in {}: {e}",
+            path.display()
+        );
+    }
 }
 
 /// `remora-host forget-permission`: deletes the saved screen-sharing and

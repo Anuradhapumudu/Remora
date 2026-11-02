@@ -9,6 +9,8 @@
 //! * [`cli`] — formatting and parsing shared by the two command-line apps.
 //! * [`clock`] — the monotonic clock both apps stamp latency with (P0).
 //! * [`prompts`] — short prompt numbers and the commands typed at the host.
+//! * [`token_file`] — the desktop portal's saved permission (Linux), in an
+//!   owner-only file.
 //! * [`decide`] — the GUI's decisions (dialogs, indicator, viewer
 //!   verification) without any GUI types (phase4.5-criteria §10).
 
@@ -20,3 +22,4 @@ pub mod decide;
 pub mod keystore;
 pub mod prompts;
 mod sys;
+pub mod token_file;

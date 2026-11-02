@@ -34,7 +34,6 @@
 
 use std::cell::RefCell;
 use std::os::fd::OwnedFd;
-use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex, mpsc};
 use std::thread::JoinHandle;
@@ -71,16 +70,18 @@ const MAX_SIDE: u32 = 8192;
 /// What to ask the portal for.
 #[derive(Debug, Clone)]
 pub struct PortalOptions {
-    /// Where the restore token is kept (`None`: never saved, GNOME asks
-    /// every time).
-    pub token_file: Option<PathBuf>,
+    /// The permission saved from the last session (`None`: GNOME asks).
+    pub restore_token: Option<RestoreToken>,
     /// Also ask for keyboard and pointer (remote control).
     pub control: bool,
 }
 
 /// The portal's restore token: lets the next session start without the
-/// dialog. Never printed (L8).
-struct RestoreToken(String);
+/// dialog, so it is a capability (L8). `Debug` never shows it; the app
+/// keeps it in an owner-only file (`remora_app::token_file`) — this crate
+/// writes no files (screen-content crates may not; policy scanner).
+#[derive(Clone, PartialEq, Eq)]
+pub struct RestoreToken(String);
 
 impl std::fmt::Debug for RestoreToken {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -89,34 +90,17 @@ impl std::fmt::Debug for RestoreToken {
 }
 
 impl RestoreToken {
-    fn load(path: &std::path::Path) -> Option<Self> {
-        let s = std::fs::read_to_string(path).ok()?;
-        let s = s.trim();
-        // A token is a short opaque string (GNOME: a UUID).
+    /// A token from saved text; `None` unless it looks like one (printable
+    /// ASCII without spaces, at most 256 bytes; GNOME's are UUIDs).
+    pub fn new(text: &str) -> Option<Self> {
+        let s = text.trim();
         (!s.is_empty() && s.len() <= 256 && s.bytes().all(|b| b.is_ascii_graphic()))
             .then(|| Self(s.to_owned()))
     }
 
-    /// Writes the token readable by this user only (L8): a new file is
-    /// created 0600 and renamed over the old one.
-    fn save(&self, path: &std::path::Path) -> std::io::Result<()> {
-        use std::io::Write;
-        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
-        if let Some(dir) = path.parent() {
-            std::fs::create_dir_all(dir)?;
-        }
-        let tmp = path.with_extension("new");
-        let _ = std::fs::remove_file(&tmp);
-        let mut f = std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .mode(0o600)
-            .open(&tmp)?;
-        // create_new + mode: but the umask can only remove bits; make sure.
-        f.set_permissions(std::fs::Permissions::from_mode(0o600))?;
-        f.write_all(self.0.as_bytes())?;
-        f.sync_all()?;
-        std::fs::rename(&tmp, path)
+    /// The text, to save it (never to log it).
+    pub fn expose(&self) -> &str {
+        &self.0
     }
 }
 
@@ -223,6 +207,8 @@ struct Started {
     fd: OwnedFd,
     node: u32,
     size: (u32, u32),
+    /// GNOME issues a new token for every session; the app saves it.
+    new_token: Option<RestoreToken>,
 }
 
 /// Screen capture through the desktop portal and PipeWire.
@@ -236,6 +222,7 @@ pub struct PortalCapture {
     /// done (the session closed).
     portal: Option<(tokio::task::JoinHandle<()>, mpsc::Receiver<()>)>,
     input: Option<PortalInput>,
+    new_token: Option<RestoreToken>,
     pipewire: Option<(pw::channel::Sender<PwMsg>, JoinHandle<()>)>,
     /// INV11/L6: the portal task reports GNOME's "Stop" through this.
     closed: ClosedSlot,
@@ -312,6 +299,7 @@ impl PortalCapture {
             portal_tx,
             portal: Some((task, done_rx)),
             input,
+            new_token: started.new_token,
             pipewire: None,
             closed,
         })
@@ -320,6 +308,12 @@ impl PortalCapture {
     /// The input side of this session, if control was asked for.
     pub fn input(&self) -> Option<PortalInput> {
         self.input.clone()
+    }
+
+    /// The permission to save for the next session (once; GNOME replaces
+    /// the token every session, so the latest must be kept).
+    pub fn take_new_token(&mut self) -> Option<RestoreToken> {
+        self.new_token.take()
     }
 }
 
@@ -434,7 +428,7 @@ async fn portal_task(
         }
     };
     {
-        let token = opts.token_file.as_deref().and_then(RestoreToken::load);
+        let token = opts.restore_token.clone();
         let monitor = SelectSourcesOptions::default()
             .set_cursor_mode(CursorMode::Embedded)
             .set_sources(ashpd::enumflags2::BitFlags::from_flag(SourceType::Monitor))
@@ -498,14 +492,22 @@ async fn portal_task(
                     return;
                 }
             };
-            save_token(&opts, devices.restore_token());
+            let new_token = devices.restore_token().and_then(RestoreToken::new);
             let Some(stream) = devices.streams().first() else {
                 let _ = started.send(Err(CaptureError::NoDisplay));
                 return;
             };
             let node = stream.pipe_wire_node_id();
             let size = logical_size(stream.size());
-            if started.send(Ok(Started { fd, node, size })).is_err() {
+            if started
+                .send(Ok(Started {
+                    fd,
+                    node,
+                    size,
+                    new_token,
+                }))
+                .is_err()
+            {
                 let _ = session.close().await;
                 return;
             }
@@ -580,14 +582,22 @@ async fn portal_task(
                     return;
                 }
             };
-            save_token(&opts, streams.restore_token());
+            let new_token = streams.restore_token().and_then(RestoreToken::new);
             let Some(stream) = streams.streams().first() else {
                 let _ = started.send(Err(CaptureError::NoDisplay));
                 return;
             };
             let node = stream.pipe_wire_node_id();
             let size = logical_size(stream.size());
-            if started.send(Ok(Started { fd, node, size })).is_ok() {
+            if started
+                .send(Ok(Started {
+                    fd,
+                    node,
+                    size,
+                    new_token,
+                }))
+                .is_ok()
+            {
                 let mut closed = session.receive_closed().await.ok().map(Box::pin);
                 loop {
                     tokio::select! {
@@ -611,20 +621,6 @@ async fn portal_task(
             }
             let _ = session.close().await;
         }
-    }
-}
-
-fn save_token(opts: &PortalOptions, new: Option<&str>) {
-    let (Some(path), Some(new)) = (opts.token_file.as_deref(), new) else {
-        return;
-    };
-    // GNOME hands out a new token for each session; keep the latest.
-    if let Err(e) = RestoreToken(new.to_owned()).save(path) {
-        // The path and the error, never the token (L8).
-        eprintln!(
-            "could not save the screen-sharing permission in {}: {e}",
-            path.display()
-        );
     }
 }
 
@@ -966,21 +962,21 @@ mod tests {
     }
 
     #[test]
-    fn l8_the_restore_token_is_never_printed_and_saved_0600() {
-        use std::os::unix::fs::PermissionsExt;
-        let t = RestoreToken("secret-capability".into());
+    fn l8_the_restore_token_is_never_printed() {
+        let t = RestoreToken::new("secret-capability").expect("a token");
         assert_eq!(format!("{t:?}"), "RestoreToken([redacted])");
-        let dir = std::env::temp_dir().join(format!("remora-token-{}", std::process::id()));
-        let path = dir.join("portal-token");
-        t.save(&path).expect("save");
-        let mode = std::fs::metadata(&path).expect("meta").permissions().mode();
-        assert_eq!(mode & 0o777, 0o600, "token file mode {mode:o}");
         assert_eq!(
-            RestoreToken::load(&path).map(|t| t.0),
-            Some("secret-capability".into())
+            format!(
+                "{:?}",
+                PortalOptions {
+                    restore_token: Some(t.clone()),
+                    control: true
+                }
+            ),
+            "PortalOptions { restore_token: Some(RestoreToken([redacted])), control: true }"
         );
-        std::fs::write(&path, "two words").expect("write");
-        assert!(RestoreToken::load(&path).is_none(), "not a token");
-        let _ = std::fs::remove_dir_all(dir);
+        assert_eq!(t.expose(), "secret-capability");
+        assert_eq!(RestoreToken::new(" two words "), None, "not a token");
+        assert_eq!(RestoreToken::new(&"x".repeat(257)), None, "too long");
     }
 }

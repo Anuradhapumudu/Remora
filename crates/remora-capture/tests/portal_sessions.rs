@@ -13,15 +13,23 @@
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
-use remora_capture::{CaptureConfig, CaptureEvent, PortalCapture, PortalOptions, ScreenCapture};
+use remora_capture::{
+    CaptureConfig, CaptureEvent, PortalCapture, PortalOptions, RestoreToken, ScreenCapture,
+};
+
+/// The saved permission named by REMORA_PORTAL_TOKEN (read only; the host
+/// app keeps it up to date).
+fn token() -> Option<RestoreToken> {
+    let path = std::env::var_os("REMORA_PORTAL_TOKEN")?;
+    RestoreToken::new(&std::fs::read_to_string(path).ok()?)
+}
 
 fn one_session(round: u32) {
-    let token = std::env::var_os("REMORA_PORTAL_TOKEN").map(Into::into);
     let t = Instant::now();
     let mut cap = PortalCapture::open(
         CaptureConfig::default(),
         PortalOptions {
-            token_file: token,
+            restore_token: token(),
             control: true,
         },
     )
@@ -62,11 +70,10 @@ fn two_portal_sessions_in_one_process() {
 #[test]
 #[ignore = "needs a desktop session and a saved portal permission"]
 fn every_input_kind_reaches_the_portal() {
-    let token = std::env::var_os("REMORA_PORTAL_TOKEN").map(Into::into);
     let cap = PortalCapture::open(
         CaptureConfig::default(),
         PortalOptions {
-            token_file: token,
+            restore_token: token(),
             control: true,
         },
     )

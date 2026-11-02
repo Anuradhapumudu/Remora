@@ -15,7 +15,7 @@ use std::time::{Duration, Instant};
 mod sys;
 
 #[cfg(target_os = "linux")]
-pub use sys::linux::{PortalCapture, PortalInput, PortalOptions};
+pub use sys::linux::{PortalCapture, PortalInput, PortalOptions, RestoreToken};
 #[cfg(target_os = "macos")]
 pub use sys::macos::{MacScreenCapture, PixelBufferRef};
 

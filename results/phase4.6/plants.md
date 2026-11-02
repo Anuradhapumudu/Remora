@@ -59,8 +59,8 @@ had an injector configured and checked it); test added; rerun 8 caught,
 
 | Row | Plant (the real failure) | Caught by |
 |---|---|---|
-| L8 | Restore-token file created 0644 | `crates/remora-capture/src/sys/linux.rs::l8_the_restore_token_is_never_printed_and_saved_0600` ("token file mode 100644") |
-| L8 | Restore token's `Debug` prints the token | same test (`left: "RestoreToken(secret-capability)"`) |
+| L8 | Restore-token file created 0644 | `crates/remora-app/src/token_file.rs::l8_the_token_file_is_owner_only_and_round_trips` ("token file mode 100644"; moved here 2026-11-02, replanted and caught again — first caught by the test's earlier home in remora-capture) |
+| L8 | Restore token's `Debug` prints the token | `crates/remora-capture/src/sys/linux.rs::l8_the_restore_token_is_never_printed` (`left: "RestoreToken(secret-capability)"`; replanted after the move, caught) |
 | L3 (buffer) | PipeWire picture copied without checking its length | `crates/remora-capture/src/sys/linux.rs::copy_picture_refuses_numbers_that_do_not_fit` (panicked: index out of range) |
 | — (colour) | Not planted: **found**. The spike's chroma coefficients (-26, -87, 112) sum to -1, tinting every grey (U = 127) | `crates/remora-codec/src/yuv.rs::colours_match_bt709_video_range_within_one_step` failed on first run; fixed to -86 |
 | — (portal) | Not planted: **seen for real** with the first version (one tokio runtime per portal session): the second session in one host process hung 120 s with no dialog (host log 2026-11-02 09:30-09:32 UTC) | `crates/remora-capture/tests/portal_sessions.rs::two_portal_sessions_in_one_process` (ignored in CI: needs a desktop; laptop: 3 sessions, 23-30 ms each, 1920x1080 pictures) |
@@ -80,3 +80,13 @@ answers with IDRs; the fake now changes one pixel, as a still desktop does.
 | Row | Plant (the real failure) | Caught by |
 |---|---|---|
 | L7 | Input sent as a plaintext envelope instead of Noise-sealed | Kept as `crates/remora-net/tests/l7_input_sealed.rs::l7_plant_unsealed_input_would_be_seen`: the scan finds the plaintext and the host delivers nothing; `::l7_input_is_sealed_on_the_stream_and_still_arrives` is the real check |
+
+### Why the L8 file code moved (2026-11-02)
+
+The workspace policy test (`remora-testkit/tests/policy.rs`) refused the
+first version: `[file write in a crate that handles screen content]
+crates/remora-capture/src/sys/linux.rs`. Crates that touch pictures may
+not write files, so no screen content can reach the disk from them. The
+token is now passed in and out of remora-capture as a value and stored by
+`remora_app::token_file`. Found by the existing check, which had not run
+on the new file before (it scans every source file on every OS).

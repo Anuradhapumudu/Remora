@@ -66,7 +66,9 @@ pub(crate) struct Counters {
     /// LP4: how long each stale period lasted, ms: from the first picture
     /// that could not be decoded (a gap or an error) to the next decoded
     /// one. Starts at detection, so the loss itself (one picture earlier)
-    /// is not included. At most [`MAX_RECOVERIES`] are kept.
+    /// is not included. At most [`MAX_RECOVERIES`] are kept. (macOS: the
+    /// video window that shows them exists there only.)
+    #[cfg(target_os = "macos")]
     pub(crate) recoveries: std::sync::Mutex<Vec<u32>>,
     /// Dropped because the decoder was busy (or there is none).
     pub(crate) dropped: AtomicU64,
@@ -87,6 +89,7 @@ pub(crate) struct Counters {
 }
 
 /// Recovery times kept for the stats line (oldest dropped first).
+#[cfg(target_os = "macos")]
 pub(crate) const MAX_RECOVERIES: usize = 10_000;
 
 /// Pictures on their way to the window at most: more would only add
@@ -119,6 +122,7 @@ impl Counters {
     }
 
     /// One stale period ended after `took` (LP4).
+    #[cfg(target_os = "macos")]
     pub(crate) fn recovered(&self, took: std::time::Duration) {
         if let Ok(mut v) = self.recoveries.lock() {
             if v.len() >= MAX_RECOVERIES {
@@ -129,6 +133,7 @@ impl Counters {
     }
 
     /// LP4 so far: how many recoveries, and their p50 / p95 / max in ms.
+    #[cfg(target_os = "macos")]
     pub(crate) fn recovery(&self) -> Option<(usize, u32, u32, u32)> {
         let mut v = self.recoveries.lock().ok()?.clone();
         if v.is_empty() {
@@ -317,7 +322,7 @@ mod tests {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, target_os = "macos"))]
 mod lp4_tests {
     use std::time::Duration;
 

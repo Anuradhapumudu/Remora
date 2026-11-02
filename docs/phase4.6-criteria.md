@@ -125,7 +125,7 @@ sessions). Plants: `results/phase4.6/plants.md`; numbers:
 | L5 | **Met** (as specified) | H9 unit test (one active session); manual: only `accept`/`deny`/`disconnect` typed in the host terminal act, and a second viewer is refused while one is Active |
 | L6 | **Met, with a finding** | GNOME's indicator shows during every session; one click ends it at once since 0ae615c (seen live). **Finding D-54:** hidden while an app is full screen |
 | L7 | **Met** | `remora-net/tests/l7_input_sealed.rs`: a real session over QUIC sends every input kind with a random canary; no 8-byte window of any input's plaintext appears in the frames handed to QUIC, and the host receives each input intact. The plant (input sent as plaintext) is kept as a test that must see the plaintext and no delivery |
-| L8 | **Met** | `remora-capture/src/sys/linux.rs::l8_the_restore_token_is_never_printed_and_saved_0600` (plants 0644 and printed token, both caught); the token is never logged |
+| L8 | **Met** | file: `remora-app/src/token_file.rs::l8_the_token_file_is_owner_only_and_round_trips` (plant 0644 caught); `Debug`: `remora-capture/src/sys/linux.rs::l8_the_restore_token_is_never_printed` (plant caught). The file is written by remora-app, never by remora-capture (the policy test refused the first version that did) |
 
 ### Performance targets
 
