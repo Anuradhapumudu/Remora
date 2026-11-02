@@ -166,6 +166,19 @@ mod tests {
             Err(AudioCodecError::Size)
         );
         assert_eq!(dec.conceal().expect("plc").len(), FRAME * CHANNELS);
+        // Exactly the limit reaches libopus (which may refuse it as Opus
+        // data, but not as too large).
+        assert_ne!(
+            dec.decode(&vec![0; MAX_OPUS_BYTES]),
+            Err(AudioCodecError::Size)
+        );
+    }
+
+    #[test]
+    fn a4_codecs_print_only_their_name() {
+        let enc = AudioEncoder::new(DEFAULT_BITRATE).expect("enc");
+        let dec = AudioDecoder::new().expect("dec");
+        assert_eq!(format!("{enc:?} {dec:?}"), "AudioEncoder AudioDecoder");
     }
 
     #[test]

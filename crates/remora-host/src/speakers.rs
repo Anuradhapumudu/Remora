@@ -74,7 +74,8 @@ pub(crate) fn parse_inspect_id(out: &str) -> Option<u32> {
     let first = out.lines().next()?.trim();
     let rest = first.strip_prefix("id ")?;
     let digits = rest.split(',').next()?;
-    if digits.is_empty() || digits.len() > 10 || !digits.bytes().all(|b| b.is_ascii_digit()) {
+    // `parse` alone would accept "+5"; empty and too-long ids fail it.
+    if !digits.bytes().all(|b| b.is_ascii_digit()) {
         return None;
     }
     digits.parse().ok()
@@ -239,6 +240,15 @@ pub(crate) mod tests {
         assert!(probe.muted(id).expect("read"), "not muted");
         drop(guard);
         assert!(!probe.muted(id).expect("read"), "not restored");
+    }
+
+    #[test]
+    fn a4_the_guard_prints_only_the_output_id() {
+        let g = SpeakersMuted {
+            mixer: Box::new(FakeMixer(fake(62, false))),
+            id: 62,
+        };
+        assert_eq!(format!("{g:?}"), "SpeakersMuted(62)");
     }
 
     #[test]

@@ -80,3 +80,28 @@ ended the session, as the input rules require.
 | AU1 | Catch-up switched off (`CATCH_UP = 1.0`): a buffer that filled while the earbuds started stays full (the live 110 ms) | `crates/remora-viewer/src/sound.rs::tests::a_full_buffer_drains_back_to_start` ("still holding 4800 frames") | 2026-11-03 |
 | AU1 | A run-dry no longer reopens the resync window: the burst after a gap stays queued (the live jump to ~110 ms) | `crates/remora-viewer/src/sound.rs::tests::a_backlog_right_after_running_dry_is_dropped_at_once` ("kept a backlog of 4800 frames") | 2026-11-03 |
 | A4 | `AudioPacket`'s `Debug` prints the Opus bytes instead of their count | `crates/remora-proto/tests/a4_debug.rs::a4_audio_packets_print_no_sound` (canary scan found the bytes) | 2026-11-03 |
+
+## Mutation testing, protocol / codec / host speakers (2026-11-03)
+
+| Scope | Caught | Missed | Unviable |
+|---|---|---|---|
+| `crates/remora-proto/src/audio.rs` | 7 | 0 | 1 |
+| `crates/remora-codec/src/audio.rs`, first run | 23 | **3** | 1 |
+| same, after the tests in this commit | 26 | 0 | 1 |
+| `crates/remora-host/src/speakers.rs`, first run (on the Mac) | 13 | **13** | 1 |
+| same, mixer logic, parser and guard, after this commit | 13 | 0 | 1 |
+| `Wpctl` (Linux only) on the laptop | — | — | not run: the live test refused to start, the speakers being already muted (see below) |
+
+Codec misses: the decoder's size limit at exactly MAX_OPUS_BYTES, and
+the two `Debug` forms. Speaker misses: 8 were the Linux-only `Wpctl`
+(not built on the Mac); 4 showed the id parser's empty and length checks
+duplicated `parse` (removed; the digits-only check stays, since `parse`
+accepts "+5", now tested); 1 the guard's `Debug`.
+
+**Open (2026-11-03, 03:33):** the laptop's speakers were found muted
+although the owner did not mute them. WirePlumber's
+`~/.local/state/wireplumber/default-routes` was last saved with
+`"mute":true` at 01:43:48, during the session that ended with "input
+refused" and printed "speakers: restored". The next host (01:45:30)
+found them muted and, by design, left them alone. A7 is not "met" until
+this is explained; the restore is not verified today.
