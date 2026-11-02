@@ -115,3 +115,12 @@ this is explained; the restore is not verified today.
 | A7 | The repair trusts the noted number without the name (after a reboot it would unmute another output) | `speakers.rs::tests::a7_repair_finds_the_output_by_name_after_a_restart`, `a7_repair_leaves_alone_what_it_cannot_identify_or_what_plays` | 2026-11-03 |
 | A7 | Mutes even when the note could not be written | `speakers.rs::tests::a7_no_note_no_mute` | 2026-11-03 |
 | (viewer quit) | Quitting (Cmd+Q) without asking the session to disconnect | `crates/remora-viewer/src/quit.rs::tests::quitting_asks_for_the_goodbye_and_waits_for_it` ("quit without waiting for the goodbye") | 2026-11-03 |
+
+## Fuzz target `opus_decode` (2026-11-03, night)
+
+The criteria (§3 A3, §7) relied on a fuzz target "around" libopus, but
+`audio_packet` only fuzzed the parser: nothing fed the decoder. Added.
+
+| ID | Planted failure | Caught by | Date |
+|---|---|---|---|
+| A3 | The decoder wrapper returns more than one 20 ms frame (`resize(FRAME*CHANNELS + 1)`) | `fuzz/fuzz_targets/opus_decode.rs` — libFuzzer "deadly signal" on the size assertion within seconds | 2026-11-03 |
