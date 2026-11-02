@@ -211,7 +211,9 @@ impl DeviceList {
     }
 
     /// Loads `path`; a missing file is an empty list. Refused if others
-    /// can read it, or if it is too large (checked before reading).
+    /// can read it. At most [`MAX_FILE`] + 1 bytes are ever read, so a
+    /// larger file (even one that grew after it was opened) is refused by
+    /// [`parse`](Self::parse) without being read whole.
     pub fn load(path: &Path) -> Result<Self, DevicesError> {
         let meta = match fs::metadata(path) {
             Ok(m) => m,
@@ -219,9 +221,6 @@ impl DeviceList {
             Err(e) => return Err(e.into()),
         };
         check_permissions(&meta)?;
-        if meta.len() > MAX_FILE as u64 {
-            return Err(DevicesError::TooLarge);
-        }
         let mut text = String::new();
         fs::File::open(path)?
             .take(MAX_FILE as u64 + 1)
@@ -320,6 +319,54 @@ mod tests {
     }
 
     #[test]
+    fn counts_and_iteration_reflect_the_list() {
+        let mut l = DeviceList::new();
+        assert!(l.is_empty());
+        assert_eq!(l.len(), 0);
+        for name in ["a", "b", "c"] {
+            l.remember(device(name)).expect("add");
+        }
+        assert!(!l.is_empty());
+        assert_eq!(l.len(), 3);
+        let names: Vec<&str> = l.iter().map(|d| d.name.as_str()).collect();
+        assert_eq!(names, ["a", "b", "c"], "oldest first");
+    }
+
+    #[test]
+    fn limits_hold_exactly_at_the_boundary() {
+        // A name of exactly MAX_NAME bytes is kept, one more is not.
+        let mut l = DeviceList::new();
+        l.remember(device(&"n".repeat(MAX_NAME)))
+            .expect("exactly the limit");
+        // A full list (MAX_DEVICES, long names) fits in a file and reads back.
+        let mut full = DeviceList::new();
+        for _ in 0..MAX_DEVICES {
+            full.remember(device(&"n".repeat(MAX_NAME))).expect("room");
+        }
+        let text = full.render();
+        assert!(text.len() < MAX_FILE, "{} bytes", text.len());
+        assert_eq!(DeviceList::parse(&text).expect("a full list parses"), full);
+        // A file of exactly MAX_FILE bytes is read; one byte more is not
+        // (blank lines are allowed, so padding keeps it valid).
+        let base = l.render();
+        let exact = format!("{base}{}", "\n".repeat(MAX_FILE - base.len()));
+        assert_eq!(exact.len(), MAX_FILE);
+        assert_eq!(DeviceList::parse(&exact).expect("exactly MAX_FILE"), l);
+        assert!(matches!(
+            DeviceList::parse(&format!("{exact}\n")),
+            Err(DevicesError::TooLarge)
+        ));
+    }
+
+    #[test]
+    fn hex_fields_refuse_a_sign() {
+        // Rust's from_str_radix accepts a leading '+'; ours must not.
+        let key = crate::cli::identity_hex(&device("x").key);
+        let text = format!("{HEADER}\n{key} - +7\n");
+        assert!(DeviceList::parse(&text).is_err());
+    }
+
+    #[test]
     fn remember_updates_by_key_and_forget_removes() {
         let mut l = DeviceList::new();
         let mut d = device("old name");
@@ -373,6 +420,31 @@ mod tests {
             DeviceList::new().remember(device(&"n".repeat(MAX_NAME + 1))),
             Err(DevicesError::NameTooLong)
         ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn files_of_exactly_the_limit_load_and_larger_ones_are_refused() {
+        use std::os::unix::fs::PermissionsExt;
+        let d = dir("size");
+        fs::create_dir_all(&d).expect("dir");
+        let path = d.join("saved-devices");
+        let mut l = DeviceList::new();
+        l.remember(device("x")).expect("add");
+        let base = l.render();
+        let exact = format!("{base}{}", "\n".repeat(MAX_FILE - base.len()));
+        fs::write(&path, &exact).expect("write");
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).expect("chmod");
+        assert_eq!(DeviceList::load(&path).expect("exactly MAX_FILE"), l);
+        fs::write(&path, format!("{exact}\n")).expect("write");
+        assert!(matches!(
+            DeviceList::load(&path),
+            Err(DevicesError::TooLarge)
+        ));
+        // Not "missing": a path that cannot be read is an error, not empty.
+        let under_a_file = path.join("x");
+        assert!(DeviceList::load(&under_a_file).is_err());
+        let _ = fs::remove_dir_all(d);
     }
 
     #[cfg(unix)]

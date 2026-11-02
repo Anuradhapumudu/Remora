@@ -27,3 +27,22 @@ The earlier C3 plant in `remora-net` (deadlocked, not valid) is
 superseded by this one: the realistic place for an "approve known
 viewers automatically" bug is the host app's prompt handler, and the
 test drives that app with a real remembered viewer.
+| C7 (session) | `Host::set_trusted` does nothing | `crates/remora-session/tests/flow.rs::c7_set_trusted_remembers_and_forgets_for_the_next_connection` ("remembered: prompted, not let in") | 2026-11-02 |
+| C8 | `saved` (viewer) prints the saved computer's raw name | `crates/remora-viewer/src/main.rs::c8_tests::c8_saved_names_are_shown_escaped` (the hostile name injected a fake "saved: Bank" line) | 2026-11-02 |
+| C8 | `known` (host) prints the viewer's raw name | `crates/remora-host/src/serve.rs::c8_tests::c8_known_viewer_names_are_shown_escaped` (fake "known: Admin" line) | 2026-11-02 |
+
+## Mutation testing (focused, `--no-config -f <file>`), 2026-11-02
+
+| Scope | Caught | Missed | Unviable |
+|---|---|---|---|
+| `crates/remora-app/src/devices.rs`, first run | 47 | **12** | 4 |
+| same, after the tests below | 56 | **0** | 4 |
+| `crates/remora-net/src/host.rs` `set_trusted` | 1 | 0 | 0 |
+
+The 12 first misses were real gaps: boundaries (a name of exactly 64
+bytes, a file of exactly MAX_FILE bytes), counts that no test read
+(`len`, `is_empty`, `iter`), a load error other than "missing" treated
+as missing, and the hex check: Rust's `from_str_radix` accepts a
+leading `+`, which only our pre-check refuses ("+7" is now tested, also
+in discovery). The duplicated size check in `load` was removed: reading
+at most MAX_FILE + 1 bytes and letting `parse` refuse is the one check.

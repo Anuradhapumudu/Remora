@@ -42,6 +42,10 @@ examine_globs = [
     # Host side of remote control: input only while Active, release on every
     # session end (phase4.6 L1, L2).
     "crates/remora-host/src/control.rs",
+    # Remembered devices: owner-only files, limits (phase4.7 C6).
+    "crates/remora-app/src/devices.rs",
+    # Home-network answers are untrusted input (phase4.7 C4).
+    "crates/remora-net/src/discovery.rs",
 ]
 
 # Test-only modules inside src/ (they ARE the tests; mutating them is noise).

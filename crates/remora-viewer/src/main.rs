@@ -696,18 +696,28 @@ fn key_path(file: Option<PathBuf>) -> anyhow::Result<PathBuf> {
 /// `remora-viewer saved` (names escaped: untrusted text, H6/C8).
 fn list_saved(file: Option<PathBuf>) -> anyhow::Result<()> {
     let list = DeviceList::load(&saved_path(&key_path(file)?))?;
-    if list.is_empty() {
-        println!("no saved computers (connect with --save to save one)");
-    }
-    for d in list.iter() {
-        let addr = d.addr.map_or_else(|| "-".to_owned(), |a| a.to_string());
-        println!(
-            "saved: {} (device {}, last at {addr})",
-            display_name(&d.name),
-            d.code()
-        );
+    for line in saved_lines(&list) {
+        println!("{line}");
     }
     Ok(())
+}
+
+/// What `saved` prints: one line per computer, its untrusted name escaped
+/// (C8, H6).
+fn saved_lines(list: &DeviceList) -> Vec<String> {
+    if list.is_empty() {
+        return vec!["no saved computers (connect with --save to save one)".into()];
+    }
+    list.iter()
+        .map(|d| {
+            let addr = d.addr.map_or_else(|| "-".to_owned(), |a| a.to_string());
+            format!(
+                "saved: {} (device {}, last at {addr})",
+                display_name(&d.name),
+                d.code()
+            )
+        })
+        .collect()
 }
 
 /// `remora-viewer forget <code>`.
@@ -810,6 +820,33 @@ fn init_logging() {
         .with_env_filter(filter)
         .with_writer(std::io::stderr)
         .try_init();
+}
+
+/// phase4.7-criteria C8: a saved computer's name is untrusted text (the
+/// host chose it); `saved` must never print it raw.
+#[cfg(test)]
+mod c8_tests {
+    use super::*;
+
+    #[test]
+    fn c8_saved_names_are_shown_escaped() {
+        let mut list = DeviceList::new();
+        let hostile = "Office\nsaved: Bank (device 0000 000 0000-0) \u{202e}evil";
+        list.remember(Device {
+            key: remora_crypto::identity::IdentityKeypair::generate(&mut rand_core::OsRng).public(),
+            name: hostile.into(),
+            addr: None,
+        })
+        .expect("add");
+        let lines = saved_lines(&list);
+        assert_eq!(lines.len(), 1);
+        assert!(
+            !lines[0].contains('\n'),
+            "a newline in a name made a second line: {lines:?}"
+        );
+        assert!(!lines[0].contains('\u{202e}'), "bidi override shown raw");
+        assert!(lines[0].contains(&display_name(hostile)));
+    }
 }
 
 /// phase4.7-criteria C1: a saved computer only in trusted mode against

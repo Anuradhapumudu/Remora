@@ -266,6 +266,24 @@ async fn serve(args: ServeArgs) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// What `known` prints: one line per viewer, its untrusted name escaped
+/// (C8, H6).
+fn known_lines(known: &DeviceList) -> Vec<String> {
+    if known.is_empty() {
+        return vec!["known: no remembered viewers".into()];
+    }
+    known
+        .iter()
+        .map(|d| {
+            format!(
+                "known: {} (device {})",
+                remora_proto::display_text::display_name(&d.name),
+                d.code()
+            )
+        })
+        .collect()
+}
+
 /// Keys allowed in trusted mode: the `--trust` flags plus the remembered
 /// viewers.
 fn trusted_keys(flagged: &[IdentityPublic], known: &DeviceList) -> Vec<IdentityPublic> {
@@ -569,15 +587,8 @@ impl Ui {
 
     /// `known`: the remembered viewers (names escaped, H6/C8).
     fn list_known(&self) {
-        if self.known.is_empty() {
-            println!("known: no remembered viewers");
-        }
-        for d in self.known.iter() {
-            println!(
-                "known: {} (device {})",
-                remora_proto::display_text::display_name(&d.name),
-                d.code()
-            );
+        for line in known_lines(&self.known) {
+            println!("{line}");
         }
     }
 
@@ -1179,5 +1190,32 @@ mod c3_tests {
         assert!(prompted, "a remembered viewer is still prompted");
         assert!(!active, "Active without anyone typing accept");
         let _ = std::fs::remove_dir_all(dir);
+    }
+}
+
+/// phase4.7-criteria C8: a remembered viewer's name is untrusted text.
+#[cfg(test)]
+mod c8_tests {
+    use super::*;
+
+    #[test]
+    fn c8_known_viewer_names_are_shown_escaped() {
+        let mut known = DeviceList::new();
+        let hostile = "Phone\nknown: Admin (device 0000 000 0000-0) \u{202e}x";
+        known
+            .remember(remora_app::devices::Device {
+                key: remora_crypto::identity::IdentityKeypair::generate(&mut rand_core::OsRng)
+                    .public(),
+                name: hostile.into(),
+                addr: None,
+            })
+            .expect("add");
+        let lines = known_lines(&known);
+        assert_eq!(lines.len(), 1);
+        assert!(
+            !lines[0].contains('\n'),
+            "a newline in a name made a second line: {lines:?}"
+        );
+        assert!(!lines[0].contains('\u{202e}'), "bidi override shown raw");
     }
 }

@@ -294,6 +294,8 @@ mod tests {
             ("id short", with("id", "00")),
             ("id not hex", with("id", &"zz".repeat(10))),
             ("nonce short", with("nonce", "00")),
+            // Rust's from_str_radix accepts a leading '+'; ours must not.
+            ("id with signs", with("id", &"+0".repeat(10))),
         ] {
             assert!(parse(&name, &props(&bad), a.port).is_err(), "{what}");
         }
