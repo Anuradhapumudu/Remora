@@ -294,7 +294,8 @@ fn invalid_datagram_headers_are_rejected() {
     };
     assert_eq!(with(&|d| d.truncate(31)), Some(DatagramError::TooShort));
     assert_eq!(with(&|d| d[0] = 0), Some(DatagramError::UnknownKind(0)));
-    assert_eq!(with(&|d| d[0] = 4), Some(DatagramError::UnknownKind(4)));
+    // The first kind after the last defined one (0x04 audio since phase 4.8).
+    assert_eq!(with(&|d| d[0] = 5), Some(DatagramError::UnknownKind(5)));
     assert_eq!(with(&|d| d[1] = 0b1000), Some(DatagramError::UnknownFlags));
     assert_eq!(with(&|d| d[15] = 1), Some(DatagramError::Reserved));
     assert_eq!(with(&|_| {}), None);

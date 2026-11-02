@@ -358,7 +358,8 @@ Internet path; PMTU discovery may raise it later).
 
 ```
 Clear header (authenticated as AAD, 16 bytes)
- 0      u8   kind        0x01 video fragment, 0x02 FEC repair, 0x03 pointer motion
+ 0      u8   kind        0x01 video fragment, 0x02 FEC repair, 0x03 pointer motion,
+                         0x04 audio packet (phase 4.8)
  1      u8   flags       bit0 keyframe, bit1 last fragment, bit2 refinement frame
  2..4   u16  key_id      which announced sender key
  4..12  u64  counter     per-key packet counter → AEAD nonce, replay window
@@ -368,7 +369,14 @@ Clear header (authenticated as AAD, 16 bytes)
 Encrypted body (ChaCha20-Poly1305, 16-byte tag)
  video:  frame_id u32, frag_index u16, frag_count u16, fec_group u16, capture_ts_us u64, data…
  motion: x f32, y f32, monitor u16, seq u32
+ audio:  seq u32, capture_ts_us u64, Opus packet (1..=1000 bytes)
 ```
+
+* **Audio** (phase 4.8, `remora_proto::audio`): one 20 ms Opus packet (48
+  kHz stereo) per datagram, no fragments; `seq` +1 per packet,
+  `capture_ts_us` on the shared clock for lip sync. Sealed, replay-checked
+  and key-rotated exactly like video (same per-session media key). Bodies
+  with no data or more than 1000 Opus bytes are refused before decoding.
 
 * **Nonce** = 4 zero bytes ‖ `counter` (8 bytes). Each key is used by exactly
   one sender, so nonces never repeat. Keys rotate after 2³² packets or 1 hour.

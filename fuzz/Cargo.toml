@@ -130,3 +130,10 @@ path = "fuzz_targets/mdns_record.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "audio_packet"
+path = "fuzz_targets/audio_packet.rs"
+test = false
+doc = false
+bench = false

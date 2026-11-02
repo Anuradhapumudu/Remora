@@ -8,6 +8,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod audio;
 pub mod code;
 mod crc32;
 pub mod datagram;
