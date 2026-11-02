@@ -127,6 +127,16 @@ dependency.
 6. One app on the Mac (share + connect).
 7. Live test Mac ↔ laptop; report; roadmap.
 
+## 6b. Scope change (owner, 2026-11-02): "Close 4.7 lean, then sound"
+
+Item 4 of §1 (one app on the Mac) and build step 6 move out of this
+phase to roadmap D-55, after sound (Phase 4.8). Phase 4.7 closes with the
+terminal apps, which already do everything else: `remora-viewer connect
+--device <code> [--save]`, `saved`, `forget`; `remora-host serve`
+(announcing), `remember`, `forget`, `known`. CU1 is met in the terminal
+(one command, no password, host approves); its "one click" wording
+belongs to D-55.
+
 ## 6a. Clarification while building (2026-11-02)
 
 C5 says the host announces `{device code, nonce, port}`. Built, the
