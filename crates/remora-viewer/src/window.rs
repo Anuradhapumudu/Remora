@@ -95,13 +95,9 @@ impl MuteKey {
     }
 
     /// A key; returns `true` when it belongs to the mute key (not sent).
-    /// A press toggles the mute.
-    pub(crate) fn key(
-        &mut self,
-        code: winit::keyboard::KeyCode,
-        pressed: bool,
-        repeat: bool,
-    ) -> bool {
+    /// The first press toggles the mute; auto-repeats (pressed again while
+    /// held) do not.
+    pub(crate) fn key(&mut self, code: winit::keyboard::KeyCode, pressed: bool) -> bool {
         use winit::keyboard::{KeyCode, ModifiersState};
         if code != KeyCode::KeyM {
             return false;
@@ -118,7 +114,7 @@ impl MuteKey {
         if !chord && !self.held {
             return false;
         }
-        if !repeat && !self.held {
+        if !self.held {
             let muted = crate::sound::toggle_mute();
             eprintln!(
                 "{}",
@@ -522,11 +518,9 @@ impl VideoWindow {
                 false
             }
             WindowEvent::KeyboardInput { event: k, .. } => match k.physical_key {
-                winit::keyboard::PhysicalKey::Code(code) => self.mute.key(
-                    code,
-                    k.state == winit::event::ElementState::Pressed,
-                    k.repeat,
-                ),
+                winit::keyboard::PhysicalKey::Code(code) => self
+                    .mute
+                    .key(code, k.state == winit::event::ElementState::Pressed),
                 winit::keyboard::PhysicalKey::Unidentified(_) => false,
             },
             _ => false,
@@ -681,23 +675,26 @@ mod tests {
 
     #[test]
     fn a6_the_mute_key_toggles_and_is_never_sent() {
+        let _turn = crate::sound::MUTE_TESTS.lock();
         use winit::keyboard::{KeyCode, ModifiersState};
         let mut k = MuteKey::default();
         let before = crate::sound::MUTED.load(std::sync::atomic::Ordering::Relaxed);
         // Plain M (and Cmd+Ctrl+Option+M) go to the host.
-        assert!(!k.key(KeyCode::KeyM, true, false));
-        assert!(!k.key(KeyCode::KeyM, false, false));
+        assert!(!k.key(KeyCode::KeyM, true));
+        assert!(!k.key(KeyCode::KeyM, false));
         k.set_mods(ModifiersState::CONTROL | ModifiersState::ALT | ModifiersState::SUPER);
-        assert!(!k.key(KeyCode::KeyM, true, false));
-        assert!(!k.key(KeyCode::KeyM, false, false));
+        assert!(!k.key(KeyCode::KeyM, true));
+        assert!(!k.key(KeyCode::KeyM, false));
         // Ctrl+Option+M: press, a repeat and the release (even after the
         // modifiers are let go first) stay here; one toggle.
         k.set_mods(ModifiersState::CONTROL | ModifiersState::ALT);
-        assert!(k.key(KeyCode::KeyM, true, false));
-        assert!(k.key(KeyCode::KeyM, true, true));
+        assert!(k.key(KeyCode::KeyM, true));
+        let pressed = crate::sound::MUTED.load(std::sync::atomic::Ordering::Relaxed);
+        assert_ne!(before, pressed, "the press itself toggles");
+        assert!(k.key(KeyCode::KeyM, true)); // auto-repeat: no second toggle
         k.set_mods(ModifiersState::empty());
-        assert!(k.key(KeyCode::KeyM, false, false));
-        assert!(!k.key(KeyCode::KeyN, true, false));
+        assert!(k.key(KeyCode::KeyM, false));
+        assert!(!k.key(KeyCode::KeyN, true));
         let after = crate::sound::MUTED.load(std::sync::atomic::Ordering::Relaxed);
         assert_ne!(before, after, "one press, one toggle");
         crate::sound::toggle_mute();

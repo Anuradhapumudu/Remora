@@ -30,3 +30,28 @@ always show the test's own lines.
 | A6 | Muted, the player stops consuming, so old sound piles up and plays on unmute | same test ("muted must not let sound pile up") | 2026-11-03 |
 | A6 | The mute key's M release is sent to the host | `crates/remora-viewer/src/window.rs::tests::a6_the_mute_key_toggles_and_is_never_sent` (the release assertion) | 2026-11-03 |
 | A4 (viewer) | The playout buffer derives `Debug`, printing held samples | `crates/remora-viewer/src/sound.rs::tests::a4_debug_shows_counts_never_samples` | 2026-11-03 |
+
+## Mutation testing (focused, `--no-config -f <file>`), 2026-11-03
+
+| Scope | Caught | Missed | Unviable / timeout |
+|---|---|---|---|
+| `crates/remora-viewer/src/sound.rs` + `MuteKey`, first run | 64 | **30** | 3 / 1 |
+| same, after the tests in this commit | 80 | 6 | 4 / 2 |
+| `MuteKey` alone, after the press-toggles check | all but 2 | 2 | — |
+
+The first misses were real gaps: interpolation was only tested with
+constant sound (now a rising left and falling right ramp at 96 kHz), the
+START boundary (30 ms must stay silent), a packet exactly half the seq
+space ahead, `toggle_mute`'s return value, the mute toggling on the first
+press rather than a repeat (the `repeat` argument was removed: a press
+while held is the repeat), and the sound thread itself (now run with an
+output that has no device). Left, with reasons:
+
+- `|` → `^` in `MuteKey::key` (×2): equivalent; the flags are distinct
+  bits.
+- `Output::start` → `Ok(Default)`: opens the real device; checked only by
+  the live test on the Mac.
+- `Drop for Sound` → `()`: dropping the sender already ends the thread;
+  only the `sound:` line is lost.
+- `window.rs:326` (`compatible_surface`): phase-4 window code, not this
+  phase's.

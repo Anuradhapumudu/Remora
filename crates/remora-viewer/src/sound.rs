@@ -177,6 +177,10 @@ impl Feeder {
 /// (Ctrl+Option+M, never sent to the host). One session per process.
 pub(crate) static MUTED: AtomicBool = AtomicBool::new(false);
 
+/// Tests that flip [`MUTED`] take turns (tests run in parallel).
+#[cfg(test)]
+pub(crate) static MUTE_TESTS: Mutex<()> = Mutex::new(());
+
 /// Flips [`MUTED`]; returns the new state.
 pub(crate) fn toggle_mute() -> bool {
     !MUTED.fetch_xor(true, Ordering::Relaxed)
@@ -186,42 +190,56 @@ pub(crate) fn toggle_mute() -> bool {
 /// the network task).
 const QUEUE: usize = 16;
 
+/// What the sound thread did (INV9: counts only).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) struct Counts {
+    /// Packets received.
+    pub(crate) packets: u64,
+    /// Lost packets filled by concealment.
+    pub(crate) concealed: u64,
+    /// 48 kHz frames dropped to bound the delay.
+    pub(crate) dropped: u64,
+    /// Times playback ran dry.
+    pub(crate) underruns: u64,
+    /// 48 kHz frames still waiting at the end.
+    pub(crate) held: usize,
+}
+
 /// The sound thread: owns the decoder and the output stream (cpal's
 /// stream stays on the thread that made it). Dropping this ends it and
 /// prints one `sound:` line of counts (INV9: never content).
 #[derive(Debug)]
 pub(crate) struct Sound {
     tx: Option<std::sync::mpsc::SyncSender<AudioPacket>>,
-    thread: Option<std::thread::JoinHandle<()>>,
+    thread: Option<std::thread::JoinHandle<Option<Counts>>>,
 }
 
 impl Sound {
-    /// Starts the thread; problems with the output device are printed once
-    /// and the session goes on without sound.
+    /// Starts the thread on the default output device; problems with it
+    /// are printed once and the session goes on without sound.
     pub(crate) fn start() -> Self {
+        Self::start_with(Output::start)
+    }
+
+    fn start_with(open: fn() -> anyhow::Result<Output>) -> Self {
         let (tx, rx) = std::sync::mpsc::sync_channel::<AudioPacket>(QUEUE);
         let thread = std::thread::Builder::new()
             .name("remora-sound".into())
             .spawn(move || {
-                let mut out = match Output::start() {
-                    Ok(o) => Some(o),
+                let mut out = match open() {
+                    Ok(o) => o,
                     Err(e) => {
                         println!("sound: not playing ({e:#})");
-                        None
+                        while rx.recv().is_ok() {}
+                        return None;
                     }
                 };
                 let mut packets = 0u64;
                 while let Ok(p) = rx.recv() {
                     packets += 1;
-                    if let Some(o) = out.as_mut() {
-                        o.play(&p);
-                    }
+                    out.play(&p);
                 }
-                if let Some((c, d, u)) = out.as_ref().and_then(Output::stats) {
-                    println!(
-                        "sound: {packets} packets, {c} concealed, {d} samples dropped for delay, {u} times ran dry"
-                    );
-                }
+                out.counts(packets)
             })
             .ok();
         Self {
@@ -236,13 +254,21 @@ impl Sound {
             let _ = tx.try_send(p);
         }
     }
+
+    /// Ends the thread after the packets already queued; its counts.
+    pub(crate) fn finish(&mut self) -> Option<Counts> {
+        self.tx = None;
+        self.thread.take()?.join().ok().flatten()
+    }
 }
 
 impl Drop for Sound {
     fn drop(&mut self) {
-        self.tx = None;
-        if let Some(t) = self.thread.take() {
-            let _ = t.join();
+        if let Some(c) = self.finish() {
+            println!(
+                "sound: {} packets, {} concealed, {} samples dropped for delay, {} times ran dry",
+                c.packets, c.concealed, c.dropped, c.underruns
+            );
         }
     }
 }
@@ -251,8 +277,9 @@ impl Drop for Sound {
 struct Output {
     jitter: Arc<Mutex<Jitter>>,
     feeder: Feeder,
+    /// Plays while held (macOS); `None` in tests.
     #[cfg(target_os = "macos")]
-    _stream: cpal::Stream,
+    _stream: Option<cpal::Stream>,
 }
 
 impl Output {
@@ -280,7 +307,7 @@ impl Output {
         Ok(Self {
             jitter,
             feeder: Feeder::new()?,
-            _stream: stream,
+            _stream: Some(stream),
         })
     }
 
@@ -297,9 +324,15 @@ impl Output {
     }
 
     /// Counts (no sound content: INV9).
-    fn stats(&self) -> Option<(u64, u64, u64)> {
+    fn counts(&self, packets: u64) -> Option<Counts> {
         let j = self.jitter.lock().ok()?;
-        Some((j.concealed, j.dropped, j.underruns))
+        Some(Counts {
+            packets,
+            concealed: j.concealed,
+            dropped: j.dropped,
+            underruns: j.underruns,
+            held: j.held.len(),
+        })
     }
 }
 
@@ -311,14 +344,98 @@ mod tests {
         vec![v; FRAME * CHANNELS]
     }
 
+    /// An output with no device: the jitter buffer only (tests).
+    fn silent_output() -> anyhow::Result<Output> {
+        Ok(Output {
+            jitter: Arc::new(Mutex::new(Jitter::new(RATE))),
+            feeder: Feeder::new()?,
+            #[cfg(target_os = "macos")]
+            _stream: None,
+        })
+    }
+
+    fn packets(n: u32) -> Vec<AudioPacket> {
+        use remora_codec::audio::{AudioEncoder, DEFAULT_BITRATE};
+        let mut enc = AudioEncoder::new(DEFAULT_BITRATE).expect("enc");
+        (0..n)
+            .map(|seq| AudioPacket {
+                seq,
+                capture_ts_us: 0,
+                data: enc.encode(&frame(0.1)).expect("encode"),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn the_sound_thread_decodes_what_it_is_offered() {
+        let mut s = Sound::start_with(silent_output);
+        for p in packets(3) {
+            s.offer(p);
+        }
+        let c = s.finish().expect("counts");
+        assert_eq!(c.packets, 3);
+        assert_eq!(c.held, 3 * FRAME, "every packet decoded into the buffer");
+        assert_eq!(s.finish(), None, "finished once");
+    }
+
+    #[test]
+    fn a_missing_device_plays_nothing_and_does_not_hang() {
+        let mut s = Sound::start_with(|| anyhow::bail!("no device"));
+        for p in packets(2) {
+            s.offer(p);
+        }
+        assert_eq!(s.finish(), None);
+    }
+
+    #[test]
+    fn toggle_mute_returns_the_new_state() {
+        let _turn = MUTE_TESTS.lock();
+        let now = toggle_mute();
+        assert_eq!(now, MUTED.load(Ordering::Relaxed));
+        assert_eq!(toggle_mute(), !now);
+    }
+
+    #[test]
+    fn rate_conversion_interpolates_each_channel() {
+        // 96 kHz device: every second output sample lies halfway between
+        // two input samples. Left rises, right falls, so a mixed-up
+        // formula or channel shows.
+        let mut j = Jitter::new(96_000);
+        let ramp: Vec<f32> = (0..2 * FRAME)
+            .flat_map(|i| [i as f32 / 1000.0, 1.0 - i as f32 / 1000.0])
+            .collect();
+        j.push(&ramp);
+        let mut out = vec![0.0; 2 * 8];
+        j.pull(&mut out, 2, false);
+        for (k, lr) in out.chunks(2).enumerate() {
+            let x = k as f32 * 0.5 / 1000.0;
+            assert!((lr[0] - x).abs() < 1e-6, "left {k}: {} vs {x}", lr[0]);
+            assert!((lr[1] - (1.0 - x)).abs() < 1e-6, "right {k}: {}", lr[1]);
+        }
+    }
+
+    #[test]
+    fn a_packet_far_ahead_is_played_not_taken_for_a_late_one() {
+        let ps = packets(1);
+        let mut f = Feeder::new().expect("feeder");
+        let mut j = Jitter::new(RATE);
+        f.feed(&ps[0], &mut j);
+        let mut far = ps[0].clone();
+        far.seq = 1u32.wrapping_add(u32::MAX / 2);
+        f.feed(&far, &mut j);
+        assert_eq!(j.held(), 2 * FRAME, "too far to conceal, still played");
+        assert_eq!(j.concealed, 0);
+    }
+
     #[test]
     fn waits_for_start_then_plays_and_runs_dry_cleanly() {
         let mut j = Jitter::new(RATE);
         let mut out = vec![9.0; 2 * 100];
         j.push(&frame(0.5));
+        j.push(&frame(0.5)[..FRAME]); // 30 ms: still under START
         j.pull(&mut out, 2, false);
         assert!(out.iter().all(|&s| s == 0.0), "played before START");
-        j.push(&frame(0.5));
+        j.push(&frame(0.5)[..FRAME]); // 40 ms: plays
         j.pull(&mut out, 2, false);
         assert!(out.iter().all(|&s| (s - 0.5).abs() < 1e-6));
         let mut long = vec![9.0; 2 * 3 * FRAME];
