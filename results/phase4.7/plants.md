@@ -17,3 +17,4 @@ lock), so the test hung instead of failing. A hang is not a catch. The
 approval gate lives in `remora-session` (`Host::approve`, mutation-tested
 since Phase 3); C3 is re-checked by the session crate's mutation run at
 the end of this phase, and a plant inside the session layer is to do.
+| C2 | The host remembers every viewer it accepts (auto-remember) | `crates/remora-host/src/serve.rs::c2_tests::c2_accepting_never_remembers_only_the_remember_command_does` ("accepting alone remembered the viewer") | 2026-11-02 |

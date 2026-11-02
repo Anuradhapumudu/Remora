@@ -29,6 +29,7 @@ use remora_app::cli::{
     PasswordChange, format_sas, identity_hex, key_file_warning, offer_code, parse_identity,
     short_code_of, unix_now,
 };
+use remora_app::devices::DeviceList;
 use remora_app::keystore::{self, Role};
 use remora_app::prompts::{HostCommand, SessionBook, no_such_prompt, parse_host_command};
 use remora_crypto::identity::IdentityPublic;
@@ -115,6 +116,8 @@ pub(crate) struct Setup {
     pub(crate) key_warning: String,
     /// Where a new identity was created, if one was.
     pub(crate) created: Option<PathBuf>,
+    /// The remembered viewers' file, next to the key file (phase4.7 Q4).
+    pub(crate) known_path: PathBuf,
 }
 
 /// Checks the options and loads (or creates) this host's keys.
@@ -152,18 +155,24 @@ pub(crate) fn setup(args: &ServeArgs) -> anyhow::Result<Setup> {
         public,
         trusted,
         key_warning: key_file_warning(&path),
+        known_path: path.with_file_name("known-viewers"),
         created: created.then_some(path),
     })
 }
 
 async fn serve(args: ServeArgs) -> anyhow::Result<()> {
     let Setup {
-        config,
+        mut config,
         public,
         key_warning,
         created,
-        ..
+        trusted: flagged,
+        known_path,
     } = setup(&args)?;
+    // Remembered viewers (phase4.7 C2): trusted next to any --trust keys.
+    let known = DeviceList::load(&known_path)
+        .with_context(|| format!("remembered viewers in {}", known_path.display()))?;
+    config.trusted = trusted_keys(&flagged, &known);
     // F-UX2: on EVERY run, not only when the file is created.
     eprintln!("{key_warning}");
     if let Some(path) = created {
@@ -185,7 +194,16 @@ async fn serve(args: ServeArgs) -> anyhow::Result<()> {
         control: crate::control::Control::new(None),
         rotated: false,
         video: Video::new(args.source, args.width, args.timing, Arc::clone(&ui_server)),
+        flagged,
+        known,
+        known_path,
     };
+    if !ui.known.is_empty() {
+        println!(
+            "known: {} remembered viewer(s) may connect without a password - you still approve each one (type 'known')",
+            ui.known.len()
+        );
+    }
     ui.control = crate::control::Control::new(injector(&ui.video));
     if ui.control.can_control() {
         println!("control: an accepted viewer can use this computer's mouse and keyboard");
@@ -222,6 +240,14 @@ async fn serve(args: ServeArgs) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Keys allowed in trusted mode: the `--trust` flags plus the remembered
+/// viewers.
+fn trusted_keys(flagged: &[IdentityPublic], known: &DeviceList) -> Vec<IdentityPublic> {
+    let mut keys = flagged.to_vec();
+    keys.extend(known.iter().map(|d| d.key).filter(|k| !flagged.contains(k)));
+    keys
+}
+
 /// The session layer's configuration for this app: password mode on, the
 /// `--trust` keys, and one viewer at a time (phase4.5-criteria H9, owner
 /// 2026-10-25). The GUI uses the same function, so both front ends refuse a
@@ -256,6 +282,8 @@ struct Entry {
     /// The safety code on its prompt while it waits for accept/deny
     /// (approval is bound to it, A22); `None` once active.
     pending: Option<Sas>,
+    /// Who it is (from the prompt): what `remember` would save.
+    viewer: Option<(IdentityPublic, String)>,
 }
 
 /// The host CLI's state.
@@ -272,6 +300,12 @@ struct Ui {
     /// last printed.
     rotated: bool,
     video: Video,
+    /// The `--trust` keys (trusted for this run only, never saved).
+    flagged: Vec<IdentityPublic>,
+    /// Remembered viewers (phase4.7 C2, C7): changed only by `remember`
+    /// and `forget` typed here.
+    known: DeviceList,
+    known_path: PathBuf,
 }
 
 impl Ui {
@@ -321,6 +355,7 @@ impl Ui {
                 let n = self.book.insert(Entry {
                     id,
                     pending: Some(sas),
+                    viewer: Some((viewer_key, viewer_name.clone())),
                 });
                 println!(
                     "prompt {n}: {viewer_name:?} (device {}) safety code {} - check it matches the viewer's screen, then type 'accept {n}' or 'deny {n}'",
@@ -343,14 +378,25 @@ impl Ui {
                     Some(n) => n,
                     // Every session is prompted, trusted or not (threat
                     // model §4 item 6); kept so a session never goes unnumbered.
-                    None => self.book.insert(Entry { id, pending: None }),
+                    None => self.book.insert(Entry {
+                        id,
+                        pending: None,
+                        viewer: None,
+                    }),
                 };
+                let mut viewer = None;
                 if let Some(e) = self.book.get_mut(n) {
                     e.pending = None;
+                    viewer = e.viewer.as_ref().map(|(k, _)| *k);
                 }
                 println!(
                     "SESSION ACTIVE {n}: a viewer is connected (type 'disconnect {n}' to end it)"
                 );
+                if viewer.is_some_and(|k| self.known.get(&k).is_none()) {
+                    println!(
+                        "note: type 'remember {n}' to let this viewer connect without a password next time (you still approve every connection)"
+                    );
+                }
                 self.video.active.insert(id);
             }
             // Applied (or not) by `control` above.
@@ -396,6 +442,76 @@ impl Ui {
                     );
                 }
             }
+        }
+    }
+
+    /// `remember <n>` (phase4.7 C2): only for a session the person here
+    /// accepted (its prompt is answered), never automatically.
+    fn remember(&mut self, n: u64) {
+        let Some(Entry {
+            pending: None,
+            viewer: Some((key, name)),
+            ..
+        }) = self.book.get(n)
+        else {
+            println!(
+                "remember {n}: only a viewer you accepted can be remembered (no accepted session {n})"
+            );
+            return;
+        };
+        let (key, name) = (*key, name.clone());
+        let device = remora_app::devices::Device {
+            key,
+            name: name
+                .chars()
+                .take(remora_app::devices::MAX_NAME)
+                .collect::<String>(),
+            addr: None,
+        };
+        if let Err(e) = self
+            .known
+            .remember(device)
+            .and_then(|()| self.known.save(&self.known_path))
+        {
+            println!("remember {n}: {e}");
+            return;
+        }
+        self.server
+            .set_trusted(trusted_keys(&self.flagged, &self.known));
+        println!(
+            "remembered {} (device {}): it can connect without a password; you still approve every connection. 'forget {}' undoes it",
+            remora_proto::display_text::display_name(&name),
+            short_code_of(&key),
+            short_code_of(&key)
+        );
+    }
+
+    /// `forget <device code>` (C7): takes effect for the next connection.
+    fn forget(&mut self, code: &remora_crypto::identity::ShortCode) {
+        let Some(key) = self.known.find_code(code).map(|d| d.key) else {
+            println!("forget: no remembered viewer has device code {code} (type 'known')");
+            return;
+        };
+        self.known.forget(&key);
+        if let Err(e) = self.known.save(&self.known_path) {
+            println!("forget: {e}");
+        }
+        self.server
+            .set_trusted(trusted_keys(&self.flagged, &self.known));
+        println!("forgot device {code}: it needs the password again (and your approval)");
+    }
+
+    /// `known`: the remembered viewers (names escaped, H6/C8).
+    fn list_known(&self) {
+        if self.known.is_empty() {
+            println!("known: no remembered viewers");
+        }
+        for d in self.known.iter() {
+            println!(
+                "known: {} (device {})",
+                remora_proto::display_text::display_name(&d.name),
+                d.code()
+            );
         }
     }
 
@@ -447,6 +563,7 @@ impl Ui {
                 Some(Entry {
                     id,
                     pending: Some(sas),
+                    ..
                 }) => {
                     let (id, sas) = (*id, *sas);
                     // Capture starts before the approval, so a capture
@@ -474,6 +591,9 @@ impl Ui {
                 Some(_) => println!("session {n} is already active - use 'disconnect {n}'"),
                 None => println!("{}", no_such_prompt(n, &self.waiting())),
             },
+            HostCommand::Remember(n) => self.remember(n),
+            HostCommand::Forget(code) => self.forget(&code),
+            HostCommand::Known => self.list_known(),
             HostCommand::Disconnect(n) => match self.book.get(n) {
                 Some(e) => self.server.disconnect(e.id),
                 None => println!("no session {n}"),
@@ -846,5 +966,86 @@ mod tests {
             noise: keys.noise,
         };
         assert!(host_config(identity, vec![]).one_active_session);
+    }
+}
+
+/// phase4.7-criteria C2: only the person at the host changes the list.
+#[cfg(test)]
+mod c2_tests {
+    use std::time::Duration;
+
+    use remora_crypto::identity::IdentityKeypair;
+
+    use super::*;
+
+    async fn ui(dir: &std::path::Path) -> Ui {
+        let keys = remora_crypto::identity::DeviceKeys::generate(&mut rand_core::OsRng);
+        let identity = Identity {
+            cert: keys.cert("host", 0).expect("short name"),
+            noise: keys.noise,
+        };
+        let (server, _events) = HostServer::bind(
+            "127.0.0.1:0".parse().expect("addr"),
+            host_config(identity, vec![]),
+        )
+        .await
+        .expect("bind");
+        let server = Arc::new(server);
+        Ui {
+            shown_password: server.otp(),
+            addr: server.local_addr().expect("addr"),
+            public: keys.identity.public(),
+            book: SessionBook::new(),
+            control: crate::control::Control::new(None),
+            rotated: false,
+            video: Video::new(Source::None, 1920, false, Arc::clone(&server)),
+            server,
+            flagged: vec![],
+            known: DeviceList::new(),
+            known_path: dir.join("known-viewers"),
+        }
+    }
+
+    fn prompt(id: u64, key: IdentityPublic) -> HostEvent {
+        HostEvent::Prompt {
+            id: SessionId(id),
+            sas: remora_crypto::sas::sas(&[1; 32], &[2; 32], &[3; 32]),
+            viewer_name: "viewer".into(),
+            viewer_key: key,
+        }
+    }
+
+    #[tokio::test]
+    async fn c2_accepting_never_remembers_only_the_remember_command_does() {
+        let dir = std::env::temp_dir().join(format!("remora-c2-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut ui = ui(&dir).await;
+        let v = IdentityKeypair::generate(&mut rand_core::OsRng).public();
+        ui.handle_event(prompt(1, v));
+        // Not answered yet: cannot be remembered.
+        ui.handle_command("remember 1");
+        assert!(ui.known.is_empty(), "a pending prompt was remembered");
+        ui.handle_event(HostEvent::Active { id: SessionId(1) });
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        assert!(ui.known.is_empty(), "accepting alone remembered the viewer");
+        assert!(
+            !ui.known_path.exists(),
+            "a list file appeared without 'remember'"
+        );
+        ui.handle_command("remember 1");
+        assert_eq!(ui.known.get(&v).map(|d| d.name.as_str()), Some("viewer"));
+        assert_eq!(
+            DeviceList::load(&ui.known_path)
+                .expect("saved")
+                .get(&v)
+                .map(|d| d.key),
+            Some(v)
+        );
+        assert_eq!(trusted_keys(&ui.flagged, &ui.known), vec![v]);
+        let code = short_code_of(&v);
+        ui.handle_command(&format!("forget {code}"));
+        assert!(ui.known.is_empty());
+        assert!(DeviceList::load(&ui.known_path).expect("saved").is_empty());
+        let _ = std::fs::remove_dir_all(dir);
     }
 }
