@@ -103,3 +103,79 @@ re-checked with `cargo info` and the crate-age check before adding; any
   person can, including typing into the host's terminal; that is what
   "control" means. The protection is Accept/Deny + the safety code + one
   active session.
+
+## 8. Report (2026-11-02)
+
+**Result:** the owner viewed and controlled the Fedora laptop from the Mac
+(GNOME 50 Wayland, Wi-Fi LAN): Settings and Firefox opened, pages
+scrolled and text typed remotely; one approval at the laptop ever (saved
+portal permission). Code: commits 8430936 … bafce32 (protocol, viewer,
+guard, host control, Linux capture/encoder/injector, fixes from the live
+sessions). Plants: `results/phase4.6/plants.md`; numbers:
+`results/phase4.6/measurements.md`.
+
+### Security requirements
+
+| ID | Status | Evidence |
+|---|---|---|
+| L1 | **Met** (unit level) | `remora-host/src/control.rs::l1_input_reaches_the_os_only_while_active` (plant: input before Active opens an injector, caught); the session layer's own refusal before Active is A20/A21. A host-binary network test was not written: the injector is reached only through `Control`, which this test covers |
+| L2 | **Met** (event level) | `control.rs::l2_every_end_path_releases_held_keys` (Normal, ProtocolViolation, CaptureStopped, Timeout, Lost, Failed; plant on Lost caught), `l2_host_stopping_releases_held_keys`; guard: `remora-input/tests/l2_l4_guard.rs` (5 plants, one first NOT caught then fixed). Live: GNOME's Stop ended a session with keys released (`session ended 1 (CaptureStopped)`) |
+| L3 | **Met** | decode checks `remora-proto/tests/l3_input.rs`; key table drop `l2_l4_guard.rs::l3_unknown_keys_are_dropped_and_counted`; fuzz target `input_event` (first version did NOT catch its plant; rewritten, caught) |
+| L4 | **Met** | `l2_l4_guard.rs::l4_*`, `control.rs::l4_a_flood_ends_the_session_and_releases` |
+| L5 | **Met** (as specified) | H9 unit test (one active session); manual: only `accept`/`deny`/`disconnect` typed in the host terminal act, and a second viewer is refused while one is Active |
+| L6 | **Met, with a finding** | GNOME's indicator shows during every session; one click ends it at once since 0ae615c (seen live). **Finding D-54:** hidden while an app is full screen |
+| L7 | **Met** | `remora-net/tests/l7_input_sealed.rs`: a real session over QUIC sends every input kind with a random canary; no 8-byte window of any input's plaintext appears in the frames handed to QUIC, and the host receives each input intact. The plant (input sent as plaintext) is kept as a test that must see the plaintext and no delivery |
+| L8 | **Met** | `remora-capture/src/sys/linux.rs::l8_the_restore_token_is_never_printed_and_saved_0600` (plants 0644 and printed token, both caught); the token is never logged |
+
+### Performance targets
+
+| ID | Target | Measured | |
+|---|---|---|---|
+| LP1 | capture+encode p95 ≤ 20 ms | 34.2 ms (8 Mbit/s session); bench on video: 24–41 ms for every software setting | **Not met** — software H.264 while the laptop also plays video. Path: Intel GPU encoder (VA-API, needs RPM Fusion: owner's decision) |
+| LP2 | ≥ 30 fps over Wi-Fi | 30–44 fps while the screen moves | **Met** (GNOME sends nothing for a still screen, so idle seconds show low fps) |
+| LP3 | injected event p95 ≤ 2 ms | 0.64–0.97 ms (S-L2; dbus-monitor saw every kind arrive) | **Met** |
+| LP4 | recovery ≤ 200 ms | before the fix: viewer waited 479 pictures in one session; after (4f98162): 5 recoveries in 2.5 min, **p50 68 ms, max 324 ms** | **Met at p50, not at max** |
+
+**Wi-Fi:** ping Mac → laptop p50 53.9 / p95 128 / max 277 ms (best 4 ms),
+laptop on 2.4 GHz with Wi-Fi power saving **on**. This, not Remora, is
+most of the control lag the owner felt. Turning power saving off needs
+administrator rights on the laptop; the owner runs that command.
+
+### Changes found by using it (not in the criteria)
+
+Trackpad scrolling did nothing (finish flag on every event), two
+pointers were visible (the Mac's is now hidden over the video), text was
+soft (openh264's 120 kbit/s default; now 4 Mbit/s QP 20–34 from a
+measured bench), the second portal session in a host run hung (one
+process-wide portal runtime now), GNOME's Stop ended the session only on
+the next input (now at once), and the spike's colour conversion tinted
+greys (fixed by its test).
+
+### Manual test steps (as the owner ran them)
+
+1. Laptop: `remora-host serve --bind <laptop-ip>:0` (prints code and password).
+2. Mac: `remora-viewer gui`, paste the code, type the password.
+3. Compare the six-digit safety code; at the host type `accept <n>` only if equal.
+4. First time ever: GNOME asks to share the screen and allow control; tick
+   "remember". Later sessions: no dialog.
+5. Move, click, type, scroll in the video window; check one pointer.
+6. Click GNOME's orange indicator: the session ends at once on both sides.
+7. `remora-host forget-permission` removes the saved permission.
+
+### Known limitations (updated)
+
+- LP1 not met in software; LP4 worst case 324 ms.
+- The first-ever GNOME dialog can outlast the host's 60 s accept window
+  (the session is refused; the saved permission then makes the next one
+  work). To fix with D-52's GUI work.
+- No sound (D-51), Mac volume keys do not reach the host (D-53),
+  indicator hidden in full screen (D-54).
+- Only GNOME 50 on Wayland tried; 4K panels unmeasured.
+
+### Deferred items, row by row
+
+- **D-50** (laptop control): delivered as above; closes when the owner
+  accepts this phase.
+- **D-51** sound, **D-52** connect simply, **D-53** volume keys, **D-54**
+  full-screen indicator: new today, open.
+- No other row changed in this phase.

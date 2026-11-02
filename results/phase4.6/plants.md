@@ -74,3 +74,9 @@ had an injector configured and checked it); test added; rerun 8 caught,
 The test's first version failed for a test reason: its fake screen changed
 every pixel between pictures, which openh264's scene-change detection
 answers with IDRs; the fake now changes one pixel, as a still desktop does.
+
+## L7 (INV2 for input), 2026-11-02
+
+| Row | Plant (the real failure) | Caught by |
+|---|---|---|
+| L7 | Input sent as a plaintext envelope instead of Noise-sealed | Kept as `crates/remora-net/tests/l7_input_sealed.rs::l7_plant_unsealed_input_would_be_seen`: the scan finds the plaintext and the host delivers nothing; `::l7_input_is_sealed_on_the_stream_and_still_arrives` is the real check |
