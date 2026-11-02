@@ -32,6 +32,8 @@ pub enum ViewerEvent {
     Active,
     /// A complete video frame from the host, for the decoder.
     Video(remora_proto::video::VideoFrame),
+    /// One audio packet to decode and play (phase 4.8).
+    Audio(remora_proto::audio::AudioPacket),
     /// The host's capture paused (session stays active).
     StreamPaused(remora_session::PauseReason),
     /// The stream resumed.
@@ -185,6 +187,9 @@ async fn drive(
                 }
                 ViewerAction::Video(frame) => {
                     let _ = events.send(ViewerEvent::Video(frame));
+                }
+                ViewerAction::Audio(packet) => {
+                    let _ = events.send(ViewerEvent::Audio(packet));
                 }
                 ViewerAction::StreamPaused(reason) => {
                     let _ = events.send(ViewerEvent::StreamPaused(reason));

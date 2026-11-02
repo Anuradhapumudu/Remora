@@ -247,6 +247,8 @@ impl ViewerGui {
             ViewerEvent::Closed { local, remote } => self.desk.ended(remote.or(local)),
             ViewerEvent::Lost => self.desk.lost(),
             // Pictures reach the window from the decoder, not through here.
+            // Played from phase 4.8 step 4 (viewer playback); dropped until then.
+            ViewerEvent::Audio(_) => {}
             ViewerEvent::Video(_) => {}
         }
         if matches!(self.desk.view(now).stage, Stage::Ended(_)) {

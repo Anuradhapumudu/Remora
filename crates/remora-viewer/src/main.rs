@@ -631,6 +631,8 @@ async fn session_loop(
                 pause = None;
                 on_pause(None);
             }
+            // Played from phase 4.8 step 4 (viewer playback); dropped until then.
+            ViewerEvent::Audio(_) => {}
             ViewerEvent::Video(frame) => decoder.offer(frame),
             ViewerEvent::Failed { reason, .. } => outcome = Some(report_failure(&reason)),
             ViewerEvent::Closed { local, remote } => {

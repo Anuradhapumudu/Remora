@@ -230,6 +230,14 @@ impl HostServer {
         Ok(())
     }
 
+    /// Sends one audio packet to every Active session (phase 4.8); see
+    /// [`remora_session::Host::send_audio`].
+    pub fn send_audio(&self, packet: &remora_proto::audio::AudioPacket) {
+        let now = self.shared.now();
+        let actions = lock(&self.shared.host).send_audio(packet, now, &mut OsRng);
+        self.shared.apply(actions, None);
+    }
+
     /// Every media datagram payload handed to quinn from now on
     /// (phase4-criteria M1a; feature `test-tap`, tests only).
     #[cfg(feature = "test-tap")]
