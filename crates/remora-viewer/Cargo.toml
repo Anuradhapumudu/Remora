@@ -25,6 +25,8 @@ tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync", "ti
 tracing-subscriber = { workspace = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
+# Sound playback (phase 4.8): CoreAudio through cpal (its `unsafe`, not ours).
+cpal = { workspace = true }
 # The Phase 4.5 GUI: the screens (remora-ui, D45) and Slint's runtime API.
 remora-ui = { workspace = true }
 slint = { workspace = true }

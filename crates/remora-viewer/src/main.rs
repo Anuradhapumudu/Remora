@@ -20,6 +20,7 @@ mod gui;
 mod input;
 #[cfg(target_os = "macos")]
 mod keymap;
+mod sound;
 #[cfg(target_os = "macos")]
 mod window;
 
@@ -128,6 +129,10 @@ struct ConnectArgs {
     /// only.
     #[arg(long)]
     timing: bool,
+    /// Play no sound from the host (phase4.8). While connected,
+    /// Ctrl+Option+M in the window mutes and unmutes instead.
+    #[arg(long)]
+    no_audio: bool,
 }
 
 fn main() -> ExitCode {
@@ -513,7 +518,10 @@ async fn run_connect(args: ConnectArgs, display: Display) -> anyhow::Result<u8> 
         &mut decoder,
         display.close,
         &*display.on_pause,
-        timing,
+        Flags {
+            timing,
+            audio: !args.no_audio,
+        },
         &mut on_active,
     )
     .await;
@@ -531,6 +539,15 @@ async fn run_connect(args: ConnectArgs, display: Display) -> anyhow::Result<u8> 
     Ok(code)
 }
 
+/// `connect` switches the session loop reads.
+#[derive(Debug, Clone, Copy)]
+struct Flags {
+    /// `--timing`: the once-a-second `media:` line.
+    timing: bool,
+    /// Not `--no-audio`: play the host's sound once active.
+    audio: bool,
+}
+
 /// Shows the session's events until it ends; returns the exit code.
 async fn session_loop(
     client: &remora_net::ViewerClient,
@@ -538,10 +555,13 @@ async fn session_loop(
     decoder: &mut decode::Decoder,
     mut close: Option<tokio::sync::oneshot::Receiver<()>>,
     on_pause: &(dyn Fn(Option<Pause>) + Send),
-    timing: bool,
+    Flags { timing, audio }: Flags,
     on_active: &mut dyn FnMut(&IdentityCert),
 ) -> u8 {
     let mut outcome: Option<u8> = None;
+    // Phase 4.8: opened when the session becomes active; dropped (its
+    // `sound:` counts line printed) when this returns.
+    let mut sound: Option<sound::Sound> = None;
     let mut interrupted = false;
     // The host's identity as the handshake verified it (for --save).
     let mut verified: Option<IdentityCert> = None;
@@ -612,6 +632,9 @@ async fn session_loop(
             }
             ViewerEvent::Active => {
                 println!("SESSION ACTIVE");
+                if audio && sound.is_none() {
+                    sound = Some(sound::Sound::start());
+                }
                 if let Some(host) = &verified {
                     on_active(host);
                 }
@@ -631,8 +654,11 @@ async fn session_loop(
                 pause = None;
                 on_pause(None);
             }
-            // Played from phase 4.8 step 4 (viewer playback); dropped until then.
-            ViewerEvent::Audio(_) => {}
+            ViewerEvent::Audio(p) => {
+                if let Some(s) = &sound {
+                    s.offer(p);
+                }
+            }
             ViewerEvent::Video(frame) => decoder.offer(frame),
             ViewerEvent::Failed { reason, .. } => outcome = Some(report_failure(&reason)),
             ViewerEvent::Closed { local, remote } => {

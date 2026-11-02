@@ -74,6 +74,64 @@ pub(crate) struct VideoWindow {
     /// Where input goes; set once the session is connected, cleared when
     /// the window closes.
     client: Option<remora_net::ViewerClient>,
+    /// A6: the local mute key.
+    mute: MuteKey,
+}
+
+/// A6 (phase4.8): Ctrl+Option+M mutes or unmutes the sound on this Mac.
+/// The M press and its release are not sent to the host; Ctrl and Option
+/// are (harmless on their own).
+#[derive(Debug, Default)]
+pub(crate) struct MuteKey {
+    mods: winit::keyboard::ModifiersState,
+    /// The M of the chord is down: its release is not sent either.
+    held: bool,
+}
+
+impl MuteKey {
+    /// The modifier keys changed.
+    pub(crate) fn set_mods(&mut self, mods: winit::keyboard::ModifiersState) {
+        self.mods = mods;
+    }
+
+    /// A key; returns `true` when it belongs to the mute key (not sent).
+    /// A press toggles the mute.
+    pub(crate) fn key(
+        &mut self,
+        code: winit::keyboard::KeyCode,
+        pressed: bool,
+        repeat: bool,
+    ) -> bool {
+        use winit::keyboard::{KeyCode, ModifiersState};
+        if code != KeyCode::KeyM {
+            return false;
+        }
+        if !pressed {
+            return std::mem::take(&mut self.held);
+        }
+        let chord = self
+            .mods
+            .contains(ModifiersState::CONTROL | ModifiersState::ALT)
+            && !self
+                .mods
+                .intersects(ModifiersState::SUPER | ModifiersState::SHIFT);
+        if !chord && !self.held {
+            return false;
+        }
+        if !repeat && !self.held {
+            let muted = crate::sound::toggle_mute();
+            eprintln!(
+                "{}",
+                if muted {
+                    "sound muted (Ctrl+Option+M to unmute)"
+                } else {
+                    "sound on"
+                }
+            );
+        }
+        self.held = true;
+        true
+    }
 }
 
 /// The video window's title (owner, 2026-11-01, phase4.5-criteria §16):
@@ -173,6 +231,7 @@ impl VideoWindow {
             host: String::new(),
             input: crate::input::InputState::default(),
             client: None,
+            mute: MuteKey::default(),
         }
     }
 
@@ -457,8 +516,25 @@ impl VideoWindow {
     /// An event for this window; returns `true` when the person closed it
     /// (the session should end with a Goodbye).
     pub(crate) fn window_event(&mut self, event: &WindowEvent) -> bool {
-        let messages = self.input.event(event, Instant::now());
-        self.send(messages);
+        let local = match event {
+            WindowEvent::ModifiersChanged(m) => {
+                self.mute.set_mods(m.state());
+                false
+            }
+            WindowEvent::KeyboardInput { event: k, .. } => match k.physical_key {
+                winit::keyboard::PhysicalKey::Code(code) => self.mute.key(
+                    code,
+                    k.state == winit::event::ElementState::Pressed,
+                    k.repeat,
+                ),
+                winit::keyboard::PhysicalKey::Unidentified(_) => false,
+            },
+            _ => false,
+        };
+        if !local {
+            let messages = self.input.event(event, Instant::now());
+            self.send(messages);
+        }
         match event {
             WindowEvent::CloseRequested => {
                 self.close();
@@ -602,6 +678,30 @@ fn percentiles(v: &mut [Duration]) -> (f64, f64) {
 #[cfg(all(test, target_os = "macos"))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a6_the_mute_key_toggles_and_is_never_sent() {
+        use winit::keyboard::{KeyCode, ModifiersState};
+        let mut k = MuteKey::default();
+        let before = crate::sound::MUTED.load(std::sync::atomic::Ordering::Relaxed);
+        // Plain M (and Cmd+Ctrl+Option+M) go to the host.
+        assert!(!k.key(KeyCode::KeyM, true, false));
+        assert!(!k.key(KeyCode::KeyM, false, false));
+        k.set_mods(ModifiersState::CONTROL | ModifiersState::ALT | ModifiersState::SUPER);
+        assert!(!k.key(KeyCode::KeyM, true, false));
+        assert!(!k.key(KeyCode::KeyM, false, false));
+        // Ctrl+Option+M: press, a repeat and the release (even after the
+        // modifiers are let go first) stay here; one toggle.
+        k.set_mods(ModifiersState::CONTROL | ModifiersState::ALT);
+        assert!(k.key(KeyCode::KeyM, true, false));
+        assert!(k.key(KeyCode::KeyM, true, true));
+        k.set_mods(ModifiersState::empty());
+        assert!(k.key(KeyCode::KeyM, false, false));
+        assert!(!k.key(KeyCode::KeyN, true, false));
+        let after = crate::sound::MUTED.load(std::sync::atomic::Ordering::Relaxed);
+        assert_ne!(before, after, "one press, one toggle");
+        crate::sound::toggle_mute();
+    }
 
     #[test]
     fn the_title_names_the_host_and_keeps_only_the_frame_rate() {

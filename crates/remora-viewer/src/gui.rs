@@ -246,8 +246,8 @@ impl ViewerGui {
             ViewerEvent::Failed { reason, .. } => self.desk.failed(&reason),
             ViewerEvent::Closed { local, remote } => self.desk.ended(remote.or(local)),
             ViewerEvent::Lost => self.desk.lost(),
-            // Pictures reach the window from the decoder, not through here.
-            // Played from phase 4.8 step 4 (viewer playback); dropped until then.
+            // Pictures reach the window from the decoder and sound the
+            // sound thread, not through here.
             ViewerEvent::Audio(_) => {}
             ViewerEvent::Video(_) => {}
         }
@@ -361,9 +361,22 @@ async fn run(
             }
         });
     });
+    // Phase 4.8: sound plays from approval to the end (Ctrl+Option+M mutes).
+    let mut sound: Option<crate::sound::Sound> = None;
     while let Some(ev) = events.recv().await {
         match ev {
             ViewerEvent::Video(frame) => decoder.offer(frame),
+            ViewerEvent::Audio(p) => {
+                if let Some(s) = &sound {
+                    s.offer(p);
+                }
+            }
+            ViewerEvent::Active => {
+                if sound.is_none() {
+                    sound = Some(crate::sound::Sound::start());
+                }
+                report(ViewerEvent::Active);
+            }
             ev @ (ViewerEvent::Closed { .. } | ViewerEvent::Lost) => {
                 report(ev);
                 break;

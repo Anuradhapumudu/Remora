@@ -26,3 +26,7 @@ always show the test's own lines.
 | A3 (codec) | The Opus decoder wrapper hands any size to libopus | `crates/remora-codec/src/audio.rs::tests::wrong_sizes_are_refused_and_loss_is_concealed` | 2026-11-02 |
 | A1 | The host starts recording sound at the prompt (before approval) | `crates/remora-host/src/serve.rs::a1_tests::a1_sound_runs_only_while_a_session_is_active` | 2026-11-02 |
 | A1 | The host never stops recording when the session ends | same test | 2026-11-02 |
+| A6 | The player ignores the mute (plays sound while muted) | `crates/remora-viewer/src/sound.rs::tests::a6_muted_is_silent_and_still_consumes` ("sound while muted") | 2026-11-03 |
+| A6 | Muted, the player stops consuming, so old sound piles up and plays on unmute | same test ("muted must not let sound pile up") | 2026-11-03 |
+| A6 | The mute key's M release is sent to the host | `crates/remora-viewer/src/window.rs::tests::a6_the_mute_key_toggles_and_is_never_sent` (the release assertion) | 2026-11-03 |
+| A4 (viewer) | The playout buffer derives `Debug`, printing held samples | `crates/remora-viewer/src/sound.rs::tests::a4_debug_shows_counts_never_samples` | 2026-11-03 |
