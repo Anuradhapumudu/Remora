@@ -566,6 +566,14 @@ impl Stats {
             Some((n, bytes)) => line + &held_text(n, bytes),
             None => line,
         };
+        // LP4 (phase4.6-criteria): stale periods so far, at the end so the
+        // fields scripts read keep their place.
+        let line = match counters.and_then(Counters::recovery) {
+            Some((n, p50, p95, max)) => {
+                line + &format!(", recovered {n} (p50 {p50} / p95 {p95} / max {max} ms)")
+            }
+            None => line,
+        };
         Some(line)
     }
 }
