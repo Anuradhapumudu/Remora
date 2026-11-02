@@ -72,11 +72,22 @@ pub(crate) fn steps(carry: &mut f32, lines: f32) -> i32 {
     whole as i32
 }
 
+/// A position across the picture (0..=1) as a pixel the portal accepts:
+/// 0 ..= side - 1. GNOME refused `side` itself ("Invalid position", owner's
+/// laptop 2026-11-03: a slider dragged past the window's right edge sent
+/// 1.0, and the refused input ended the session). Not a number -> 0.
+pub(crate) fn to_pixel(v: f32, side: u32) -> f64 {
+    let last = f64::from(side.max(1) - 1);
+    if !v.is_finite() {
+        return 0.0;
+    }
+    (f64::from(v) * f64::from(side)).clamp(0.0, last)
+}
+
 impl Backend for PortalBackend {
     fn move_to(&mut self, x: f32, y: f32) -> Result<(), BackendError> {
         let (w, h) = self.input.size();
-        let px = |v: f32, side: u32| f64::from(v.clamp(0.0, 1.0)) * f64::from(side);
-        self.input.motion(px(x, w), px(y, h)).map_err(e)
+        self.input.motion(to_pixel(x, w), to_pixel(y, h)).map_err(e)
     }
 
     fn button(&mut self, button: u32, down: bool) -> Result<(), BackendError> {
@@ -125,6 +136,24 @@ mod tests {
                 None
             ]
         );
+    }
+
+    #[test]
+    fn positions_stay_on_the_picture() {
+        assert_eq!(to_pixel(0.0, 1920), 0.0);
+        assert_eq!(to_pixel(0.5, 1920), 960.0);
+        // The right/bottom edge (a drag past the window) is the last pixel,
+        // never `side` (GNOME: "Invalid position").
+        assert_eq!(to_pixel(1.0, 1920), 1919.0);
+        assert_eq!(to_pixel(1.5, 1080), 1079.0);
+        assert_eq!(to_pixel(-0.2, 1080), 0.0);
+        assert_eq!(to_pixel(f32::NAN, 1080), 0.0);
+        assert_eq!(to_pixel(f32::INFINITY, 1080), 0.0);
+        assert_eq!(to_pixel(1.0, 0), 0.0, "no size yet");
+        for i in 0..=1000 {
+            let p = to_pixel(i as f32 / 1000.0, 1366);
+            assert!((0.0..1366.0).contains(&p), "{i}: {p}");
+        }
     }
 
     #[test]

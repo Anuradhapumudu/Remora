@@ -64,3 +64,15 @@ output that has no device). Left, with reasons:
 | A7 | An output the person had muted is muted "again" and un-muted at the end (the already-muted check removed) | `speakers.rs::tests::a7_an_output_muted_by_the_person_stays_muted` | 2026-11-03 |
 | A7 | The speakers are muted before recording starts (so a host that cannot record still mutes, briefly) | `serve.rs::a1_tests::a7_a_host_that_cannot_record_never_mutes` — **first missed**: the test read only the end state, and the brief mute was already undone. The fake mixer now records every change and the test requires none | 2026-11-03 |
 | A7 | Sound (and with it the mute) starts at the prompt, before approval | `serve.rs::a1_tests::a7_speakers_are_silent_only_while_a_session_is_active` ("speakers silenced before the person approved") | 2026-11-03 |
+
+## Found in the 4.8 live test: pointer at the picture's edge (2026-11-03)
+
+Phase 4.6 code, fixed here (the accepted 4.6 records are left as they
+are). Dragging the laptop's volume slider past the viewer window's right
+edge sent x = 1.0; the host turned it into pixel `width`, one past the
+last column; GNOME refused it ("Invalid position") and the refused input
+ended the session, as the input rules require.
+
+| ID | Planted failure | Caught by | Date |
+|---|---|---|---|
+| (4.6 input) | The old conversion `v.clamp(0, 1) * side` (1.0 -> `side`) | `crates/remora-input/src/sys/linux.rs::tests::positions_stay_on_the_picture` (left 1920.0, right 1919.0; run on the laptop, Linux-only module) | 2026-11-03 |
