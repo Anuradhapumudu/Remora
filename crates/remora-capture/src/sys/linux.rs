@@ -59,6 +59,11 @@ use crate::{
 /// second: S-L2).
 const PORTAL_ANSWER: Duration = Duration::from_secs(120);
 
+/// A smooth-scroll gesture ends after this long without scrolling. The
+/// viewer does not send gesture phases; a trackpad sends events every
+/// ~8-16 ms while the fingers move, so 150 ms is clearly "stopped".
+const SCROLL_END: Duration = Duration::from_millis(150);
+
 /// Largest picture accepted from PipeWire (a 8K monitor), so a bogus
 /// format can't make us allocate without bound.
 const MAX_SIDE: u32 = 8192;
@@ -124,8 +129,10 @@ enum InputCmd {
     Button(i32, bool),
     /// evdev key code, pressed?
     Key(i32, bool),
-    /// Smooth scroll in logical pixels.
+    /// Smooth scroll in logical pixels (part of a gesture).
     Axis(f64, f64),
+    /// The smooth-scroll gesture ended (sent by the portal task itself).
+    AxisEnd,
     /// Wheel clicks: vertical, horizontal.
     Steps(i32, i32),
 }
@@ -468,9 +475,21 @@ async fn portal_task(
             }
             // GNOME's top-bar "Stop" closes the session from the desktop side.
             let mut closed = session.receive_closed().await.ok().map(Box::pin);
+            // An open smooth-scroll gesture is closed (finish) after
+            // SCROLL_END of no scrolling; see InputCmd::Axis in `inject`.
+            let mut scroll_end: Option<tokio::time::Instant> = None;
             loop {
                 let cmd = tokio::select! {
                     cmd = rx.recv() => cmd,
+                    () = async {
+                        match scroll_end {
+                            Some(t) => tokio::time::sleep_until(t).await,
+                            None => std::future::pending().await,
+                        }
+                    } => {
+                        scroll_end = None;
+                        Some(PortalCmd::Input(InputCmd::AxisEnd))
+                    }
                     _ = async {
                         match closed.as_mut() {
                             Some(c) => {
@@ -485,6 +504,9 @@ async fn portal_task(
                 };
                 match cmd {
                     Some(PortalCmd::Input(i)) => {
+                        if matches!(i, InputCmd::Axis(..)) {
+                            scroll_end = Some(tokio::time::Instant::now() + SCROLL_END);
+                        }
                         if let Err(e) = inject(&rd, &session, node, i).await {
                             // Codes and the API name only, never the event (INV9).
                             fail(format!("RemoteDesktop: {e}"));
@@ -583,11 +605,26 @@ async fn inject(
             rd.notify_keyboard_keycode(session, k, state(down), Default::default())
                 .await
         }
+        // Movement within a gesture: finish = false. With finish = true on
+        // every event (the first version) GNOME scrolled nothing at all —
+        // seen on the laptop 2026-11-02: 1233 calls arrived in 30 s, the
+        // page did not move. The portal documents `finish` as "whether it
+        // is the last axis event" (ashpd-0.13.13 remote_desktop.rs:210).
         InputCmd::Axis(dx, dy) => {
             rd.notify_pointer_axis(
                 session,
                 dx,
                 dy,
+                NotifyPointerAxisOptions::default().set_finish(false),
+            )
+            .await
+        }
+        // The gesture is over (no scrolling for SCROLL_END).
+        InputCmd::AxisEnd => {
+            rd.notify_pointer_axis(
+                session,
+                0.0,
+                0.0,
                 NotifyPointerAxisOptions::default().set_finish(true),
             )
             .await

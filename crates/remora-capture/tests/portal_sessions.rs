@@ -56,3 +56,28 @@ fn two_portal_sessions_in_one_process() {
     one_session(2);
     one_session(3);
 }
+
+/// Each input kind leaves this process as a portal call (watch with
+/// `dbus-monitor --session interface=org.freedesktop.portal.RemoteDesktop`).
+#[test]
+#[ignore = "needs a desktop session and a saved portal permission"]
+fn every_input_kind_reaches_the_portal() {
+    let token = std::env::var_os("REMORA_PORTAL_TOKEN").map(Into::into);
+    let cap = PortalCapture::open(
+        CaptureConfig::default(),
+        PortalOptions {
+            token_file: token,
+            control: true,
+        },
+    )
+    .expect("portal");
+    let input = cap.input().expect("control granted");
+    let (w, h) = input.size();
+    input
+        .motion(f64::from(w) / 2.0, f64::from(h) / 2.0)
+        .expect("motion");
+    input.scroll_pixels(0.0, 30.0).expect("smooth scroll");
+    input.scroll_steps(1, 0).expect("wheel step");
+    std::thread::sleep(Duration::from_millis(500));
+    drop(cap);
+}

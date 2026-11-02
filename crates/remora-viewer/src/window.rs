@@ -179,6 +179,20 @@ impl VideoWindow {
     /// The connection mouse and keyboard events go to (`None`: not sent).
     pub(crate) fn set_client(&mut self, client: Option<remora_net::ViewerClient>) {
         self.client = client;
+        self.show_local_cursor();
+    }
+
+    /// While this window controls the host, the Mac's own pointer is
+    /// hidden over it: the host's pointer is drawn into the picture, and
+    /// two pointers made it unclear which one clicks (owner, 2026-11-02).
+    /// winit 0.30.13 hides it through the view's cursor rect
+    /// (`platform_impl/macos/window_delegate.rs:1138`,
+    /// `invalidateCursorRectsForView`), i.e. over the view only; its docs
+    /// say "while focused" — which one holds is checked by hand (step 6).
+    fn show_local_cursor(&self) {
+        if let Some(w) = &self.window {
+            w.set_cursor_visible(self.client.is_none());
+        }
     }
 
     fn send(&self, messages: impl IntoIterator<Item = remora_proto::messages::Input>) {
@@ -288,6 +302,7 @@ impl VideoWindow {
             renderer: Renderer::new(device, queue, format),
         });
         self.window = Some(window);
+        self.show_local_cursor();
         Ok(())
     }
 

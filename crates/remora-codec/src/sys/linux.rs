@@ -6,7 +6,8 @@
 //! the spike's: screen-content real-time mode, low complexity, 8 threads,
 //! no frame skipping, slices of ≤ 1200 bytes (so the threads have
 //! independent work). Plus BT.709 video-range colour signalling, which is
-//! what [`crate::yuv`] produces and the viewer assumes.
+//! what [`crate::yuv`] produces and the viewer assumes, and (unlike the
+//! spike) Remora's bitrate with a QP cap, for readable text.
 //!
 //! Same shape as the macOS `VtEncoder`: `encode` returns a sequence number
 //! and the result goes to the sink (here synchronously, on the caller's
@@ -14,7 +15,9 @@
 
 use std::time::{Duration, Instant};
 
-use openh264::encoder::{Complexity, Encoder, FrameRate, FrameType, UsageType, VuiConfig};
+use openh264::encoder::{
+    BitRate, Complexity, Encoder, FrameRate, FrameType, QpRange, UsageType, VuiConfig,
+};
 use remora_capture::CpuImage;
 
 use crate::{CodecError, EncodedFrame, EncoderConfig, EncoderEvent, EncoderSink};
@@ -59,6 +62,13 @@ impl OpenH264Encoder {
             .max_frame_rate(FrameRate::from_hz(cfg.fps.max(1) as f32))
             .skip_frames(false)
             .max_slice_len(1200)
+            // The crate's default target is 120 kbit/s (encoder.rs
+            // `EncoderConfig::new`), far too little for a desktop: text
+            // came out soft (owner, 2026-11-02, "can we improve the video
+            // quality?"). Use Remora's bitrate (8 Mbit/s by default) and
+            // never quantise coarser than QP 36, so text stays readable.
+            .bitrate(BitRate::from_bps(cfg.bitrate_bps))
+            .qp(QpRange::new(10, 36))
             .vui(VuiConfig::bt709());
         let encoder = Encoder::with_api_config(openh264::OpenH264API::from_source(), config)
             .map_err(err("openh264 WelsCreateSVCEncoder"))?;
