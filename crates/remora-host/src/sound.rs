@@ -9,6 +9,38 @@
 pub(crate) type SoundStarter =
     Box<dyn FnMut() -> anyhow::Result<Box<dyn std::any::Any + Send>> + Send>;
 
+/// Mutes the host's speakers; `Ok(None)` when they were already muted.
+/// Dropping what it returns restores them (A7).
+#[cfg(any(target_os = "linux", test))]
+pub(crate) type SpeakerMuter =
+    Box<dyn FnMut() -> anyhow::Result<Option<Box<dyn std::any::Any + Send>>> + Send>;
+
+/// A7 (`serve --mute-speakers`): `inner`, with the speakers silent while
+/// it runs. Recording starts first, so a host that cannot record never
+/// mutes; a mute that fails is said once and the session goes on with
+/// the speakers playing. Dropped in field order: recording stops, then the
+/// speakers come back.
+#[cfg(any(target_os = "linux", test))]
+pub(crate) fn with_speakers_muted(mut inner: SoundStarter, mut mute: SpeakerMuter) -> SoundStarter {
+    Box::new(move || {
+        let recording = inner()?;
+        let muted = match mute() {
+            Ok(Some(m)) => {
+                println!(
+                    "speakers: silent while a viewer is connected (restored when the session ends)"
+                );
+                Some(m)
+            }
+            Ok(None) => None, // already muted by the person: left alone
+            Err(e) => {
+                println!("speakers: could not silence them ({e:#}) - they keep playing");
+                None
+            }
+        };
+        Ok(Box::new((recording, muted)) as Box<dyn std::any::Any + Send>)
+    })
+}
+
 /// Linux: PipeWire capture of the default output -> Opus -> the server.
 #[cfg(target_os = "linux")]
 pub(crate) fn starter(server: std::sync::Arc<remora_net::HostServer>) -> SoundStarter {

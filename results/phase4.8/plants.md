@@ -55,3 +55,12 @@ output that has no device). Left, with reasons:
   only the `sound:` line is lost.
 - `window.rs:326` (`compatible_surface`): phase-4 window code, not this
   phase's.
+
+## A7: `serve --mute-speakers` (owner, 2026-11-03)
+
+| ID | Planted failure | Caught by | Date |
+|---|---|---|---|
+| A7 | The guard never restores the speakers | `crates/remora-host/src/speakers.rs::tests::a7_mutes_then_restores_the_same_output` and `crates/remora-host/src/serve.rs::a1_tests::a7_speakers_are_silent_only_while_a_session_is_active` | 2026-11-03 |
+| A7 | An output the person had muted is muted "again" and un-muted at the end (the already-muted check removed) | `speakers.rs::tests::a7_an_output_muted_by_the_person_stays_muted` | 2026-11-03 |
+| A7 | The speakers are muted before recording starts (so a host that cannot record still mutes, briefly) | `serve.rs::a1_tests::a7_a_host_that_cannot_record_never_mutes` — **first missed**: the test read only the end state, and the brief mute was already undone. The fake mixer now records every change and the test requires none | 2026-11-03 |
+| A7 | Sound (and with it the mute) starts at the prompt, before approval | `serve.rs::a1_tests::a7_speakers_are_silent_only_while_a_session_is_active` ("speakers silenced before the person approved") | 2026-11-03 |

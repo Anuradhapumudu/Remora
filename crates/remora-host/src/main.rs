@@ -16,6 +16,8 @@ mod bench_linux;
 mod control;
 mod serve;
 mod sound;
+#[cfg(any(target_os = "linux", test))]
+mod speakers;
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 mod stream;
 // Used by the macOS benchmark; pure Rust, so their tests run on every platform.

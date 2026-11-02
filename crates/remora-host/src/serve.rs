@@ -83,6 +83,11 @@ pub(crate) struct ServeArgs {
     /// the host can record it).
     #[arg(long)]
     pub(crate) no_audio: bool,
+    /// Silence this computer's own speakers while a viewer is connected,
+    /// so only the viewer hears the sound (phase 4.8 A7); restored when
+    /// the session ends. Linux.
+    #[arg(long, conflicts_with = "no_audio")]
+    pub(crate) mute_speakers: bool,
 }
 
 /// `serve --source`.
@@ -232,7 +237,23 @@ async fn serve(args: ServeArgs) -> anyhow::Result<()> {
     ui.control = crate::control::Control::new(injector(&ui.video));
     #[cfg(target_os = "linux")]
     if !args.no_audio {
-        ui.video.sound_starter = Some(crate::sound::starter(Arc::clone(&ui.server)));
+        let mut starter = crate::sound::starter(Arc::clone(&ui.server));
+        if args.mute_speakers {
+            starter = crate::sound::with_speakers_muted(
+                starter,
+                Box::new(|| {
+                    let muted = crate::speakers::mute_speakers(Box::new(crate::speakers::Wpctl))?;
+                    Ok(muted.map(|m| Box::new(m) as Box<dyn std::any::Any + Send>))
+                }),
+            );
+        }
+        ui.video.sound_starter = Some(starter);
+    }
+    #[cfg(not(target_os = "linux"))]
+    if args.mute_speakers {
+        println!(
+            "speakers: --mute-speakers works on Linux hosts only (this host sends no sound yet)"
+        );
     }
     if ui.control.can_control() {
         println!("control: an accepted viewer can use this computer's mouse and keyboard");
@@ -1305,5 +1326,59 @@ mod a1_tests {
         });
         assert_eq!(now(), 0, "still recording after the session ended");
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn a7_speakers_are_silent_only_while_a_session_is_active() {
+        use crate::speakers::tests::{FakeMixer, fake};
+        let dir = std::env::temp_dir().join(format!("remora-a7-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let (mut ui, _events) = super::c2_tests::ui_with_events_for_c3(&dir).await;
+        let mixer = fake(62, false);
+        let m = Arc::clone(&mixer);
+        ui.video.sound_starter = Some(crate::sound::with_speakers_muted(
+            Box::new(|| Ok(Box::new(()) as Box<dyn std::any::Any + Send>)),
+            Box::new(move || {
+                let g = crate::speakers::mute_speakers(Box::new(FakeMixer(Arc::clone(&m))))?;
+                Ok(g.map(|g| Box::new(g) as Box<dyn std::any::Any + Send>))
+            }),
+        ));
+        let muted = || mixer.lock().expect("fake").muted[&62];
+        let v = remora_crypto::identity::IdentityKeypair::generate(&mut rand_core::OsRng).public();
+        ui.handle_event(HostEvent::Prompt {
+            id: SessionId(1),
+            sas: remora_crypto::sas::sas(&[1; 32], &[2; 32], &[3; 32]),
+            viewer_name: "viewer".into(),
+            viewer_key: v,
+        });
+        assert!(!muted(), "speakers silenced before the person approved");
+        ui.handle_event(HostEvent::Active { id: SessionId(1) });
+        assert!(muted(), "speakers still playing in an Active session");
+        ui.handle_event(HostEvent::Closed {
+            id: SessionId(1),
+            code: remora_session::CloseCode::Normal,
+        });
+        assert!(!muted(), "speakers not restored after the session ended");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a7_a_host_that_cannot_record_never_mutes() {
+        use crate::speakers::tests::{FakeMixer, fake};
+        let mixer = fake(62, false);
+        let m = Arc::clone(&mixer);
+        let mut start = crate::sound::with_speakers_muted(
+            Box::new(|| anyhow::bail!("no PipeWire")),
+            Box::new(move || {
+                let g = crate::speakers::mute_speakers(Box::new(FakeMixer(Arc::clone(&m))))?;
+                Ok(g.map(|g| Box::new(g) as Box<dyn std::any::Any + Send>))
+            }),
+        );
+        assert!(start().is_err());
+        assert_eq!(
+            mixer.lock().expect("fake").changes,
+            vec![],
+            "the speakers were touched although nothing was recorded"
+        );
     }
 }
