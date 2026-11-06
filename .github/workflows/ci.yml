@@ -44,7 +44,7 @@ jobs:
           rustup toolchain install
           rustup show active-toolchain
 
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
 
       - name: Format
         run: cargo fmt --all --check
@@ -95,7 +95,7 @@ jobs:
         run: bash scripts/macos/test-dev-identity.sh
 
       - name: Install cargo-deny and cargo-audit
-        uses: taiki-e/install-action@861a07ce7084f55488e375df125cdc99bba60eb7 # v2.87.23
+        uses: taiki-e/install-action@1e29709c0ec63babbe8f266397a465f29a825f91 # v2.87.31
         with:
           tool: cargo-deny,cargo-audit
 
