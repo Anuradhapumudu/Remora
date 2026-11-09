@@ -1,0 +1,30 @@
+== S-C1: mDNS discovery with mdns-sd 0.21.6 (2026-11-02)
+
+Library (read): src/lib.rs:157 `#![forbid(unsafe_code)]`; runtime deps
+fastrand, flume, if-addrs, mio, socket-pktinfo, socket2 (+ libc, lock_api,
+log, scopeguard, spin, windows-*). MIT OR Apache-2.0. 0.21.6 released
+2026-10-19 (passes the 14-day rule on 2026-11-02; 0.21.7 is newer).
+
+Announced: `_remora._udp.local.`, instance = the device code, host name a
+fixed "remora-host.local." (the computer's name is never announced),
+TXT {code, nonce (32 hex), v=1}, port.
+
+Mac only (announcer and finder on the M4, Wi-Fi interface 192.168.8.102):
+  started together:            found after 7.03 s (announcer still probing)
+  announcer running 3 s first: found after 0.09 s, 1.05 s, 1.06 s
+  -> CU2 (<= 2 s) met when the host is already announcing, which is the
+     real case; the 1 s ones are mDNS's once-per-second answer limit.
+  macOS showed no Local Network prompt (run from Terminal, which already
+  has the permission; the bundled app will be asked once - to check).
+
+Mac <-> Fedora laptop across the owner's home Wi-Fi (same day, after
+the laptop's Wi-Fi power saving was turned off by the owner):
+  laptop announces 3333-LAPTOP at 192.168.8.100, Mac finds it after
+  0.072 s, 1.10 s, 1.09 s, with the right address, port and a 32-hex nonce.
+  -> the router passes mDNS multicast between Wi-Fi clients, and
+     Fedora's default firewall lets it through (no change made).
+  CU2 (<= 2 s) met across machines.
+
+Wi-Fi, same day: ping Mac -> laptop with power saving ON p50 53.9 /
+p95 128 / max 277 ms; OFF (owner ran iw + nmcli powersave 2) p50 4.4 /
+p95 24.0 / max 26.2 ms.

@@ -59,6 +59,7 @@ pub async fn start_host(
             identity: host.identity.clone(),
             password_enabled: true,
             trusted,
+            one_active_session: true,
         },
     )
     .await

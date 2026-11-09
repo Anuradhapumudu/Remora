@@ -43,7 +43,7 @@ fn closes(acts: &[HostAction]) -> Vec<(remora_session::SessionId, CloseCode)> {
 #[test]
 fn t1_interruption_pauses_every_active_session_and_keeps_it_active() {
     let (h, v1, v2, v3) = (device("host"), device("v1"), device("v2"), device("v3"));
-    let mut host = host_with(&h, vec![]);
+    let mut host = host_multi_viewer(&h);
     let mut a = to_active(&mut host, &v1, ip(1));
     let mut b = to_active(&mut host, &v2, ip(2));
     let p = to_prompt(&mut host, &v3, ip(3));
@@ -119,7 +119,7 @@ fn t1_a_new_reason_while_paused_is_passed_on() {
 #[test]
 fn t1_resume_tells_viewers_and_forces_one_keyframe() {
     let (h, v1, v2) = (device("host"), device("v1"), device("v2"));
-    let mut host = host_with(&h, vec![]);
+    let mut host = host_multi_viewer(&h);
     let mut a = to_active(&mut host, &v1, ip(1));
     let mut b = to_active(&mut host, &v2, ip(2));
     let acts = host.capture_changed(ASLEEP, T0);
@@ -143,7 +143,7 @@ fn t1_resume_tells_viewers_and_forces_one_keyframe() {
 #[test]
 fn t1_stopped_closes_every_active_session_with_capture_stopped() {
     let (h, v1, v2, v3) = (device("host"), device("v1"), device("v2"), device("v3"));
-    let mut host = host_with(&h, vec![]);
+    let mut host = host_multi_viewer(&h);
     let a = to_active(&mut host, &v1, ip(1));
     let b = to_active(&mut host, &v2, ip(2));
     let p = to_prompt(&mut host, &v3, ip(3));

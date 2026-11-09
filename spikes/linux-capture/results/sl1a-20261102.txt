@@ -1,0 +1,188 @@
+Spike S-L1a (roadmap D-50): GNOME 50 / Wayland screen capture through the desktop
+portal (ScreenCast) + PipeWire 1.6.11, on the owner's Fedora 44 laptop
+(i5-12500H, Iris Xe + RTX 3050 Mobile, 3840x2160 panel), 2026-11-02.
+Build: spikes/linux-capture (ashpd 0.13.13, pipewire 0.10.1), cursor embedded,
+buffers mapped to memory (MAP_BUFFERS, shared memory).
+
+Run 1 (screen left still):
+  portal: answered in 117.0 s (the owner picked the monitor and clicked Share)
+  format: BGRx 3840x2160, framerate 0/1 (variable: frames only on damage)
+  RESULT sl1a: 7 frames in 23.1 s (0.3 fps), 31.6 MB/frame,
+               interval p50 5017.8 p95 6000.4 max 6000.4 ms
+
+Run 2 (owner moved things on screen; content not recorded):
+  portal: answered in 95.7 s
+  format: BGRx 3840x2160 @ 0/1
+  RESULT sl1a: 226 frames in 20.0 s (11.3 fps), 31.6 MB/frame,
+               interval p50 66.2 p95 183.8 max 2312.8 ms
+
+Findings:
+- The portal + PipeWire path works from a Rust program; the person must
+  approve in GNOME's dialog every time (persist mode off): consent on the
+  host side, as Remora wants.
+- Pictures come at the panel's full 4K (31.6 MB each). Software H.264 at 4K is
+  out of reach: the host must scale to 1920 wide (as the Mac does) before
+  encoding, or encode in hardware.
+- 11.3 fps is far below 60, cause NOT known: (a) the content may not have
+  changed faster, (b) shared-memory buffers make GNOME copy 31.6 MB out of the
+  GPU per frame (DMA-BUF avoids it), (c) GNOME's screencast limits. Next run:
+  a known 60 fps moving pattern on screen, and DMA-BUF buffers.
+- Hardware encoders present: Intel Quick Sync (VA-API) and NVIDIA NVENC, but
+  Fedora's packages leave H.264 encoding out (patents): RPM Fusion / NVIDIA
+  driver would be the owner's decision. openh264 (software) needs no install.
+
+Run 3 (known content: scripts/macos/motion-pattern.html full screen in the
+laptop's browser, changing every frame at 60 Hz):
+  portal: answered in 129.2 s
+  format: BGRx 3840x2160 @ 0/1
+  RESULT sl1a: 305 frames in 20.0 s (15.2 fps), 31.6 MB/frame,
+               interval p50 66.7 p95 68.3 max 102.9 ms
+
+So the content was not the limit: with a picture that changes every frame the
+capture delivers a steady 15.2 fps, exactly every 4th refresh (66.7 ms =
+4 x 16.7 ms). Leading hypothesis, NOT yet shown: shared-memory buffers make
+GNOME copy each 31.6 MB 4K picture out of the GPU, and it cannot do that at
+60 Hz. Test next: negotiate DMA-BUF buffers (GPU memory, no copy), the path
+GNOME's own screen recorder uses.
+
+Run 4 (same 60 Hz motion page; DMA-BUF buffers, linear modifier, not mapped):
+  portal: answered in 82.6 s
+  format: BGRx 3840x2160 @ 0/1; asked for DMA-BUF buffers: Ok
+  first buffer: DataType::DmaBuf, chunk size 33177600
+  RESULT sl1a dmabuf: 412 frames in 20.0 s (20.6 fps), 31.6 MB/frame,
+                      interval p50 39.1 p95 67.2 max 85.0 ms
+
+GPU buffers were really used and raised the rate from 15.2 to 20.6 fps:
+the shared-memory copy was part of the limit, not all of it. Still open:
+(a) the linear layout makes GNOME convert each 4K picture on the GPU; offering
+the GPU's own (tiled) modifiers, queried through EGL, avoids that; (b) whether
+the browser itself draws 60 fps on this 4K panel was not measured. Not tried
+yet: a smaller capture size (GNOME may not scale for us), and 1920-wide panels.
+
+Runs 5-6 (owner switched the panel to 1920x1080; motion page full screen):
+  shared memory: BGRx 1920x1080, MemFd
+    RESULT sl1a: 1106 frames in 20.0 s (55.3 fps), 7.9 MB/frame,
+                 interval p50 16.7 p95 27.6 max 43.3 ms
+  DMA-BUF (linear): BGRx 1920x1080, DmaBuf
+    RESULT sl1a dmabuf: 992 frames in 20.0 s (49.6 fps), 7.9 MB/frame,
+                        interval p50 24.8 p95 30.7 max 38.0 ms
+  (Two earlier attempts at 1080p ran before the page was on screen: 0.3 and
+  7.2 fps with gaps of seconds; not counted.)
+
+Conclusion of S-L1a: the 4K picture size was the main limit. At 1080p the
+portal + PipeWire capture keeps up with a 60 Hz screen (55.3 fps, p50 16.7 ms)
+with plain shared memory; linear DMA-BUF is slower at this size (its layout
+conversion costs more than the copy). For the Linux host: capture at the
+size to be streamed (1920 wide) where possible; on a 4K panel GNOME captures
+at 4K, so DMA-BUF with the GPU's native modifiers plus GPU scaling is the
+path to test next. The p95 of 27.6 ms is above one refresh: to be compared
+with the Mac's capture (Phase 2: 60 fps steady).
+
+Run 7 (S-L1b: 1080p, shared memory, every picture converted BGRx -> YUV420
+and encoded with openh264 0.9.8 (default EncoderConfig, built from source)
+inside the capture callback; 60 Hz motion page full screen):
+  ENCODE sl1b: 461 pictures, convert+encode p50 42.4 p95 47.4 ms,
+               12.9 KB/picture, 2.42 Mbit/s
+  RESULT sl1a: 461 frames in 20.0 s (23.0 fps), interval p50 43.2 ms
+
+Software encoding as configured is too slow: 42 ms per 1080p picture caps
+the stream at 23 fps and alone exceeds the 20 ms end-to-end budget
+(quality.md §1; the Mac's hardware encoder: C12 p95 7.6 ms). Not yet split:
+how much is the colour conversion and how much the encoder; not yet tried:
+openh264's threads / slices and its real-time (screen content) settings.
+Hardware encoders on this laptop (Intel Quick Sync via VA-API, NVIDIA NVENC)
+need packages Fedora does not ship with H.264 (RPM Fusion / NVIDIA driver).
+
+Runs 8-9 (1080p, motion page full screen; conversion timed separately).
+The owner approved once in GNOME's dialog with a restore token (persist
+mode "until revoked"); run 9 reused it: "portal: answered in 0.0 s", no
+dialog. Token file 0600 in the spike folder.
+  default EncoderConfig:
+    ENCODE sl1b: 461 pictures, convert+encode p50 42.6 p95 46.9 ms
+                 (of which convert p50 17.1 p95 17.5), 12.8 KB/picture, 2.42 Mbit/s
+    RESULT sl1a: 461 frames in 20.0 s (23.0 fps)
+  ScreenContentRealTime, Complexity::Low, 8 threads, 60 fps, no skipping:
+    ENCODE sl1b fast: 480 pictures, convert+encode p50 40.9 p95 44.1 ms
+                      (of which convert p50 17.1 p95 17.6), 8.8 KB/picture, 1.72 Mbit/s
+    RESULT sl1a: 480 frames in 20.0 s (24.0 fps)
+
+Split: the BGRx->YUV420 conversion (openh264's Rust rgb2yuv, one thread)
+takes 17 ms; the encoder about 24 ms even with the real-time settings (its
+threads need slices, not set). Neither fits a 60 fps / 20 ms budget in
+software as is. Paths: conversion on several cores or the GPU (expected to
+shrink a lot), and for the encoder either slices + threads (unmeasured) or a
+hardware encoder (Quick Sync / NVENC: packages Fedora leaves out).
+
+Run 10 (1080p, motion page; own BGRx->YUV420 conversion, BT.709 video range,
+integer maths, 8 threads by rows, written straight into openh264's planes
+(YUVSlices); encoder with the real-time settings; restore token, no dialog):
+  ENCODE sl1b par: 803 pictures, convert+encode p50 24.0 p95 28.5 ms
+                   (of which convert p50 1.3 p95 1.4), 7.4 KB/picture, 2.44 Mbit/s
+  RESULT sl1a: 803 frames in 20.0 s (40.1 fps), interval p50 24.8 p95 29.5 ms
+
+The conversion is solved (17.1 -> 1.3 ms). What remains is openh264 itself:
+about 22.7 ms per 1080p picture with the real-time settings, so 40 fps and
+over the 20 ms budget alone (the Mac's hardware encoder: C12 p95 7.6 ms).
+Software H.264 on this CPU can carry a session, not a 60 fps / low-latency
+one. Next: openh264 slices (so its threads can work in parallel; the crate
+exposes max_slice_len only) and a hardware encoder (Quick Sync via VA-API
+needs RPM Fusion's intel-media-driver; NVENC needs NVIDIA's driver) - the
+latter is the owner's decision.
+
+Run 11 (as run 10, plus size-limited slices: EncoderConfig::max_slice_len(1200),
+so the encoder's 8 threads get independent pieces; restore token, no dialog):
+  ENCODE sl1b slices: 1093 pictures, convert+encode p50 10.7 p95 13.6 ms
+                      (of which convert p50 1.2 p95 1.3), 7.5 KB/picture, 3.37 Mbit/s
+  RESULT sl1a: 1093 frames in 20.0 s (54.6 fps), interval p50 16.4 p95 28.5 ms
+
+RESULT OF S-L1 (capture + encode on the owner's Fedora 44 laptop, 1080p):
+  capture (portal + PipeWire, shared memory)         55.3 fps, p50 16.7 ms
+  conversion BGRx->YUV420, 8 threads                  1.2 ms
+  openh264, real-time settings, slices, 8 threads    ~9.5 ms
+  total per picture                                  10.7 ms p50, 13.6 ms p95
+  stream                                             54.6 fps, 3.4 Mbit/s
+Software H.264 is viable on this CPU: no hardware encoder, extra drivers or
+third-party repositories needed. Open for the criteria: the 4K panel case
+(capture is 15-21 fps at 4K: GPU scaling or capturing at 1080p), CPU load
+of 8 encoder threads, and p95 against the 20 ms budget end to end.
+
+== S-L1c: sl1-host (laptop, Fedora 44 / GNOME 50 Wayland, 1080p) -> Mac remora-viewer, Wi-Fi LAN
+Full Remora session: rendezvous code + password, safety code matched (059 573),
+accepted at the host, E2E-encrypted media (same remora-net/session crates).
+Capture: portal ScreenCast + PipeWire, restore token (no dialog).
+Encode: openh264, parallel BT.709 conversion, slices (S-L1b settings).
+Viewer stats once the window was visible:
+  13-33 fps drawn (mostly 30-33), decode p50 2.0-2.8 / p95 2.6-3.8 ms,
+  upload+draw p50 1.5-2.0 / p95 2.0-2.4 ms, refused 0, failed 0
+Media counters (whole run): frames 5723, frames_dropped 93 (1.6 %),
+  auth_failed 0, replayed 0, bad_fragments 0, late_fragments 0
+Notes:
+- First run looked broken ("waiting" climbing, 0 fps); cause was the viewer
+  window being covered ("no drawable ... occluded" climbed while 0 fps),
+  not the stream. Once visible it drew at once.
+- Each dropped frame (Wi-Fi loss) makes the decoder wait for the next
+  keyframe ("waiting" counter keeps growing slowly): this is the dip to
+  13 fps. Loss recovery (keyframe request latency / intra refresh) is
+  open for the D-50 criteria.
+- View only: no input yet (portal RemoteDesktop is the next step in D-50).
+
+== S-L2: input injection through the RemoteDesktop portal (local only, 2026-11-02)
+sl2-input: RemoteDesktop session + ScreenCast monitor on the same session,
+devices Keyboard|Pointer, PersistMode::ExplicitlyRevoked, restore token in
+rd-restore-token (0600). Moves the pointer in a 200 px square (16 moves,
+absolute, stream coordinates) and taps Left Shift. No clicks, no characters.
+Proof of arrival: GNOME IdleMonitor GetIdletime before/after.
+Portal: RemoteDesktop interface version 2; offers Keyboard|Pointer|Touchscreen.
+Run 1 (no token): dialog on the laptop, owner allowed after 71.1 s;
+  granted Keyboard|Pointer; restore token returned and saved.
+  16 moves: call p50 505 us, p95 677 us, max 731 us; shift press+release 777 us
+  idle 843155 ms -> 7 ms (input arrived)
+Run 2 (token): answered in 0.0 s, NO dialog; granted Keyboard|Pointer.
+  16 moves: call p50 443 us, p95 637 us, max 678 us; shift 1250 us
+  idle 14680 ms -> 5 ms
+So: control works on GNOME 50 Wayland with one approval at the laptop, and
+each injected event costs ~0.5 ms (a D-Bus round trip), small against the
+20 ms budget. Open for the criteria: what revokes the saved permission
+(GNOME Settings > Apps / Privacy; the token file), INV10 release-all on
+every session end, D-38 (remote input must not reach Remora's own controls;
+on this host the controls are the sl1-host stdin, not windows).

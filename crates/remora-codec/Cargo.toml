@@ -11,6 +11,9 @@ publish.workspace = true
 license = "MIT OR Apache-2.0"
 
 [dependencies]
+remora-proto = { workspace = true }
+# Sound: Opus encode (host) and decode (viewer), phase 4.8.
+opus = { workspace = true }
 remora-capture = { workspace = true }
 thiserror = { workspace = true }
 
@@ -23,6 +26,9 @@ objc2-video-toolbox = { workspace = true, features = [
 ] }
 objc2-core-media = { workspace = true, features = ["CMSampleBuffer", "CMBlockBuffer", "CMFormatDescription", "CMTime", "CMBase", "objc2-core-video"] }
 objc2-core-video = { workspace = true, features = ["CVBuffer", "CVImageBuffer", "CVPixelBuffer", "CVPixelBufferPool", "CVReturn", "CVBase"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+openh264 = { workspace = true }
 
 [dev-dependencies]
 remora-testkit = { workspace = true }

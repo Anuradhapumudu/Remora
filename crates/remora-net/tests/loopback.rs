@@ -177,6 +177,8 @@ fn close_code_table_on_the_wire() {
         (CloseCode::Rejected, 0x13),
         (CloseCode::Timeout, 0x14),
         (CloseCode::RateLimited, 0x15),
+        (CloseCode::CaptureStopped, 0x16),
+        (CloseCode::HostBusy, 0x17),
     ] {
         assert_eq!(to_varint(code), quinn::VarInt::from_u32(wire), "{code:?}");
         let err = quinn::ConnectionError::ApplicationClosed(quinn::ApplicationClose {

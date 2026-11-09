@@ -32,6 +32,8 @@ pub enum ViewerEvent {
     Active,
     /// A complete video frame from the host, for the decoder.
     Video(remora_proto::video::VideoFrame),
+    /// One audio packet to decode and play (phase 4.8).
+    Audio(remora_proto::audio::AudioPacket),
     /// The host's capture paused (session stays active).
     StreamPaused(remora_session::PauseReason),
     /// The stream resumed.
@@ -84,9 +86,15 @@ pub async fn connect(
     };
     let mut endpoint = quinn::Endpoint::client(local)?;
     endpoint.set_default_client_config(client_config()?);
-    let conn = endpoint.connect(addr, SERVER_NAME)?.await?;
+    let conn = match endpoint.connect(addr, SERVER_NAME)?.await {
+        Ok(c) => c,
+        Err(e) => return refused(e),
+    };
     let ex = exporter(&conn)?;
-    let (send, recv) = conn.open_bi().await?;
+    let (send, recv) = match conn.open_bi().await {
+        Ok(s) => s,
+        Err(e) => return refused(e),
+    };
     let stream = FramedStream::new(send, recv);
     let start = Instant::now();
     let (session, first) = ViewerSession::start(config, nonce, ex, Millis(0));
@@ -95,6 +103,28 @@ pub async fn connect(
     tokio::spawn(drive(
         endpoint, conn, stream, session, first, events, cmd_rx, start,
     ));
+    Ok((ViewerClient { commands }, rx))
+}
+
+/// The host closed the connection while it was being set up (refused before
+/// the handshake: busy, H9, or rate-limited, A03). Reported as the same
+/// `Closed` event as any later close, so every caller shows the host's
+/// reason; seen on CI 2026-11-01, where a fast refusal came back as an
+/// error ("closed by peer: 23") instead of "the host is busy". Anything
+/// else is an error, as before.
+fn refused(
+    err: quinn::ConnectionError,
+) -> Result<(ViewerClient, mpsc::UnboundedReceiver<ViewerEvent>), NetError> {
+    let Some(code) = close_code_of(&err) else {
+        return Err(err.into());
+    };
+    let (events, rx) = mpsc::unbounded_channel();
+    let _ = events.send(ViewerEvent::Closed {
+        local: None,
+        remote: Some(code),
+    });
+    // No connection to command: a disconnect on this client does nothing.
+    let (commands, _) = mpsc::unbounded_channel();
     Ok((ViewerClient { commands }, rx))
 }
 
@@ -157,6 +187,9 @@ async fn drive(
                 }
                 ViewerAction::Video(frame) => {
                     let _ = events.send(ViewerEvent::Video(frame));
+                }
+                ViewerAction::Audio(packet) => {
+                    let _ = events.send(ViewerEvent::Audio(packet));
                 }
                 ViewerAction::StreamPaused(reason) => {
                     let _ = events.send(ViewerEvent::StreamPaused(reason));

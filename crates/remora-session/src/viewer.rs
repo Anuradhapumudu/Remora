@@ -75,6 +75,8 @@ pub enum ViewerAction {
     /// A complete video frame for the decoder (Active only; it came only
     /// from datagrams that opened under an announced media key).
     Video(remora_proto::video::VideoFrame),
+    /// One audio packet to decode and play (phase 4.8).
+    Audio(remora_proto::audio::AudioPacket),
     /// The session failed (log it, tell the user).
     Failed {
         /// Precise local reason.
@@ -214,12 +216,12 @@ impl ViewerSession {
         let mut out = Vec::new();
         match self.state() {
             State::Closed => {}
-            State::Active => out.extend(
-                self.media
-                    .datagram(datagram, now)
-                    .into_iter()
-                    .map(ViewerAction::Video),
-            ),
+            State::Active => out.extend(self.media.datagram(datagram, now).into_iter().map(
+                |item| match item {
+                    crate::media::MediaItem::Video(f) => ViewerAction::Video(f),
+                    crate::media::MediaItem::Audio(p) => ViewerAction::Audio(p),
+                },
+            )),
             State::PendingApproval => self.media.stats.before_active += 1,
             _ => {
                 let step = step_of(&self.state);

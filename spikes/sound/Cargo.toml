@@ -1,0 +1,17 @@
+# THROWAWAY spike S-A1 (phase4.8-criteria step 1, roadmap D-51): capture
+# what the laptop plays (PipeWire sink capture), Opus-encode it, and play
+# it on the Mac. Own workspace; deleted at the end of the phase (D-41).
+[package]
+name = "sa1-sound"
+version = "0.0.0"
+edition = "2024"
+publish = false
+license = "GPL-3.0-or-later"
+
+[workspace]
+
+[dependencies]
+opus = "=0.4.0"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+pipewire = "=0.10.1"

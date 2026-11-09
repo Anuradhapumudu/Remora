@@ -11,6 +11,20 @@ publish.workspace = true
 license = "MIT OR Apache-2.0"
 
 [dependencies]
+remora-proto = { workspace = true }
+raw-window-handle = { workspace = true }
+thiserror = { workspace = true }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = { workspace = true }
+objc2-app-kit = { workspace = true, features = ["NSWindow", "NSView", "NSResponder"] }
+
+[target.'cfg(target_os = "macos")'.dev-dependencies]
+winit = { workspace = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# The portal session that shows the screen also carries the input (D48).
+remora-capture = { workspace = true }
 
 [lints]
 workspace = true

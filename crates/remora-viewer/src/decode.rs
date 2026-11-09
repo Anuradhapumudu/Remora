@@ -63,6 +63,13 @@ pub(crate) struct Counters {
     pub(crate) waiting: AtomicU64,
     /// The decoder failed on them.
     pub(crate) failed: AtomicU64,
+    /// LP4: how long each stale period lasted, ms: from the first picture
+    /// that could not be decoded (a gap or an error) to the next decoded
+    /// one. Starts at detection, so the loss itself (one picture earlier)
+    /// is not included. At most [`MAX_RECOVERIES`] are kept. (macOS: the
+    /// video window that shows them exists there only.)
+    #[cfg(target_os = "macos")]
+    pub(crate) recoveries: std::sync::Mutex<Vec<u32>>,
     /// Dropped because the decoder was busy (or there is none).
     pub(crate) dropped: AtomicU64,
     /// Decoded but not shown: the window still had `MAX_UNSHOWN`
@@ -71,7 +78,19 @@ pub(crate) struct Counters {
     /// Pictures handed to the window and not yet drawn.
     #[cfg(target_os = "macos")]
     pub(crate) unshown: AtomicU64,
+    /// The decoder's live pictures (set when the decode thread starts) and
+    /// the size of the last one decoded: the memory self-count
+    /// (phase4.5-criteria §3b). VideoToolbox's decoded pictures are not in
+    /// the process footprint, so a memory run adds these.
+    #[cfg(target_os = "macos")]
+    pub(crate) pictures: std::sync::OnceLock<remora_codec::PictureCount>,
+    #[cfg(target_os = "macos")]
+    pub(crate) picture_bytes: AtomicU64,
 }
+
+/// Recovery times kept for the stats line (oldest dropped first).
+#[cfg(target_os = "macos")]
+pub(crate) const MAX_RECOVERIES: usize = 10_000;
 
 /// Pictures on their way to the window at most: more would only add
 /// latency (and hold decoder surfaces), so newer ones are dropped.
@@ -100,6 +119,40 @@ impl Counters {
             failed: g(&self.failed),
             dropped: g(&self.dropped) + g(&self.not_shown),
         }
+    }
+
+    /// One stale period ended after `took` (LP4).
+    #[cfg(target_os = "macos")]
+    pub(crate) fn recovered(&self, took: std::time::Duration) {
+        if let Ok(mut v) = self.recoveries.lock() {
+            if v.len() >= MAX_RECOVERIES {
+                v.remove(0);
+            }
+            v.push(u32::try_from(took.as_millis()).unwrap_or(u32::MAX));
+        }
+    }
+
+    /// LP4 so far: how many recoveries, and their p50 / p95 / max in ms.
+    #[cfg(target_os = "macos")]
+    pub(crate) fn recovery(&self) -> Option<(usize, u32, u32, u32)> {
+        let mut v = self.recoveries.lock().ok()?.clone();
+        if v.is_empty() {
+            return None;
+        }
+        v.sort_unstable();
+        let at = |p: f64| v[((v.len() - 1) as f64 * p).round() as usize];
+        Some((v.len(), at(0.5), at(0.95), v[v.len() - 1]))
+    }
+
+    /// Decoded pictures that exist now and their bytes (count × the last
+    /// picture's size); `None` before the decoder exists.
+    #[cfg(target_os = "macos")]
+    pub(crate) fn held(&self) -> Option<(u64, u64)> {
+        let n = self.pictures.get()?.get();
+        Some((
+            n,
+            n.saturating_mul(self.picture_bytes.load(Ordering::Relaxed)),
+        ))
     }
 
     /// The window has dealt with one picture. Only the window thread
@@ -182,11 +235,19 @@ fn run(
     use remora_codec::h264::SizeLimit;
 
     let mut decoder = VtDecoder::new(SizeLimit::default());
+    let _ = counters.pictures.set(decoder.picture_count());
+    let mut stale_since: Option<std::time::Instant> = None;
     for (frame, received_us) in rx {
         let started = std::time::Instant::now();
         match decoder.decode(frame.frame_id, &frame.data) {
             Ok(picture) => {
                 bump(&counters.decoded);
+                if let Some(t) = stale_since.take() {
+                    counters.recovered(t.elapsed());
+                }
+                counters
+                    .picture_bytes
+                    .store(picture.byte_size(), Ordering::Relaxed);
                 let Some(show) = show.as_mut() else {
                     continue; // no window: the picture is released here
                 };
@@ -205,6 +266,7 @@ fn run(
             }
             Err(e) => {
                 bump(counter_for(counters, &e));
+                stale_since.get_or_insert(started);
                 client.request_keyframe();
             }
         }
@@ -257,5 +319,27 @@ mod tests {
             &c.refused
         ));
         assert!(is(DecodeError::NoPicture, &c.failed));
+    }
+}
+
+#[cfg(all(test, target_os = "macos"))]
+mod lp4_tests {
+    use std::time::Duration;
+
+    use super::{Counters, MAX_RECOVERIES};
+
+    #[test]
+    fn recovery_times_give_percentiles_and_stay_bounded() {
+        let c = Counters::default();
+        assert_eq!(c.recovery(), None, "nothing recovered yet");
+        for ms in [30, 10, 20, 400, 50] {
+            c.recovered(Duration::from_millis(ms));
+        }
+        assert_eq!(c.recovery(), Some((5, 30, 400, 400)));
+        for _ in 0..MAX_RECOVERIES + 10 {
+            c.recovered(Duration::from_millis(1));
+        }
+        let (n, ..) = c.recovery().expect("some");
+        assert_eq!(n, MAX_RECOVERIES, "bounded");
     }
 }

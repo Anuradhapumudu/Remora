@@ -46,6 +46,13 @@ jobs:
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
 
+      # Phase 4.6 (architecture D48): the Linux host links PipeWire, whose Rust
+      # bindings are generated with bindgen at build time (libclang + the
+      # libpipewire-0.3 headers; docs/dependencies.md `pipewire`).
+      - name: Install PipeWire headers and libclang (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update -q && sudo apt-get install -y -q --no-install-recommends libpipewire-0.3-dev libclang-dev pkg-config
+
       - name: Format
         run: cargo fmt --all --check
 
@@ -120,6 +127,7 @@ jobs:
       - name: Self-test (planted too-new entries must be caught)
         run: python3 -I scripts/ci/check-crate-age.py --self-test
       - name: Check newly locked crates
+        id: age
         env:
           EVENT: ${{ github.event_name }}
           BEFORE: ${{ github.event.before }}
@@ -137,13 +145,20 @@ jobs:
           else
             python3 -I scripts/ci/check-crate-age.py --all Cargo.lock fuzz/Cargo.lock
           fi
+          echo "base=${base:-HEAD~1}" >> "$GITHUB_OUTPUT"
+      - name: Self-test of the dependencies.md check (planted gaps must be caught)
+        run: python3 -I scripts/ci/check-dep-docs.py --self-test
+      - name: Every newly locked crate is in docs/dependencies.md (R8)
+        env:
+          BASE: ${{ steps.age.outputs.base }}
+        run: python3 -I scripts/ci/check-dep-docs.py "$BASE"
 
   # docs/roadmap.md's deferred-items list and progress log are what every
   # phase is judged against, and they are hand-edited. On 2026-10-19 a
   # scripted edit silently cut off everything after one row; this guard
   # makes that, a deleted deferred item, or a malformed row fail CI.
   roadmap:
-    name: roadmap tables intact
+    name: roadmap tables intact, no test removed, plants on record
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -154,6 +169,7 @@ jobs:
       - name: Self-test (planted breakages must be caught)
         run: python3 -I scripts/ci/check-roadmap.py --self-test
       - name: Compare with the base version
+        id: base
         env:
           EVENT: ${{ github.event_name }}
           BEFORE: ${{ github.event.before }}
@@ -167,6 +183,41 @@ jobs:
             base="HEAD~1"
           fi
           python3 -I scripts/ci/check-roadmap.py "$base"
+          echo "base=$base" >> "$GITHUB_OUTPUT"
+      - name: Self-test of the removed-test check (planted removals must be caught)
+        run: python3 -I scripts/ci/check-tests.py --self-test
+      - name: No test disappears (R2; docs/removed-tests.md for a reason)
+        env:
+          BASE: ${{ steps.base.outputs.base }}
+        run: python3 -I scripts/ci/check-tests.py "$BASE"
+      - name: Self-test of the plant record check (planted bad records must be caught)
+        run: python3 -I scripts/ci/check-plants.py --self-test
+      - name: Every recorded plant points at a real row and test (R7)
+        run: python3 -I scripts/ci/check-plants.py
+      - name: Self-test of check (c) (planted missing checks must be caught)
+        run: python3 -I scripts/ci/check-criteria.py --self-test
+      - name: Criteria rows name checks that exist; prose requirements warned (check (c))
+        run: python3 -I scripts/ci/check-criteria.py
+
+  # Measuring runs (R9, phase4.5-criteria §15): the shared helper decides
+  # whether a run counts (AC power, no sleep, display on, no pausing
+  # instrument), and check-measuring.py fails if a runner bypasses it.
+  # Linux is enough: the self-tests feed recorded macOS output and run no
+  # macOS tool.
+  measuring:
+    name: measuring helper
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Self-test (planted bad runs must be INVALID)
+        run: python3 -I scripts/macos/measuring.py --self-test
+      - name: Check self-test (planted runners that bypass the helper must fail)
+        run: python3 -I scripts/ci/check-measuring.py --self-test
+      - name: Every runner uses the helper
+        run: python3 -I scripts/ci/check-measuring.py
 
   # The A04 timing claim rests ONLY on the 200-sample "A04 timing" workflow
   # (phase3-criteria §3.1a). Every other A04 run checks only that the floor

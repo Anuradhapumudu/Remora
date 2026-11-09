@@ -1,0 +1,25 @@
+== S-A1: laptop sound -> Opus -> Mac (2026-11-02), no network (file over SSH)
+
+Build: opus 0.4.0 on opusic-sys 0.7.5 (0.7.6 < 14 days). Default feature
+"bundled" builds libopus 1.6.1 from the C source shipped in the crate with
+cmake (opusic-sys build.rs; opus/package_version). The crate's opus.patch
+only changes MSVC runtime flags and OSCE defines. cmake installed on both
+machines (Mac: brew cmake 4.4.5; laptop: owner ran `sudo dnf install cmake`,
+4.3.0). CI runners will need cmake too.
+
+Laptop capture (PipeWire, stream.capture.sink = true, F32LE 48 kHz stereo),
+owner playing a YouTube video:
+  works with NO portal or dialog (a user's own process may record the
+  user's own output); peak level 0.65 (real sound captured)
+  1002 Opus packets of 20 ms in 20.0 s, 128 kbit/s (Application::Audio)
+  PipeWire buffers arrive every 42.7 ms (p50; p95 42.9, max 43.1): the
+  default quantum is 2048 samples. A smaller one (node.latency) is to be
+  requested in the real build: it is up to 43 ms of the AU1 budget
+  encode p50 0.167 ms, p95 0.261 ms per 20 ms packet
+
+Mac decode: 1002 packets, 20.0 s, decode p50 0.043 ms, p95 0.062 ms.
+Owner listened with Bluetooth earbuds: "yes good".
+
+Open for the build: CoreAudio playback and its own latency; jitter
+buffer size; requesting a smaller PipeWire quantum; earbud delay (AU1
+measured without it).

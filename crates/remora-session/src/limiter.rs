@@ -41,6 +41,10 @@ pub enum Refusal {
     TooManyPending,
     /// This IP made [`PER_IP_PER_MINUTE`] connections in the last minute.
     IpRateLimited,
+    /// A session is `Active` (one at a time, phase4.5-criteria H9). Checked
+    /// by [`crate::Host::accept_connection`] before the limiter, so it uses
+    /// no pending slot and no per-IP budget.
+    HostBusy,
     /// Password attempts are paused until this time.
     CoolingDown {
         /// When attempts are allowed again.

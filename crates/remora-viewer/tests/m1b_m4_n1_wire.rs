@@ -180,6 +180,7 @@ fn m1b_m4_n1_a_real_stream_through_a_recording_relay() {
                 identity: host_id,
                 password_enabled: true,
                 trusted: vec![viewer_key.public()],
+                one_active_session: true,
             },
         )
         .await

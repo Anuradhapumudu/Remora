@@ -86,6 +86,13 @@ pub enum HostCommand {
     Deny(u64),
     /// `disconnect <n>`.
     Disconnect(u64),
+    /// `remember <n>`: let the viewer of accepted session `n` connect
+    /// without a password next time (it is still prompted) — phase4.7 C2.
+    Remember(u64),
+    /// `forget <device code>`: remove a remembered viewer (C7).
+    Forget(remora_crypto::identity::ShortCode),
+    /// `known`: list the remembered viewers.
+    Known,
 }
 
 /// Why a typed line is not a command. Every case is shown to the person:
@@ -93,7 +100,9 @@ pub enum HostCommand {
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum CommandError {
     /// Not one of the commands.
-    #[error("unknown command {0:?} - commands: accept <n>, deny <n>, disconnect <n>, quit")]
+    #[error(
+        "unknown command {0:?} - commands: accept <n>, deny <n>, disconnect <n>, remember <n>, forget <device code>, known, quit"
+    )]
     Unknown(String),
     /// `accept` / `deny` / `disconnect` without a number.
     #[error("'{0}' needs the prompt number shown on screen, e.g. '{0} 1'")]
@@ -111,6 +120,11 @@ pub enum CommandError {
     /// Something after the number.
     #[error("'{0}' takes exactly one prompt number")]
     TooManyWords(&'static str),
+    /// `forget` without a valid device code.
+    #[error(
+        "'forget' needs a device code as 'known' lists it, e.g. 'forget 7266 055 4675-2' ({0})"
+    )]
+    BadCode(String),
 }
 
 /// Parses one line typed at the host.
@@ -121,6 +135,15 @@ pub fn parse_host_command(line: &str) -> Result<HostCommand, CommandError> {
     };
     let (cmd, make): (&'static str, fn(u64) -> HostCommand) = match first {
         "quit" if words.next().is_none() => return Ok(HostCommand::Quit),
+        "known" if words.next().is_none() => return Ok(HostCommand::Known),
+        "forget" => {
+            // The code is shown with spaces ("7266 055 4675-2"): take the rest.
+            let rest: Vec<&str> = words.collect();
+            return remora_crypto::identity::ShortCode::parse(&rest.join(" "))
+                .map(HostCommand::Forget)
+                .map_err(|e| CommandError::BadCode(e.to_string()));
+        }
+        "remember" => ("remember", HostCommand::Remember),
         "accept" => ("accept", HostCommand::Accept),
         "deny" => ("deny", HostCommand::Deny),
         "disconnect" => ("disconnect", HostCommand::Disconnect),
@@ -151,6 +174,31 @@ pub fn no_such_prompt(n: u64, open: &[u64]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn remember_forget_and_known_parse() {
+        assert_eq!(
+            parse_host_command("remember 2"),
+            Ok(HostCommand::Remember(2))
+        );
+        assert_eq!(parse_host_command("known"), Ok(HostCommand::Known));
+        assert!(matches!(
+            parse_host_command("remember"),
+            Err(CommandError::MissingNumber("remember"))
+        ));
+        assert!(matches!(
+            parse_host_command("forget 1234"),
+            Err(CommandError::BadCode(_))
+        ));
+        let key =
+            remora_crypto::identity::IdentityKeypair::generate(&mut rand_core::OsRng).public();
+        let code = crate::cli::short_code_of(&key);
+        assert_eq!(
+            parse_host_command(&format!("forget {code}")),
+            Ok(HostCommand::Forget(code)),
+            "the code as displayed, with its spaces"
+        );
+    }
 
     #[test]
     fn numbers_start_at_one_and_count_up() {

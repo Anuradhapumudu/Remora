@@ -11,15 +11,19 @@
 
 use std::time::{Duration, Instant};
 
+pub mod audio;
 pub mod barcode;
 pub mod bitstream;
 pub mod h264;
 mod sys;
+pub mod yuv;
 
+#[cfg(target_os = "linux")]
+pub use sys::linux::{OpenH264Encoder, OpenH264Tuning};
 #[cfg(target_os = "macos")]
 pub use sys::macos::{
-    DecodedFrame, EncoderInfo, Probe444, PropertyReport, SyntheticSource, VtDecoder, VtEncoder,
-    list_encoders, probe_444, supported_properties,
+    DecodedFrame, EncoderInfo, PictureCount, Probe444, PropertyReport, SyntheticSource, VtDecoder,
+    VtEncoder, list_encoders, probe_444, supported_properties,
 };
 
 /// Video codecs Remora can produce.

@@ -4,7 +4,10 @@
 One command per step. Every run writes its numbers to results/phase4/<step>.txt,
 appends one line per verdict to results/phase4/summary.md, and keeps the raw
 logs in results/phase4/logs/ (one-time codes and passwords are removed before
-anything is written). The Mac is kept awake (caffeinate) while a step runs.
+anything is written). The shared measuring helper (measuring.py, R9) keeps the
+Mac awake, records machine state at the start and end of every step, and adds
+a VALIDITY line; a step that ran on battery, slept, or had the display turn
+off without causing it itself gets an INVALID line in summary.md.
 
   scripts/macos/phase4-session.py check      # preflight: power, build, permission
   scripts/macos/phase4-session.py p1         # P1-P4: 3 x (10 s warm-up + 60 s), motion page
@@ -33,6 +36,9 @@ import tempfile
 import threading
 import time
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import measuring  # noqa: E402  (the shared measuring helper, R9)
+
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 RESULTS = os.path.join(ROOT, "results", "phase4")
 LOGS = os.path.join(RESULTS, "logs")
@@ -53,6 +59,9 @@ T2_PAUSE_S, T2_RESUME_S, T2_GROWTH_MB = 1.0, 2.0, 2.0
 T3_RESUME_S = 2.0
 
 SECRET = re.compile(r"^(code|password): ")
+# Power-log events a step causes on purpose, so they do not invalidate it.
+EXPECT = {"t2": {measuring.DISPLAY_OFF}, "t3-lid": {measuring.DISPLAY_OFF}}
+RUN = None  # this step's measuring.Run, set in main()
 # Start time of this step: in every file name, so no run overwrites another.
 STAMP = datetime.datetime.now().strftime("%H%M")
 
@@ -208,10 +217,9 @@ def pids(pattern):
     return [int(x) for x in r.stdout.split()]
 
 
-def footprint_mb(pid):
+def footprint_mb(run, pid):
     """phys_footprint (Activity Monitor's "Memory") of `pid`, in MB."""
-    r = subprocess.run(["footprint", "-p", str(pid)], capture_output=True, text=True)
-    m = re.search(r"Footprint: ([\d.]+) (KB|MB|GB)", r.stdout)
+    m = re.search(r"Footprint: ([\d.]+) (KB|MB|GB)", run.instrument(["footprint", "-p", str(pid)]))
     if not m:
         return None
     scale = {"KB": 1 / 1024, "MB": 1, "GB": 1024}[m.group(2)]
@@ -272,7 +280,7 @@ def end_session(host, viewer, n):
 def wait(secs, why=""):
     if why:
         print(f"   ... {why} ({secs:.0f} s)", flush=True)
-    time.sleep(secs)
+    RUN.wait(secs)
 
 
 # ------------------------------------------------------------------- stats --
@@ -481,8 +489,8 @@ def step_p5(a, rep):
         host, viewer, n = start_session("screen", window=True)
     start, samples = time.time(), []
     while time.time() - start < a.minutes * 60:
-        time.sleep(10)
-        mb = footprint_mb(viewer.pid)
+        RUN.wait(10)
+        mb = footprint_mb(RUN, viewer.pid)
         minute = (time.time() - start) / 60
         if mb is not None:
             samples.append((minute, mb))
@@ -601,7 +609,7 @@ def step_t2(a, rep):
     rep.say("T2: 5 display sleep / wake cycles in one session (the display goes off 5 times)")
     host, viewer, n = start_session("screen", window=False, timing=True)
     wait(5, "streaming")
-    mem0 = footprint_mb(host.pid)
+    mem0 = footprint_mb(RUN, host.pid)
     ok = True
     for cycle in range(1, 6):
         mark = len(host.snapshot())
@@ -621,7 +629,7 @@ def step_t2(a, rep):
         rep.say(f"cycle {cycle}: paused {pause_s:.2f} s after sleep, resumed {resume_s:.2f} s after"
                 f" wake, first frame after resume a keyframe: {key}")
         wait(5, "streaming")
-    mem1 = footprint_mb(host.pid)
+    mem1 = footprint_mb(RUN, host.pid)
     alive = viewer.p.poll() is None
     counters = end_session(host, viewer, n)
     write_log("t2-host.log", host.snapshot())
@@ -745,16 +753,20 @@ def main():
     # T2's `pmset displaysleepnow` still works. With -s a closed lid does NOT
     # sleep the Mac on AC (T3, 2026-10-23): `--mac-sleeps` leaves -s out, as
     # Phase 2's lid test did (-di; the Mac slept ~29 s).
-    if not os.environ.get("REMORA_CAFFEINATED"):
-        os.environ["REMORA_CAFFEINATED"] = "1"
-        flags = "-di" if a.mac_sleeps else "-dims"
-        os.execvp("caffeinate", ["caffeinate", flags, sys.executable, *sys.argv])
+    measuring.keep_awake("-di" if a.mac_sleeps else "-dims")
     name = a.step if a.source == "screen" else f"{a.step}-{a.source}"
     rep = Report(name + ("-mac-sleeps" if a.mac_sleeps else "") + ("-covered" if a.covered else ""))
     rep.say(f"Phase 4 {a.step}, {datetime.datetime.now().isoformat(timespec='seconds')}, "
             f"commit {subprocess.run(['git', 'rev-parse', '--short', 'HEAD'], capture_output=True, text=True, cwd=ROOT).stdout.strip()}")
+    global RUN
+    RUN = measuring.Run(rep.say, expect=EXPECT.get(a.step, set())
+                        | ({measuring.SLEPT} if a.mac_sleeps else set()))
+    RUN.start()
     try:
         STEPS[a.step](a, rep)
+        if not RUN.finish():
+            rep.verdict(f"{a.step} run", False, "machine state or power events (VALIDITY line above)",
+                        valid=False)
     finally:
         rep.save()
 

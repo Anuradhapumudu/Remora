@@ -14,6 +14,7 @@ on:
       - "crates/remora-session/**"
       - "crates/remora-codec/src/h264.rs"
       - "crates/remora-codec/src/bitstream.rs"
+      - "crates/remora-codec/src/audio.rs"
       - "fuzz/**"
 
 permissions:
@@ -39,11 +40,21 @@ jobs:
             session_host,
             video_reassembly,
             h264_frame,
+            display_name,
+            input_event,
+            device_list,
+            mdns_record,
+            audio_packet,
+            opus_decode,
           ]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # Phase 4.6: input_event links remora-input, which on Linux pulls in
+      # the PipeWire capture backend (bindgen: libclang + libpipewire-0.3).
+      - name: Install PipeWire headers and libclang
+        run: sudo apt-get update -q && sudo apt-get install -y -q --no-install-recommends libpipewire-0.3-dev libclang-dev pkg-config
       - name: Install the pinned nightly (fuzz/rust-toolchain.toml)
         working-directory: fuzz
         run: rustup toolchain install

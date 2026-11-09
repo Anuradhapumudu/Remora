@@ -78,6 +78,8 @@ const FILE_WRITES: [&str; 5] = [
 const MEDIA_SEND_FILE: &str = "crates/remora-net/src/media.rs";
 /// quinn's datagram send methods.
 const DATAGRAM_SENDS: [&str; 2] = ["send_datagram", "send_datagram_wait"];
+/// The crate whose source is Slint markup only (architecture D45).
+const UI_SRC: &str = "crates/remora-ui/src/";
 
 fn is_ident_char(c: char) -> bool {
     c.is_alphanumeric() || c == '_'
@@ -140,8 +142,21 @@ pub fn check_rust(path: &str, content: &str) -> Vec<Violation> {
     let writes_checked =
         NO_FILE_WRITES.iter().any(|c| path.starts_with(c)) && path != FILE_WRITE_ALLOWED;
     let mut v = Vec::new();
+    if path.starts_with(UI_SRC) {
+        v.extend(check_ui(path, content));
+    }
     for (i, line) in content.lines().enumerate() {
         let code = code_part(line);
+        // D45: Slint's GENERATED code may allow unsafe in remora-ui; nothing
+        // we write may, anywhere outside src/sys.
+        if !unsafe_allowed && loosens_unsafe_code(&code) {
+            v.push(Violation {
+                rule: "allow(unsafe_code) outside src/sys",
+                path: path.into(),
+                line: i + 1,
+                text: line.trim().into(),
+            });
+        }
         if !unsafe_allowed && has_word(&code, "unsafe") {
             v.push(Violation {
                 rule: "unsafe outside src/sys",
@@ -181,6 +196,56 @@ pub fn check_rust(path: &str, content: &str) -> Vec<Violation> {
                 line: i + 1,
                 text: line.trim().into(),
             });
+        }
+    }
+    v
+}
+
+/// Whether `code` has an `allow(..)`, `expect(..)` or `warn(..)` lint list
+/// naming `unsafe_code` (each would loosen the workspace's `deny`).
+fn loosens_unsafe_code(code: &str) -> bool {
+    ["allow(", "expect(", "warn("].iter().any(|open| {
+        code.match_indices(open).any(|(i, _)| {
+            let before = code[..i].chars().next_back();
+            let inner = &code[i + open.len()..];
+            let inner = &inner[..inner.find(')').unwrap_or(inner.len())];
+            !before.is_some_and(is_ident_char) && has_word(inner, "unsafe_code")
+        })
+    })
+}
+
+/// remora-ui's source (architecture D45): outside `slint::slint! { .. }`
+/// blocks (Slint markup, which cannot hold Rust) only blank lines, comments,
+/// attributes and `pub use` lines are allowed, so no Rust we write can live
+/// in the one crate that cannot forbid `unsafe`.
+fn check_ui(path: &str, content: &str) -> Vec<Violation> {
+    let mut v = Vec::new();
+    let mut depth = 0usize;
+    for (i, line) in content.lines().enumerate() {
+        let code = code_part(line);
+        let trimmed = code.trim();
+        if depth == 0 {
+            let allowed = trimmed.is_empty()
+                || trimmed.starts_with("#![")
+                || trimmed.starts_with("#[")
+                || (trimmed.starts_with("pub use ") && trimmed.ends_with(';'))
+                || trimmed == "slint::slint! {";
+            if !allowed {
+                v.push(Violation {
+                    rule: "Rust code in remora-ui (markup only, D45)",
+                    path: path.into(),
+                    line: i + 1,
+                    text: line.trim().into(),
+                });
+                continue;
+            }
+        }
+        for c in code.chars() {
+            match c {
+                '{' => depth += 1,
+                '}' => depth = depth.saturating_sub(1),
+                _ => {}
+            }
         }
     }
     v
@@ -275,6 +340,82 @@ pub fn check_workspace(root: &Path) -> Scan {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn d45_remora_ui_holds_markup_only() {
+        let ok = "//! Doc.\n#![cfg(target_os = \"macos\")]\n#![allow(missing_docs)]\n\nslint::slint! {\n    export component A inherits Window {\n        in property <string> t: \"{ unsafe }\";\n        Text { text: root.t; }\n    }\n}\npub use std::fmt;\n";
+        assert!(check_rust("crates/remora-ui/src/lib.rs", ok).is_empty());
+        for bad in [
+            "fn helper() {}",
+            "pub fn helper() -> u8 { 1 }",
+            "static X: u8 = 1;",
+            "mod extra;",
+            "impl Foo {}",
+        ] {
+            let src = format!("{ok}{bad}\n");
+            let v = check_rust("crates/remora-ui/src/lib.rs", &src);
+            let line = ok.lines().count() + 1;
+            assert!(
+                v.iter().any(
+                    |v| v.rule == "Rust code in remora-ui (markup only, D45)" && v.line == line
+                ),
+                "{bad} at line {line}: {v:?}"
+            );
+        }
+        // The same text elsewhere is ordinary Rust.
+        assert!(check_rust("crates/remora-host/src/gui.rs", "fn helper() {}").is_empty());
+    }
+
+    #[test]
+    fn d45_allow_unsafe_code_is_refused_outside_sys() {
+        for (path, src) in [
+            ("crates/remora-ui/src/lib.rs", "#![allow(unsafe_code)]"),
+            (
+                "crates/remora-host/src/gui.rs",
+                "fn g() {}\n#[allow( unsafe_code )]\nfn f() {}",
+            ),
+            (
+                "crates/remora-app/src/lib.rs",
+                "#![allow(clippy::x, unsafe_code)]",
+            ),
+            ("crates/remora-app/src/lib.rs", "#![expect(unsafe_code)]"),
+            ("crates/remora-ui/src/lib.rs", "#![warn(unsafe_code)]"),
+        ] {
+            let v = check_rust(path, src);
+            let line = src
+                .lines()
+                .position(|l| l.contains("unsafe_code"))
+                .unwrap_or(0)
+                + 1;
+            assert!(
+                v.iter()
+                    .any(|v| v.rule == "allow(unsafe_code) outside src/sys" && v.line == line),
+                "{path} line {line}: {v:?}"
+            );
+        }
+        assert!(
+            check_rust(
+                "crates/remora-codec/src/sys/mod.rs",
+                "#[allow(unsafe_code)]\nmod macos;"
+            )
+            .is_empty()
+        );
+        assert!(
+            check_rust(
+                "crates/remora-ui/src/lib.rs",
+                "//! Slint adds #[allow(unsafe_code)] itself."
+            )
+            .is_empty()
+        );
+        assert!(
+            check_rust(
+                "crates/remora-app/src/lib.rs",
+                "#![allow(unsafe_code_like)]"
+            )
+            .is_empty()
+        );
+        assert!(check_rust("crates/remora-app/src/lib.rs", "#![deny(unsafe_code)]").is_empty());
+    }
 
     #[test]
     fn t4_os_names_are_refused_in_session_and_net_only() {

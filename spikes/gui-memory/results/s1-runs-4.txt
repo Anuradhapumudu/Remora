@@ -1,0 +1,28 @@
+== s3 --close-ui-after 30 10:34:28
+  machine state (start): thermal state nominal; Now drawing from 'AC Power'
+  t=   5s footprint   167.0 MB  graphics  101.2 MB
+  t=  15s footprint   165.0 MB  graphics  101.2 MB
+  t=  25s footprint   168.0 MB  graphics  101.2 MB
+  t=  35s footprint   168.0 MB  graphics  100.9 MB
+  t=  45s footprint   165.0 MB  graphics  101.2 MB
+  t=  55s footprint   168.0 MB  graphics  101.2 MB
+  t=  65s footprint   168.0 MB  graphics  101.2 MB
+  t=  75s footprint   165.0 MB  graphics  100.8 MB
+  t=  85s footprint   165.0 MB  graphics  101.2 MB
+  t=  95s footprint   165.0 MB  graphics  101.2 MB
+  t= 105s footprint   165.0 MB  graphics  101.2 MB
+  t= 115s footprint   165.0 MB  graphics  100.8 MB
+  t= 125s footprint   165.0 MB  graphics  101.2 MB
+  t= 135s footprint   165.0 MB  graphics  101.2 MB
+  t= 145s footprint   165.0 MB  graphics  101.2 MB
+  t= 155s footprint   157.0 MB  graphics  101.2 MB
+  t= 165s footprint   157.0 MB  graphics  101.2 MB
+  t= 175s footprint   157.0 MB  graphics  101.2 MB
+  video window: present mode Immediate, format Bgra8Unorm
+  [    0.1 s] video window Occluded(false)
+  Slint window hidden
+  RESULT s3: draws 10788 in 179.9 s (60.0 fps); interval p50 16.66 p95 19.39 ms; handoff p50 0.082 p95 0.112 ms; no drawable 6; skipped while occluded 0; occluded events [(0.06022975, false)]
+  machine state (end): thermal state nominal; Now drawing from 'AC Power'
+VALIDITY display stayed on: yes; on AC power: yes
+SUMMARY s3 --close-ui-after 30 --seconds 180: peak 168.0 MB, after 60 s min 157.0 max 168.0 MB, graphics peak 101.2 MB, samples 18
+ALL RUNS VALID

@@ -11,10 +11,18 @@ use clap::{Parser, Subcommand};
 
 #[cfg(target_os = "macos")]
 mod bench;
+#[cfg(target_os = "linux")]
+mod bench_linux;
+mod control;
 mod serve;
-#[cfg(target_os = "macos")]
+mod sound;
+#[cfg(any(target_os = "linux", test))]
+mod speakers;
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 mod stream;
 // Used by the macOS benchmark; pure Rust, so their tests run on every platform.
+#[cfg(target_os = "macos")]
+mod gui;
 #[cfg(any(target_os = "macos", test))]
 mod stats;
 #[cfg(any(target_os = "macos", test))]
@@ -31,11 +39,27 @@ struct Cli {
 enum Command {
     /// Phase 3: accept authenticated, host-approved sessions on loopback.
     Serve(serve::ServeArgs),
+    /// Phase 4.5: the same host with windows: the code and password, an
+    /// Accept/Deny dialog per viewer, and the session indicator.
+    #[cfg(target_os = "macos")]
+    Gui(serve::ServeArgs),
     /// Print this host's identity key and device code (created if needed).
     Identity {
         /// Key file (default: the per-user config directory).
         #[arg(long)]
         identity_file: Option<std::path::PathBuf>,
+    },
+    /// Linux: delete the saved screen-sharing / remote-control permission,
+    /// so the next session asks at this computer again.
+    #[cfg(target_os = "linux")]
+    ForgetPermission,
+    /// Linux: compare openh264 settings on the live screen (times and
+    /// sizes only; nothing is saved or sent).
+    #[cfg(target_os = "linux")]
+    BenchEncoder {
+        /// How long to measure.
+        #[arg(long, default_value_t = 30)]
+        seconds: u64,
     },
     /// Phase 2: capture the screen, hardware-encode to .h264, print measured stats.
     #[cfg(target_os = "macos")]
@@ -60,10 +84,22 @@ enum Command {
     /// Phase 2: report encoder capabilities (4:4:4, LTR, intra-refresh) as evidence.
     #[cfg(target_os = "macos")]
     ProbeEncoder,
+    /// Print machine state that can skew a measurement (thermal, power, Low
+    /// Power Mode, load), as bench-capture does. Measuring scripts call this
+    /// in a separate process, so the measured process is left alone.
+    #[cfg(target_os = "macos")]
+    MachineState {
+        /// Label printed with the state, e.g. "start" or "end".
+        #[arg(long, default_value = "now")]
+        when: String,
+    },
 }
 
 fn main() -> ExitCode {
-    let cli = Cli::parse();
+    let cli = Cli::parse_from(remora_app::cli::args_or_gui(
+        std::env::args_os(),
+        std::env::var_os("REMORA_GUI"),
+    ));
     init_logging();
     let result: anyhow::Result<()> = match cli.command {
         None => {
@@ -75,11 +111,22 @@ fn main() -> ExitCode {
             Ok(())
         }
         Some(Command::Serve(args)) => serve::run(args),
+        #[cfg(target_os = "macos")]
+        Some(Command::Gui(args)) => gui::run(args),
         Some(Command::Identity { identity_file }) => serve::identity(identity_file),
+        #[cfg(target_os = "linux")]
+        Some(Command::ForgetPermission) => serve::forget_permission(),
+        #[cfg(target_os = "linux")]
+        Some(Command::BenchEncoder { seconds }) => bench_linux::run(seconds),
         #[cfg(target_os = "macos")]
         Some(Command::BenchCapture(args)) => bench::run(args),
         #[cfg(target_os = "macos")]
         Some(Command::ProbeEncoder) => bench::probe(),
+        #[cfg(target_os = "macos")]
+        Some(Command::MachineState { when }) => {
+            sysmon::print_machine_state(&when);
+            Ok(())
+        }
         #[cfg(target_os = "macos")]
         Some(Command::ListDisplays) => bench::list_displays(),
         #[cfg(target_os = "macos")]

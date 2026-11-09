@@ -52,3 +52,7 @@ pub const VIDEO_DATAGRAM_TARGET: usize = 1100;
 /// the fragment header and the AEAD tag.
 pub const VIDEO_FRAGMENT_DATA: usize =
     VIDEO_DATAGRAM_TARGET - DATAGRAM_HEADER_LEN - FRAGMENT_HEADER_LEN - AEAD_TAG_LEN;
+/// Largest scroll amount per event, either axis (lines or pixels). A real
+/// trackpad flick is a few hundred pixels; this bound only stops absurd
+/// values reaching the injector (phase4.6-criteria L3).
+pub const SCROLL_MAX: f32 = 10_000.0;

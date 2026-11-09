@@ -970,6 +970,19 @@ pub struct DecodedFrame {
     _alive: Alive,
 }
 
+/// How many decoded pictures exist right now, readable from any thread
+/// (the viewer's memory self-count, phase4.5-criteria §3b). A view of the
+/// same count as [`DecodeStats::pictures_alive`].
+#[derive(Debug, Clone)]
+pub struct PictureCount(Arc<AtomicU64>);
+
+impl PictureCount {
+    /// Pictures handed out by the decoder and not yet dropped.
+    pub fn get(&self) -> u64 {
+        self.0.load(Ordering::Relaxed)
+    }
+}
+
 /// Counts objects of one kind while they exist: +1 when made, −1 when
 /// dropped (M7: the decoder's own objects are bounded, checked by
 /// counting on any machine — phase4-criteria §12, 2026-10-22).
@@ -992,6 +1005,22 @@ impl DecodedFrame {
     /// The picture.
     pub fn image(&self) -> &PixelBufferRef {
         &self.image
+    }
+
+    /// Bytes of its pixel planes: each plane's bytes per row × rows (row
+    /// padding included, as the surface holds it). The viewer's memory
+    /// self-count (phase4.5-criteria §3b) multiplies this by the pictures
+    /// alive.
+    pub fn byte_size(&self) -> u64 {
+        let buf = self.image.as_cv();
+        let planes = CVPixelBufferGetPlaneCount(buf).max(1);
+        (0..planes)
+            .map(|i| {
+                let rows = CVPixelBufferGetHeightOfPlane(buf, i);
+                let row = CVPixelBufferGetBytesPerRowOfPlane(buf, i);
+                u64::try_from(row.saturating_mul(rows)).unwrap_or(u64::MAX)
+            })
+            .fold(0u64, u64::saturating_add)
     }
 
     /// Calls `f` with the picture's NV12 planes, locked read-only for the
@@ -1148,6 +1177,11 @@ impl VtDecoder {
         self.session = None;
         self.gate.configure_failed();
         e
+    }
+
+    /// A live view of the pictures that exist, for another thread.
+    pub fn picture_count(&self) -> PictureCount {
+        PictureCount(Arc::clone(&self.pictures_alive))
     }
 
     /// Counters, with the live sessions and pictures as of now.

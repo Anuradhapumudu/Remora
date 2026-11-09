@@ -33,6 +33,8 @@ pub(crate) enum Event {
     Counters(Arc<Counters>),
     /// The stream paused (`Some`) or resumed (`None`).
     Pause(Option<crate::Pause>),
+    /// The connection, for mouse and keyboard (sent once, after connecting).
+    Client(remora_net::ViewerClient),
     /// The session ended with this exit code.
     Ended(u8),
 }
@@ -46,12 +48,14 @@ struct Gpu {
     renderer: Renderer,
 }
 
-struct App {
+/// The video window and everything it draws, apart from the event loop
+/// that drives it (the CLI's own loop, [`run`]; the Phase 4.5 GUI will put
+/// it on Slint's, option C′, phase4.5-criteria §2). It opens with the
+/// first picture.
+pub(crate) struct VideoWindow {
     window: Option<Arc<Window>>,
     gpu: Option<Gpu>,
-    close: Option<CloseRequest>,
     counters: Option<Arc<Counters>>,
-    exit_code: Option<u8>,
     stats: Stats,
     /// `connect --timing`: one stderr line per drawn frame (P1/P2).
     timing: bool,
@@ -59,9 +63,121 @@ struct App {
     /// last reason (R3: e.g. a hidden window gets none).
     no_drawable: (u64, &'static str),
     /// While the stream is paused: the title says why, counting down
-    /// every second if the host's display is unavailable (D-29). Plain text,
-    /// no styling: the proper overlay is Phase 4.5 (roadmap D-33).
+    /// every second if the host's display is unavailable (D-29).
     pause: Option<crate::Pause>,
+    /// O1 (phase4.5-criteria §7, D-35): the window is covered.
+    covered: Covered,
+    /// The host's device ID for the title (the GUI sets it; empty in the CLI).
+    host: String,
+    /// Mouse and keyboard → `Input` messages (phase4.6-criteria step 3).
+    input: crate::input::InputState,
+    /// Where input goes; set once the session is connected, cleared when
+    /// the window closes.
+    client: Option<remora_net::ViewerClient>,
+    /// A6: the local mute key.
+    mute: MuteKey,
+}
+
+/// A6 (phase4.8): Ctrl+Option+M mutes or unmutes the sound on this Mac.
+/// The M press and its release are not sent to the host; Ctrl and Option
+/// are (harmless on their own).
+#[derive(Debug, Default)]
+pub(crate) struct MuteKey {
+    mods: winit::keyboard::ModifiersState,
+    /// The M of the chord is down: its release is not sent either.
+    held: bool,
+}
+
+impl MuteKey {
+    /// The modifier keys changed.
+    pub(crate) fn set_mods(&mut self, mods: winit::keyboard::ModifiersState) {
+        self.mods = mods;
+    }
+
+    /// A key; returns `true` when it belongs to the mute key (not sent).
+    /// The first press toggles the mute; auto-repeats (pressed again while
+    /// held) do not.
+    pub(crate) fn key(&mut self, code: winit::keyboard::KeyCode, pressed: bool) -> bool {
+        use winit::keyboard::{KeyCode, ModifiersState};
+        if code != KeyCode::KeyM {
+            return false;
+        }
+        if !pressed {
+            return std::mem::take(&mut self.held);
+        }
+        let chord = self
+            .mods
+            .contains(ModifiersState::CONTROL | ModifiersState::ALT)
+            && !self
+                .mods
+                .intersects(ModifiersState::SUPER | ModifiersState::SHIFT);
+        if !chord && !self.held {
+            return false;
+        }
+        if !self.held {
+            let muted = crate::sound::toggle_mute();
+            eprintln!(
+                "{}",
+                if muted {
+                    "sound muted (Ctrl+Option+M to unmute)"
+                } else {
+                    "sound on"
+                }
+            );
+        }
+        self.held = true;
+        true
+    }
+}
+
+/// The video window's title (owner, 2026-11-01, phase4.5-criteria §16):
+/// "Remora — <host> · <status>", with the developer stats line on stderr
+/// only; without a known host (the CLI) "Remora viewer — <status>".
+pub(crate) fn title_for(host: &str, status: &str) -> String {
+    let who = if host.is_empty() {
+        "Remora viewer".to_owned()
+    } else {
+        format!("Remora \u{2014} {host}")
+    };
+    if status.is_empty() {
+        who
+    } else {
+        format!("{who} \u{00B7} {status}")
+    }
+}
+
+/// O1: while the window is covered (`Occluded(true)`), pictures are still
+/// decoded (the decoder's reference chain must stay intact) but not
+/// uploaded or drawn; the first picture after `Occluded(false)` is drawn.
+#[derive(Debug, Default)]
+pub(crate) struct Covered {
+    now: bool,
+    /// Pictures not drawn because the window was covered.
+    pub(crate) skipped: u64,
+}
+
+impl Covered {
+    /// The window's occlusion changed.
+    pub(crate) fn set(&mut self, covered: bool) {
+        self.now = covered;
+    }
+
+    /// A decoded picture arrived: draw it?
+    pub(crate) fn draw(&mut self) -> bool {
+        if self.now {
+            self.skipped += 1;
+        }
+        !self.now
+    }
+}
+
+/// What the CLI's event loop keeps besides the window.
+struct App {
+    video: VideoWindow,
+    close: Option<CloseRequest>,
+    exit_code: Option<u8>,
+    /// Signalled when the session thread has finished (Cmd+Q waits for it).
+    done: std::sync::mpsc::Receiver<()>,
 }
 
 /// A presented frame: CPU time for acquire + draw + present, and with
@@ -85,26 +201,119 @@ pub(crate) fn run(
     let event_loop = EventLoop::<Event>::with_user_event().build()?;
     let proxy = event_loop.create_proxy();
     let (close_tx, close_rx) = tokio::sync::oneshot::channel();
+    let (done_tx, done) = std::sync::mpsc::channel();
     let thread = std::thread::Builder::new()
         .name("remora-session".into())
-        .spawn(move || session(proxy, close_rx))?;
+        .spawn(move || {
+            session(proxy, close_rx);
+            let _ = done_tx.send(());
+        })?;
     let mut app = App {
-        window: None,
-        gpu: None,
+        video: VideoWindow::new(timing),
         close: Some(close_tx),
-        counters: None,
         exit_code: None,
-        stats: Stats::new(),
-        timing,
-        no_drawable: (0, ""),
-        pause: None,
+        done,
     };
     event_loop.run_app(&mut app)?;
     let _ = thread.join();
     Ok(app.exit_code.unwrap_or(remora_app::cli::exit::ERROR))
 }
 
-impl App {
+impl VideoWindow {
+    /// No window yet; it opens with the first picture.
+    pub(crate) fn new(timing: bool) -> Self {
+        Self {
+            window: None,
+            gpu: None,
+            counters: None,
+            stats: Stats::new(),
+            timing,
+            no_drawable: (0, ""),
+            pause: None,
+            covered: Covered::default(),
+            host: String::new(),
+            input: crate::input::InputState::default(),
+            client: None,
+            mute: MuteKey::default(),
+        }
+    }
+
+    /// The connection mouse and keyboard events go to (`None`: not sent).
+    pub(crate) fn set_client(&mut self, client: Option<remora_net::ViewerClient>) {
+        self.client = client;
+        self.show_local_cursor();
+    }
+
+    /// While this window controls the host, the Mac's own pointer is
+    /// hidden over it: the host's pointer is drawn into the picture, and
+    /// two pointers made it unclear which one clicks (owner, 2026-11-02).
+    /// winit 0.30.13 hides it through the view's cursor rect
+    /// (`platform_impl/macos/window_delegate.rs:1138`,
+    /// `invalidateCursorRectsForView`), i.e. over the view only; its docs
+    /// say "while focused" — which one holds is checked by hand (step 6).
+    fn show_local_cursor(&self) {
+        if let Some(w) = &self.window {
+            w.set_cursor_visible(self.client.is_none());
+        }
+    }
+
+    fn send(&self, messages: impl IntoIterator<Item = remora_proto::messages::Input>) {
+        if let Some(c) = &self.client {
+            for m in messages {
+                c.send_input(m);
+            }
+        }
+    }
+
+    /// Whether `id` is this window.
+    pub(crate) fn is(&self, id: WindowId) -> bool {
+        self.window.as_ref().is_some_and(|w| w.id() == id)
+    }
+
+    /// The host's device ID, for the title.
+    pub(crate) fn set_host(&mut self, host: String) {
+        self.host = host;
+    }
+
+    /// The decoder's counters, for the stats line.
+    pub(crate) fn set_counters(&mut self, c: Arc<Counters>) {
+        self.counters = Some(c);
+    }
+
+    /// The stream paused (`Some`) or resumed (`None`).
+    pub(crate) fn set_pause(&mut self, p: Option<crate::Pause>) {
+        self.pause = p;
+        match p {
+            Some(_) => self.show_pause(),
+            None => {
+                if let Some(w) = &self.window {
+                    w.set_title(&title_for(&self.host, ""));
+                }
+            }
+        }
+    }
+
+    /// Once a second while paused with a countdown: the title's time left.
+    /// Returns whether it wants to be called again in a second.
+    pub(crate) fn tick(&self) -> bool {
+        match &self.pause {
+            Some(p) => {
+                self.show_pause();
+                p.deadline.is_some()
+            }
+            None => false,
+        }
+    }
+
+    /// Closes the window (the session is ending).
+    pub(crate) fn close(&mut self) {
+        self.client = None;
+        if let Some(w) = self.window.take() {
+            w.set_visible(false);
+        }
+        self.gpu = None;
+    }
+
     fn open(&mut self, el: &ActiveEventLoop, width: u32, height: u32) -> anyhow::Result<()> {
         // Start at half the picture size on a Retina screen (1 picture
         // pixel per screen pixel), never larger than 1280 points wide.
@@ -140,6 +349,7 @@ impl App {
             wgpu::PresentMode::Fifo
         };
         let size = window.inner_size();
+        self.input.resized(size.width, size.height);
         let mut config = surface
             .get_default_config(&adapter, size.width.max(1), size.height.max(1))
             .ok_or_else(|| anyhow::anyhow!("the window surface does not fit the GPU"))?;
@@ -154,6 +364,7 @@ impl App {
             renderer: Renderer::new(device, queue, format),
         });
         self.window = Some(window);
+        self.show_local_cursor();
         Ok(())
     }
 
@@ -258,7 +469,7 @@ impl App {
     /// The title while paused (the stats line takes it back on resume).
     fn show_pause(&self) {
         if let (Some(w), Some(p)) = (&self.window, &self.pause) {
-            w.set_title(&format!("Remora viewer — {}", p.text()));
+            w.set_title(&title_for(&self.host, &p.text()));
         }
     }
 
@@ -273,70 +484,62 @@ impl App {
                 self.no_drawable.0, self.no_drawable.1
             ));
         }
+        if self.covered.skipped > 0 {
+            line.push_str(&format!(
+                ", not drawn while covered {}",
+                self.covered.skipped
+            ));
+        }
         eprintln!("stats: {line}");
         if let Some(w) = &self.window {
-            w.set_title(&format!("Remora viewer — {line}"));
+            // The title keeps the frame rate only ("53 fps"); the full line is
+            // for developers and the measuring scripts, on stderr.
+            let fps = line.split(',').next().unwrap_or("");
+            w.set_title(&title_for(&self.host, fps));
         }
     }
 }
 
-impl ApplicationHandler<Event> for App {
-    fn resumed(&mut self, _el: &ActiveEventLoop) {}
-
-    /// While paused, wake once a second to update the title's countdown.
-    fn about_to_wait(&mut self, el: &ActiveEventLoop) {
-        match &self.pause {
-            Some(p) => {
-                self.show_pause();
-                if p.deadline.is_some() {
-                    el.set_control_flow(ControlFlow::WaitUntil(
-                        Instant::now() + Duration::from_secs(1),
-                    ));
-                }
-            }
-            None => el.set_control_flow(ControlFlow::Wait),
+impl VideoWindow {
+    /// A decoded picture: opens the window on the first, uploads and draws
+    /// it at once (D34) unless the window is covered (O1). Either way the
+    /// decoder may hand over the next one.
+    pub(crate) fn picture(&mut self, el: &ActiveEventLoop, p: Picture) {
+        if self.window.is_none() || self.covered.draw() {
+            self.show(el, p);
         }
+        if let Some(c) = &self.counters {
+            c.shown();
+        }
+        // Coalesced pointer motion: at most one per drawn picture.
+        let pending = self.input.flush(Instant::now());
+        self.send(pending);
     }
 
-    fn user_event(&mut self, el: &ActiveEventLoop, event: Event) {
-        match event {
-            Event::Picture(p) => {
-                self.show(el, p);
-                if let Some(c) = &self.counters {
-                    c.shown();
-                }
+    /// An event for this window; returns `true` when the person closed it
+    /// (the session should end with a Goodbye).
+    pub(crate) fn window_event(&mut self, event: &WindowEvent) -> bool {
+        let local = match event {
+            WindowEvent::ModifiersChanged(m) => {
+                self.mute.set_mods(m.state());
+                false
             }
-            Event::Counters(c) => self.counters = Some(c),
-            Event::Pause(p) => {
-                self.pause = p;
-                match p {
-                    Some(_) => self.show_pause(),
-                    None => {
-                        if let Some(w) = &self.window {
-                            w.set_title("Remora viewer");
-                        }
-                    }
-                }
-            }
-            Event::Ended(code) => {
-                self.exit_code = Some(code);
-                el.exit();
-            }
+            WindowEvent::KeyboardInput { event: k, .. } => match k.physical_key {
+                winit::keyboard::PhysicalKey::Code(code) => self
+                    .mute
+                    .key(code, k.state == winit::event::ElementState::Pressed),
+                winit::keyboard::PhysicalKey::Unidentified(_) => false,
+            },
+            _ => false,
+        };
+        if !local {
+            let messages = self.input.event(event, Instant::now());
+            self.send(messages);
         }
-    }
-
-    fn window_event(&mut self, _el: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
         match event {
             WindowEvent::CloseRequested => {
-                // The session sends a Goodbye and then reports how it
-                // ended (Event::Ended), which closes the event loop.
-                if let Some(close) = self.close.take() {
-                    let _ = close.send(());
-                }
-                if let Some(w) = self.window.take() {
-                    w.set_visible(false);
-                }
-                self.gpu = None;
+                self.close();
+                return true;
             }
             WindowEvent::Resized(size) => {
                 if let Some(gpu) = self.gpu.as_mut() {
@@ -350,7 +553,64 @@ impl ApplicationHandler<Event> for App {
             WindowEvent::RedrawRequested => {
                 let _ = self.present(false);
             }
+            // O1: on macOS from the window's occlusion state (winit
+            // window_delegate.rs:352).
+            WindowEvent::Occluded(covered) => self.covered.set(*covered),
             _ => {}
+        }
+        false
+    }
+}
+
+impl ApplicationHandler<Event> for App {
+    fn resumed(&mut self, _el: &ActiveEventLoop) {}
+
+    /// Also on Cmd+Q, after which macOS ends the process: say goodbye
+    /// first (see `quit.rs`). After a normal end the thread is already done.
+    fn exiting(&mut self, _el: &ActiveEventLoop) {
+        let close = self.close.take();
+        crate::quit::goodbye(
+            || {
+                if let Some(c) = close {
+                    let _ = c.send(());
+                }
+            },
+            &self.done,
+            crate::quit::QUIT_WAIT,
+        );
+    }
+
+    /// While paused, wake once a second to update the title's countdown.
+    fn about_to_wait(&mut self, el: &ActiveEventLoop) {
+        if self.video.tick() {
+            el.set_control_flow(ControlFlow::WaitUntil(
+                Instant::now() + Duration::from_secs(1),
+            ));
+        } else {
+            el.set_control_flow(ControlFlow::Wait);
+        }
+    }
+
+    fn user_event(&mut self, el: &ActiveEventLoop, event: Event) {
+        match event {
+            Event::Picture(p) => self.video.picture(el, p),
+            Event::Counters(c) => self.video.set_counters(c),
+            Event::Pause(p) => self.video.set_pause(p),
+            Event::Client(c) => self.video.set_client(Some(c)),
+            Event::Ended(code) => {
+                self.exit_code = Some(code);
+                el.exit();
+            }
+        }
+    }
+
+    fn window_event(&mut self, _el: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
+        // The session sends a Goodbye and then reports how it ended
+        // (Event::Ended), which closes the event loop.
+        if self.video.window_event(&event)
+            && let Some(close) = self.close.take()
+        {
+            let _ = close.send(());
         }
     }
 }
@@ -390,10 +650,35 @@ impl Stats {
         self.since = Instant::now();
         self.decode.clear();
         self.draw.clear();
-        Some(format!(
+        let line = format!(
             "{fps:.0} fps, decode p50 {d50:.1} / p95 {d95:.1} ms, upload+draw p50 {r50:.1} / p95 {r95:.1} ms, refused {refused}, waiting {waiting}, failed {failed}, dropped {dropped}"
-        ))
+        );
+        #[cfg(target_os = "macos")]
+        let line = match counters.and_then(Counters::held) {
+            Some((n, bytes)) => line + &held_text(n, bytes),
+            None => line,
+        };
+        // LP4 (phase4.6-criteria): stale periods so far, at the end so the
+        // fields scripts read keep their place.
+        let line = match counters.and_then(Counters::recovery) {
+            Some((n, p50, p95, max)) => {
+                line + &format!(", recovered {n} (p50 {p50} / p95 {p95} / max {max} ms)")
+            }
+            None => line,
+        };
+        Some(line)
     }
+}
+
+/// The memory self-count on the stats line (phase4.5-criteria §3b): the
+/// decoded pictures that exist and their size, which the footprint does
+/// not include. `scripts/macos/p5-recheck.py` reads it.
+#[cfg(target_os = "macos")]
+fn held_text(pictures: u64, bytes: u64) -> String {
+    format!(
+        ", pictures held {pictures} ({:.1} MB)",
+        bytes as f64 / (1024.0 * 1024.0)
+    )
 }
 
 /// p50 and p95 in milliseconds (0 if empty).
@@ -404,4 +689,86 @@ fn percentiles(v: &mut [Duration]) -> (f64, f64) {
     v.sort_unstable();
     let at = |q: f64| v[((v.len() - 1) as f64 * q).round() as usize].as_secs_f64() * 1e3;
     (at(0.5), at(0.95))
+}
+
+#[cfg(all(test, target_os = "macos"))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a6_the_mute_key_toggles_and_is_never_sent() {
+        let _turn = crate::sound::MUTE_TESTS.lock();
+        use winit::keyboard::{KeyCode, ModifiersState};
+        let mut k = MuteKey::default();
+        let before = crate::sound::MUTED.load(std::sync::atomic::Ordering::Relaxed);
+        // Plain M (and Cmd+Ctrl+Option+M) go to the host.
+        assert!(!k.key(KeyCode::KeyM, true));
+        assert!(!k.key(KeyCode::KeyM, false));
+        k.set_mods(ModifiersState::CONTROL | ModifiersState::ALT | ModifiersState::SUPER);
+        assert!(!k.key(KeyCode::KeyM, true));
+        assert!(!k.key(KeyCode::KeyM, false));
+        // Ctrl+Option+M: press, a repeat and the release (even after the
+        // modifiers are let go first) stay here; one toggle.
+        k.set_mods(ModifiersState::CONTROL | ModifiersState::ALT);
+        assert!(k.key(KeyCode::KeyM, true));
+        let pressed = crate::sound::MUTED.load(std::sync::atomic::Ordering::Relaxed);
+        assert_ne!(before, pressed, "the press itself toggles");
+        assert!(k.key(KeyCode::KeyM, true)); // auto-repeat: no second toggle
+        k.set_mods(ModifiersState::empty());
+        assert!(k.key(KeyCode::KeyM, false));
+        assert!(!k.key(KeyCode::KeyN, true));
+        let after = crate::sound::MUTED.load(std::sync::atomic::Ordering::Relaxed);
+        assert_ne!(before, after, "one press, one toggle");
+        crate::sound::toggle_mute();
+    }
+
+    #[test]
+    fn the_title_names_the_host_and_keeps_only_the_frame_rate() {
+        assert_eq!(
+            title_for("8531 422 5411-5", "53 fps"),
+            "Remora \u{2014} 8531 422 5411-5 \u{00B7} 53 fps"
+        );
+        assert_eq!(
+            title_for("8531 422 5411-5", ""),
+            "Remora \u{2014} 8531 422 5411-5"
+        );
+        assert_eq!(title_for("", "60 fps"), "Remora viewer \u{00B7} 60 fps");
+    }
+
+    #[test]
+    fn o1_covered_window_draws_nothing_then_draws_at_once() {
+        let mut c = Covered::default();
+        assert!(c.draw(), "not covered: drawn");
+        c.set(true);
+        assert!(!c.draw());
+        assert!(!c.draw());
+        assert_eq!(c.skipped, 2, "decoded, counted, not drawn");
+        c.set(false);
+        assert!(c.draw(), "the first picture after uncovering is drawn");
+        assert_eq!(c.skipped, 2);
+    }
+
+    #[test]
+    fn o1_the_windows_occlusion_events_reach_it() {
+        // winit's own events, before any window exists (none is needed).
+        let mut v = VideoWindow::new(false);
+        assert!(!v.window_event(&WindowEvent::Occluded(true)));
+        assert!(!v.covered.draw(), "covered: not drawn");
+        assert!(!v.window_event(&WindowEvent::Occluded(false)));
+        assert!(v.covered.draw(), "uncovered: drawn");
+        assert!(
+            v.window_event(&WindowEvent::CloseRequested),
+            "closing ends the session"
+        );
+    }
+
+    #[test]
+    fn self_count_on_the_stats_line() {
+        // Two 1920 x 1248 NV12 pictures.
+        assert_eq!(
+            held_text(2, 2 * 1920 * 1248 * 3 / 2),
+            ", pictures held 2 (6.9 MB)"
+        );
+        assert_eq!(held_text(0, 0), ", pictures held 0 (0.0 MB)");
+    }
 }

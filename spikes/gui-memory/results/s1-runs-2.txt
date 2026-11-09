@@ -1,0 +1,53 @@
+== s0 15:45:22
+  t=   5s footprint   153.0 MB  graphics  101.2 MB
+  t=  15s footprint   150.0 MB  graphics  101.2 MB
+  t=  25s footprint   150.0 MB  graphics  101.2 MB
+  t=  35s footprint   150.0 MB  graphics  101.2 MB
+  t=  45s footprint   150.0 MB  graphics  101.2 MB
+  t=  55s footprint   150.0 MB  graphics  101.2 MB
+  t=  65s footprint   150.0 MB  graphics  101.2 MB
+  t=  75s footprint   150.0 MB  graphics  101.2 MB
+  t=  85s footprint   163.0 MB  graphics  101.4 MB
+  t=  95s footprint   160.0 MB  graphics  101.4 MB
+  t= 105s footprint   161.0 MB  graphics  101.4 MB
+  t= 115s footprint   161.0 MB  graphics  101.4 MB
+  t= 125s footprint   161.0 MB  graphics  101.4 MB
+  t= 135s footprint   161.0 MB  graphics  101.8 MB
+  t= 145s footprint   161.0 MB  graphics  101.8 MB
+  t= 155s footprint   161.0 MB  graphics  101.8 MB
+  t= 165s footprint   161.0 MB  graphics  101.8 MB
+  t= 175s footprint   161.0 MB  graphics  101.8 MB
+  video window: present mode Immediate, format Bgra8Unorm
+  [    0.1 s] video window Occluded(false)
+  RESULT s0: draws 8232 in 180.1 s (45.7 fps); interval p50 16.66 p95 23.59 ms; handoff p50 0.061 p95 0.096 ms; no drawable 3; skipped while occluded 0; occluded events [(0.054741291, false)]
+SUMMARY s0 --seconds 180: peak 163.0 MB, after 60 s min 150.0 max 163.0 MB, graphics peak 101.8 MB, samples 18
+== s1 15:48:38
+  t=   5s footprint    76.0 MB  graphics   48.5 MB
+  t=  15s footprint   190.0 MB  graphics  122.8 MB
+  t=  25s footprint   183.0 MB  graphics  114.8 MB
+  t=  35s footprint   180.0 MB  graphics  114.8 MB
+  t=  45s footprint   180.0 MB  graphics  114.0 MB
+  t=  55s footprint   180.0 MB  graphics  114.0 MB
+  t=  65s footprint   180.0 MB  graphics  114.0 MB
+  t=  75s footprint   182.0 MB  graphics  117.0 MB
+  t=  85s footprint   183.0 MB  graphics  114.0 MB
+  t=  95s footprint   180.0 MB  graphics  114.0 MB
+  t= 105s footprint   182.0 MB  graphics  117.0 MB
+  t= 115s footprint   180.0 MB  graphics  114.0 MB
+  t= 125s footprint   196.0 MB  graphics  108.9 MB
+  t= 135s footprint    97.0 MB  graphics   12.1 MB
+  t= 145s footprint   184.0 MB  graphics  114.0 MB
+  t= 155s footprint   180.0 MB  graphics  114.0 MB
+  t= 165s footprint   183.0 MB  graphics  114.0 MB
+  t= 175s footprint   183.0 MB  graphics  114.0 MB
+  video window: present mode Immediate, format Bgra8Unorm
+  [    8.0 s] video window Occluded(false)
+  [   10.4 s] video window Occluded(true)
+  [   11.1 s] video window Occluded(false)
+  [   17.1 s] video window Occluded(true)
+  [   18.9 s] video window Occluded(false)
+  [  124.0 s] video window Occluded(true)
+  [  136.7 s] video window Occluded(false)
+  RESULT s1: draws 9330 in 179.9 s (51.9 fps); interval p50 16.66 p95 19.95 ms; handoff p50 0.067 p95 0.085 ms; no drawable 485; skipped while occluded 914; occluded events [(8.039596625, false), (10.405812625, true), (11.11092225, false), (17.101816125, true), (18.860599167, false), (123.984548459, true), (136.741935917, false)]
+SUMMARY s1 --seconds 180: peak 196.0 MB, after 60 s min 97.0 max 196.0 MB, graphics peak 122.8 MB, samples 18
+INVALID: the video window was occluded during 's1'; stopping

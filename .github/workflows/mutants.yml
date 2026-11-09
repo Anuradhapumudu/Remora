@@ -57,6 +57,12 @@ jobs:
         with:
           persist-credentials: false
       - run: rustup toolchain install
+      # Phase 4.6 (architecture D48): the Linux host links PipeWire, whose Rust
+      # bindings are generated with bindgen at build time (libclang + the
+      # libpipewire-0.3 headers; docs/dependencies.md `pipewire`).
+      - name: Install PipeWire headers and libclang
+        run: sudo apt-get update -q && sudo apt-get install -y -q --no-install-recommends libpipewire-0.3-dev libclang-dev pkg-config
+
       - name: Install cargo-mutants 27.1.0
         run: cargo install --locked cargo-mutants@27.1.0
       - name: The tests still read the variables set below

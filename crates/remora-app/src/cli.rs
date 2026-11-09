@@ -184,6 +184,30 @@ impl PasswordChange {
             }
         }
     }
+
+    /// The same, as one plain sentence for the host window (empty when the
+    /// password is unchanged: a fresh code needs no explanation there).
+    pub fn sentence(self) -> &'static str {
+        match self {
+            Self::Unchanged => "",
+            Self::UsedUp => {
+                "New code and password: the last ones were used by the previous viewer. Each pair works for one connection."
+            }
+            Self::ReplacedAfterFailures => {
+                "New password: the old one was replaced after 3 failed attempts and no longer works."
+            }
+        }
+    }
+}
+
+/// A 6-digit password as the host window shows it: "248 416" (easier to
+/// read out and to compare; the viewer accepts it with or without the space).
+pub fn group_password(digits: &str) -> String {
+    if digits.len() == 6 && digits.is_ascii() {
+        format!("{} {}", &digits[..3], &digits[3..])
+    } else {
+        digits.to_owned()
+    }
 }
 
 /// A safety code as people read it aloud: `123 456`.
@@ -240,6 +264,29 @@ pub fn unix_now() -> u64 {
         .map_or(0, |d| d.as_secs())
 }
 
+/// The arguments an app runs with. Started from a dev bundle (Finder, Dock)
+/// it gets no arguments; the bundle's Info.plist sets `REMORA_GUI=1`
+/// (`LSEnvironment`), and then the app runs `gui` (phase4.5-criteria §0
+/// item 7, Q9). Any typed command is used as it is, and only macOS has a GUI.
+pub fn args_or_gui(
+    args: impl IntoIterator<Item = OsString>,
+    remora_gui: Option<OsString>,
+) -> Vec<OsString> {
+    let args: Vec<OsString> = args.into_iter().collect();
+    if cfg!(target_os = "macos") && args.len() <= 1 && remora_gui.is_some_and(|v| v == "1") {
+        let program = args.first().cloned().unwrap_or_default();
+        return vec![program, "gui".into()];
+    }
+    args
+}
+
+/// Time of day of `unix` seconds as "HH:MM:SS UTC", for log lines (the
+/// apps add no time-zone dependency for this).
+pub fn utc_time(unix: u64) -> String {
+    let s = unix % 86_400;
+    format!("{:02}:{:02}:{:02} UTC", s / 3600, s / 60 % 60, s % 60)
+}
+
 /// The host's offer code: its identity key, a single-use nonce, expiry
 /// `now + ttl_secs`, and one host candidate (Phase 3: loopback). The ICE
 /// fields are random filler until Phase 5 uses them.
@@ -273,6 +320,52 @@ pub fn offer_code(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn args_or_gui_opens_the_gui_only_from_a_bundle_without_arguments() {
+        let os = |v: &[&str]| v.iter().map(OsString::from).collect::<Vec<_>>();
+        let gui = Some(OsString::from("1"));
+        let want = if cfg!(target_os = "macos") {
+            os(&["app", "gui"])
+        } else {
+            os(&["app"])
+        };
+        assert_eq!(args_or_gui(os(&["app"]), gui.clone()), want);
+        // A typed command always wins; no REMORA_GUI, or another value: unchanged.
+        assert_eq!(
+            args_or_gui(os(&["app", "serve"]), gui),
+            os(&["app", "serve"])
+        );
+        assert_eq!(args_or_gui(os(&["app"]), None), os(&["app"]));
+        assert_eq!(args_or_gui(os(&["app"]), Some("0".into())), os(&["app"]));
+    }
+
+    #[test]
+    fn password_shown_grouped_and_changes_explained_in_plain_sentences() {
+        assert_eq!(group_password("248416"), "248 416");
+        assert_eq!(group_password("12345"), "12345");
+        assert_eq!(PasswordChange::Unchanged.sentence(), "");
+        assert!(PasswordChange::UsedUp.sentence().contains("one connection"));
+        assert!(
+            PasswordChange::ReplacedAfterFailures
+                .sentence()
+                .contains("3 failed attempts")
+        );
+        for c in [
+            PasswordChange::UsedUp,
+            PasswordChange::ReplacedAfterFailures,
+        ] {
+            assert!(!c.sentence().starts_with("note:"));
+        }
+    }
+
+    #[test]
+    fn utc_time_of_day() {
+        assert_eq!(utc_time(0), "00:00:00 UTC");
+        // 2026-11-01 11:22:33 UTC
+        assert_eq!(utc_time(1_793_532_153), "11:22:33 UTC");
+        assert_eq!(utc_time(86_399), "23:59:59 UTC");
+    }
 
     #[test]
     fn d29_display_unavailable_text_rounds_up_to_whole_seconds() {

@@ -2,7 +2,7 @@
 resolver = "3"
 members = ["crates/*", "spikes/*"]
 # Throwaway spikes with heavy dependencies keep their own workspace and lockfile.
-exclude = ["spikes/slint-wgpu"]
+exclude = ["spikes/slint-wgpu", "spikes/gui-memory", "spikes/linux-capture", "spikes/connect-mdns", "spikes/sound"]
 
 [workspace.package]
 version = "0.0.1"
@@ -30,6 +30,7 @@ remora-codec = { path = "crates/remora-codec" }
 remora-input = { path = "crates/remora-input" }
 remora-testkit = { path = "crates/remora-testkit" }
 remora-app = { path = "crates/remora-app" }
+remora-ui = { path = "crates/remora-ui" }
 
 # async + network
 tokio = { version = "1.53", default-features = false }
@@ -59,6 +60,30 @@ keyring = "4.2"
 # NFKC for the unattended-password policy (A30). Locked to 0.1.25: 0.1.26 is < 14 days old.
 unicode-normalization = "0.1.25"
 
+# Linux host (phase4.6-criteria §5, architecture D48): the desktop portal
+# (screen cast + remote desktop over D-Bus), PipeWire for the pictures, and
+# Cisco's openh264 (below, with the platform crates) as the encoder. Used
+# only under cfg(target_os = "linux").
+ashpd = { version = "0.13.13", default-features = false, features = ["tokio", "screencast", "remote_desktop"] }
+pipewire = "0.10.1"
+# Linux CLOCK_MONOTONIC for the shared latency clock (remora-app), safely.
+rustix = { version = "1.1.5", default-features = false, features = ["std", "time"] }
+# The portal session's Closed signal is a Stream (already in the graph).
+futures-util = { version = "0.3.34", default-features = false }
+
+# Home-network discovery (phase4.7-criteria, spike S-C1): mDNS announce and
+# browse. The crate forbids unsafe code itself (src/lib.rs:157). 0.21.6:
+# newest release at least 14 days old on 2026-11-02.
+mdns-sd = { version = "0.21.6", default-features = false }
+
+# Sound (phase4.8-criteria, spike S-A1): Opus. opus 0.4.0 builds libopus
+# 1.6.1 from source shipped in opusic-sys (bundled, cmake); opusic-sys is
+# locked to 0.7.5 (0.7.6 < 14 days). BSD-3-Clause (libopus), MIT/Apache.
+opus = "0.4.0"
+# Playing sound on the Mac viewer: the objc2 0.3 audio crates we already use
+# underneath, so the CoreAudio `unsafe` stays in this widely used crate.
+cpal = { version = "0.18.2", default-features = false }
+
 # protocol
 base64 = "0.23.1"
 prost = "0.14.4"
@@ -71,6 +96,9 @@ objc2 = "0.6.4" # locked to 0.6.4: 0.6.5 is < 14 days old
 block2 = "0.6.2"
 dispatch2 = { version = "0.3.1", default-features = false, features = ["std", "objc2"] }
 objc2-foundation = { version = "0.3.2", default-features = false, features = ["std"] }
+# I3 (architecture D46): the session indicator on every Space (remora-input).
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std"] }
+raw-window-handle = "0.6.2"
 objc2-core-foundation = { version = "0.3.2", default-features = false, features = ["std"] }
 objc2-core-graphics = { version = "0.3.2", default-features = false, features = ["std"] }
 objc2-screen-capture-kit = { version = "0.3.2", default-features = false, features = ["std"] }
@@ -87,7 +115,12 @@ openh264 = "0.9.8"
 wgpu = { version = "30.0.1", default-features = false, features = ["std", "wgsl", "metal"] }
 winit = { version = "0.30.13", default-features = false, features = ["rwh_06"] }
 pollster = "1.0.1"
-slint = { version = "1.18.1", features = ["unstable-wgpu-30"] }
+# Phase 4.5 GUI (phase4.5-criteria §2, §3), used only by remora-ui (D45): the
+# winit backend (our video window shares Slint's event loop, option C′) and
+# the SOFTWARE renderer (S1: +17 MB over the video path, against +35-39 MB
+# for femtovg on wgpu).
+slint = { version = "1.18.1", default-features = false, features = ["std", "compat-1-2", "accessibility", "backend-winit", "renderer-software", "unstable-winit-030"] }
+i-slint-backend-testing = "1.18.1"
 
 # server
 axum = { version = "0.8.9", features = ["ws"] }

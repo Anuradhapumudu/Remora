@@ -28,11 +28,12 @@ use remora_proto::video::{PacketizeError, packetize};
 
 use crate::fail::{AuthDetail, Violation};
 use crate::limiter::Limiter;
-use crate::media::{KEYFRAME_REQUEST_INTERVAL_MS, MediaOut, video_header};
+use crate::media::{KEYFRAME_REQUEST_INTERVAL_MS, MediaOut, audio_header, video_header};
 use crate::{
     AppMessage, CloseCode, FailReason, HANDSHAKE_TIMEOUT_MS, Millis, PROMPT_TIMEOUT_MS,
     PROTOCOL_VERSION, State, Step,
 };
+use remora_proto::datagram::DatagramHeader;
 
 /// `SessionReject.reason` values (protocol.md §3.4).
 const REJECT_DENIED: u32 = 1;
@@ -64,6 +65,14 @@ pub struct HostConfig {
     pub password_enabled: bool,
     /// Viewer identity keys allowed to use trusted (password-less) mode.
     pub trusted: Vec<IdentityPublic>,
+    /// One active session at a time (phase4.5-criteria H9): while a session
+    /// is `Active`, new connections are refused [`Refusal::HostBusy`] before
+    /// any crypto. **`true` in every app** (v0.1 is single-viewer); `false`
+    /// only where several viewers are the point (multi-viewer media tests).
+    /// No default on purpose: whoever builds a host decides.
+    ///
+    /// [`Refusal::HostBusy`]: crate::limiter::Refusal::HostBusy
+    pub one_active_session: bool,
 }
 
 /// Why [`Host::send_video`] could not send a frame.
@@ -94,6 +103,11 @@ pub enum ApproveError {
     /// The safety code given does not match this session's (A22).
     #[error("safety code does not match this session")]
     SasMismatch,
+    /// Another session is `Active` and the host serves one at a time
+    /// ([`HostConfig::one_active_session`], phase4.5-criteria H9). Viewers
+    /// that were already waiting at the prompt cannot be let in next to it.
+    #[error("another session is active (one viewer at a time)")]
+    AnotherSessionActive,
 }
 
 /// What the host must do.
@@ -304,6 +318,17 @@ impl Host {
         }
     }
 
+    /// Replaces the viewer keys allowed in trusted (password-less) mode
+    /// (phase4.7-criteria C2, C7: the person at the host remembered or
+    /// forgot a viewer). It applies to every connection whose
+    /// `ViewerHello` arrives afterwards; a session already past its hello
+    /// keeps the list it started with (end it with `disconnect` to cut it
+    /// off). Trusted viewers are still prompted for approval like everyone
+    /// else (threat model §4 item 6).
+    pub fn set_trusted(&mut self, keys: Vec<IdentityPublic>) {
+        self.config.trusted = keys;
+    }
+
     /// Rotates every session's media key after `packets` packets instead
     /// of 2³² (clamped to 1..=2³²). Shorter key lives only, for testing
     /// rotation (phase4-criteria M8); keys still also rotate hourly.
@@ -330,17 +355,46 @@ impl Host {
         self.next_frame_id = frame_id
             .checked_add(1)
             .ok_or(SendVideoError::FrameIdsExhausted)?;
+        let bodies: Vec<(DatagramHeader, &[u8])> = fragments
+            .iter()
+            .map(|f| (video_header(f.flags), f.body.as_slice()))
+            .collect();
+        Ok(self.seal_for_active(&bodies, now, rng))
+    }
+
+    /// Sends one 20 ms audio packet (phase 4.8) to every `Active` session,
+    /// sealed under each session's own media key exactly like video: the
+    /// same counters, replay window and key rotation. Sessions in any
+    /// other state get nothing (A1, like M3 for video).
+    pub fn send_audio<R: RngCore + CryptoRng>(
+        &mut self,
+        packet: &remora_proto::audio::AudioPacket,
+        now: Millis,
+        rng: &mut R,
+    ) -> Vec<HostAction> {
+        let body = packet.encode();
+        self.seal_for_active(&[(audio_header(), body.as_slice())], now, rng)
+    }
+
+    /// Seals `bodies` for every `Active` session, with any new media-key
+    /// announcements; a session whose keys run out is failed.
+    fn seal_for_active<R: RngCore + CryptoRng>(
+        &mut self,
+        bodies: &[(DatagramHeader, &[u8])],
+        now: Millis,
+        rng: &mut R,
+    ) -> Vec<HostAction> {
         let mut out = Vec::new();
         for id in self.active_sessions() {
-            let mut datagrams = Vec::with_capacity(fragments.len());
+            let mut datagrams = Vec::with_capacity(bodies.len());
             let mut failed = None;
             if let Some(HostSession {
                 state: HostSessionState::Active { est, media },
                 ..
             }) = self.sessions.get_mut(&id)
             {
-                for f in &fragments {
-                    match media.seal(video_header(f.flags), &f.body, self.rotate_after, now, rng) {
+                for (header, body) in bodies {
+                    match media.seal(*header, body, self.rotate_after, now, rng) {
                         Ok(datagram) => datagrams.push(HostAction::Media { id, datagram }),
                         Err(_) => {
                             failed = Some(Violation::MediaKey("key ids used up"));
@@ -367,7 +421,7 @@ impl Host {
                 ),
             }
         }
-        Ok(out)
+        out
     }
 
     /// The current one-time password (for the host's screen only).
@@ -419,8 +473,18 @@ impl Host {
     }
 
     /// A QUIC connection from `peer_ip` completed its TLS handshake. Applies
-    /// the pending cap and per-IP limit **before any crypto**; on success
-    /// the new session waits for `ViewerHello`.
+    /// the one-active-session rule, then the pending cap and per-IP limit,
+    /// all **before any crypto**; on success the new session waits for
+    /// `ViewerHello`.
+    ///
+    /// One active session (phase4.5-criteria H9, when
+    /// [`HostConfig::one_active_session`]): while a session is `Active`
+    /// every new connection is refused [`Refusal::HostBusy`]. It
+    /// is checked first, so a refused attempt changes nothing: no pending
+    /// slot, no per-IP budget, no password attempt (INV12) and the one-time
+    /// password stays valid (INV15).
+    ///
+    /// [`Refusal::HostBusy`]: crate::limiter::Refusal::HostBusy
     pub fn accept_connection<R: RngCore + CryptoRng>(
         &mut self,
         peer_ip: IpAddr,
@@ -428,6 +492,14 @@ impl Host {
         now: Millis,
         rng: &mut R,
     ) -> Result<SessionId, Refused> {
+        if self.config.one_active_session
+            && self
+                .sessions
+                .values()
+                .any(|s| matches!(s.state, HostSessionState::Active { .. }))
+        {
+            return Err(Refused(crate::limiter::Refusal::HostBusy));
+        }
         self.limiter.admit(peer_ip, now).map_err(Refused)?;
         let mut id = SessionId(rng.next_u64());
         while self.sessions.contains_key(&id) {
@@ -579,6 +651,9 @@ impl Host {
         sas: Sas,
         now: Millis,
     ) -> Result<Vec<HostAction>, ApproveError> {
+        // Read before borrowing the session: the one being approved is
+        // Pending, so it is never among the Active ones.
+        let busy = self.config.one_active_session && !self.active_sessions().is_empty();
         let sess = self
             .sessions
             .get_mut(&id)
@@ -588,6 +663,9 @@ impl Host {
         };
         if *shown != sas {
             return Err(ApproveError::SasMismatch);
+        }
+        if busy {
+            return Err(ApproveError::AnotherSessionActive);
         }
         if self.capture == crate::CaptureStatus::Stopped {
             // Nothing to stream until the user fixes capture at the host:

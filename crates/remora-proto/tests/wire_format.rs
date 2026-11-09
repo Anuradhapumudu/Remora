@@ -239,8 +239,10 @@ fn invalid_envelopes_are_rejected() {
             "({x},{y})"
         );
     }
+    // 4 back and 5 forward are valid since phase4.6-criteria L3; 6 is the
+    // first button outside the allowlist.
     assert!(invalid(inp(input::Kind::Button(MouseButton {
-        button: 4,
+        button: 6,
         down: true,
         x: 0.5,
         y: 0.5
@@ -292,7 +294,8 @@ fn invalid_datagram_headers_are_rejected() {
     };
     assert_eq!(with(&|d| d.truncate(31)), Some(DatagramError::TooShort));
     assert_eq!(with(&|d| d[0] = 0), Some(DatagramError::UnknownKind(0)));
-    assert_eq!(with(&|d| d[0] = 4), Some(DatagramError::UnknownKind(4)));
+    // The first kind after the last defined one (0x04 audio since phase 4.8).
+    assert_eq!(with(&|d| d[0] = 5), Some(DatagramError::UnknownKind(5)));
     assert_eq!(with(&|d| d[1] = 0b1000), Some(DatagramError::UnknownFlags));
     assert_eq!(with(&|d| d[15] = 1), Some(DatagramError::Reserved));
     assert_eq!(with(&|_| {}), None);

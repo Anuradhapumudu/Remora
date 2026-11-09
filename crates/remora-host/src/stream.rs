@@ -22,11 +22,20 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use anyhow::Context;
-use remora_capture::{
-    CaptureError, CaptureEvent, CapturedFrame, EventSink, FrameStatus, InterruptReason,
-    ScreenCapture,
-};
-use remora_codec::{EncoderConfig, EncoderEvent, SyntheticSource, VtEncoder};
+use remora_capture::{CaptureEvent, InterruptReason, ScreenCapture};
+// The macOS test pattern (SyntheticCapture) only.
+#[cfg(target_os = "macos")]
+use remora_capture::{CaptureError, CapturedFrame, EventSink, FrameStatus};
+#[cfg(target_os = "macos")]
+use remora_codec::SyntheticSource;
+use remora_codec::{EncoderConfig, EncoderEvent};
+
+/// The encoder for this OS: the Mac's hardware encoder (VideoToolbox), or
+/// openh264 in software on Linux (phase 4.6). Same calls on both.
+#[cfg(target_os = "macos")]
+type VideoEncoder = remora_codec::VtEncoder;
+#[cfg(target_os = "linux")]
+type VideoEncoder = remora_codec::OpenH264Encoder;
 use remora_session::{CaptureStatus, PauseReason};
 
 /// Where encoded frames and capture state go: the host server, or a
@@ -59,6 +68,20 @@ pub(crate) enum NotEncoded {
 /// real time, without B-frames), far fewer than 64.
 const IN_FLIGHT: usize = 64;
 
+/// One captured picture as this OS's encoder takes it.
+#[cfg(target_os = "macos")]
+type Image = remora_capture::PixelBufferRef;
+#[cfg(target_os = "linux")]
+type Image = remora_capture::CpuImage;
+
+/// Linux: a keyframe asked for while the screen is still is made from the
+/// last picture after this long without a new one (LP4). GNOME sends a
+/// picture only when something changes, so without this a viewer that
+/// lost a frame on a still screen stayed stale until the next change
+/// (owner's laptop, 2026-11-02: "waiting" 479 over one session).
+#[cfg(target_os = "linux")]
+const REPEAT_AFTER: Duration = Duration::from_millis(40);
+
 /// What the capture thread and the encoder thread share.
 struct Shared {
     out: Arc<dyn VideoOut>,
@@ -66,13 +89,45 @@ struct Shared {
     force: AtomicBool,
     /// `capture_ts_us` per encoder sequence number (see [`IN_FLIGHT`]).
     display_us: [AtomicU64; IN_FLIGHT],
+    /// Calls to `encode` so far: the encoder numbers frames 0, 1, 2, ... by
+    /// them (failed calls included), so a frame's slot is known before the
+    /// call and the encoder thread can never read it too early. Only
+    /// changed with the encoder locked.
+    calls: AtomicU64,
+    /// Linux: the last picture and when it was encoded (for LP4 repeats).
+    #[cfg(target_os = "linux")]
+    last: Mutex<Option<(Arc<Image>, Instant)>>,
+    /// Linux: tells the repeat thread to finish.
+    #[cfg(target_os = "linux")]
+    stopping: AtomicBool,
+}
+
+/// Encodes one picture shown at `shown` (a keyframe if one is due).
+fn submit(s: &Shared, enc: &Mutex<VideoEncoder>, image: &Image, shown: Instant, started: Instant) {
+    let shown_us = display_us(shown);
+    s.out.captured(shown_us);
+    let pts = shown.saturating_duration_since(started);
+    let sent = enc.lock().map(|mut e| {
+        let call = s.calls.fetch_add(1, Ordering::Relaxed);
+        s.display_us[call as usize % IN_FLIGHT].store(shown_us, Ordering::Relaxed);
+        let keyframe = s.force.swap(false, Ordering::Relaxed);
+        e.encode(image, pts, keyframe)
+    });
+    if !matches!(sent, Ok(Ok(_))) {
+        s.force.store(true, Ordering::Relaxed);
+        s.out.not_encoded(shown_us, NotEncoded::Failed);
+    }
 }
 
 /// A running capture → encode → send pipeline.
 pub(crate) struct Streamer {
     capture: Box<dyn ScreenCapture>,
-    encoder: Arc<Mutex<VtEncoder>>,
+    encoder: Arc<Mutex<VideoEncoder>>,
     shared: Arc<Shared>,
+    /// Linux: re-encodes the last picture as a keyframe when one is asked
+    /// for on a still screen (LP4).
+    #[cfg(target_os = "linux")]
+    repeat: Option<JoinHandle<()>>,
 }
 
 impl Streamer {
@@ -90,9 +145,14 @@ impl Streamer {
             // without forcing it, checked by removing a forced first frame).
             force: AtomicBool::new(false),
             display_us: std::array::from_fn(|_| AtomicU64::new(0)),
+            calls: AtomicU64::new(0),
+            #[cfg(target_os = "linux")]
+            last: Mutex::new(None),
+            #[cfg(target_os = "linux")]
+            stopping: AtomicBool::new(false),
         });
         let s = Arc::clone(&shared);
-        let encoder = VtEncoder::new(
+        let encoder = VideoEncoder::new(
             EncoderConfig {
                 width,
                 height,
@@ -123,31 +183,37 @@ impl Streamer {
                 }
             }),
         )
-        .context("hardware encoder")?;
+        .context("video encoder")?;
         let encoder = Arc::new(Mutex::new(encoder));
         let (enc, s) = (Arc::clone(&encoder), Arc::clone(&shared));
-        // The encoder numbers frames 0, 1, 2, … by calls to `encode`
-        // (failed calls included), so the slot is known before the call
-        // and the encoder thread can never read it too early.
-        let mut calls: u64 = 0;
         let started = Instant::now();
+        #[cfg(target_os = "linux")]
+        let repeat = {
+            let (enc, s) = (Arc::clone(&encoder), Arc::clone(&shared));
+            Some(
+                std::thread::Builder::new()
+                    .name("remora-repeat".into())
+                    .spawn(move || repeat_when_still(&s, &enc, started))
+                    .context("starting the keyframe repeat thread")?,
+            )
+        };
         capture
             .start(Box::new(move |ev| match ev {
+                #[cfg(target_os = "macos")]
                 CaptureEvent::Frame(f) => {
                     let Some(image) = f.image.as_ref() else {
                         return; // nothing changed on screen: nothing to send
                     };
-                    let shown = f.display_time();
-                    let shown_us = display_us(shown);
-                    s.display_us[calls as usize % IN_FLIGHT].store(shown_us, Ordering::Relaxed);
-                    calls += 1;
-                    s.out.captured(shown_us);
-                    let keyframe = s.force.swap(false, Ordering::Relaxed);
-                    let pts = shown.saturating_duration_since(started);
-                    let sent = enc.lock().map(|mut e| e.encode(image, pts, keyframe));
-                    if !matches!(sent, Ok(Ok(_))) {
-                        s.force.store(true, Ordering::Relaxed);
-                        s.out.not_encoded(shown_us, NotEncoded::Failed);
+                    submit(&s, &enc, image, f.display_time(), started);
+                }
+                #[cfg(target_os = "linux")]
+                CaptureEvent::Frame(mut f) => {
+                    let Some(image) = f.image.take().map(Arc::new) else {
+                        return; // nothing changed on screen: nothing to send
+                    };
+                    submit(&s, &enc, &image, f.display_time(), started);
+                    if let Ok(mut last) = s.last.lock() {
+                        *last = Some((image, Instant::now()));
                     }
                 }
                 CaptureEvent::Interrupted(reason) => s
@@ -169,6 +235,8 @@ impl Streamer {
             capture,
             encoder,
             shared,
+            #[cfg(target_os = "linux")]
+            repeat,
         })
     }
 
@@ -182,11 +250,42 @@ impl Streamer {
         if let Err(e) = self.capture.stop() {
             eprintln!("stopping capture: {e}");
         }
+        #[cfg(target_os = "linux")]
+        {
+            self.shared.stopping.store(true, Ordering::Relaxed);
+            if let Some(t) = self.repeat.take() {
+                let _ = t.join();
+            }
+        }
         if let Ok(mut e) = self.encoder.lock()
             && let Err(err) = e.flush()
         {
             eprintln!("flushing the encoder: {err}");
         }
+    }
+}
+
+/// Linux (LP4): while a keyframe is due and no new picture has come for
+/// [`REPEAT_AFTER`], encode the last picture again, as that keyframe. Its
+/// display time is now: it shows the screen as it still is.
+#[cfg(target_os = "linux")]
+fn repeat_when_still(s: &Shared, enc: &Mutex<VideoEncoder>, started: Instant) {
+    while !s.stopping.load(Ordering::Relaxed) {
+        std::thread::sleep(Duration::from_millis(10));
+        if !s.force.load(Ordering::Relaxed) {
+            continue;
+        }
+        let image = match s.last.lock() {
+            Ok(mut last) => match last.as_mut() {
+                Some((image, at)) if at.elapsed() >= REPEAT_AFTER => {
+                    *at = Instant::now();
+                    Arc::clone(image)
+                }
+                _ => continue,
+            },
+            Err(_) => return,
+        };
+        submit(s, enc, &image, Instant::now(), started);
     }
 }
 
@@ -212,10 +311,12 @@ fn pause_reason(r: InterruptReason) -> PauseReason {
     }
 }
 
-/// A test pattern instead of the screen: frames numbered by a barcode
+/// A test pattern instead of the screen (macOS: the pattern is drawn by
+/// VideoToolbox's pixel buffers): frames numbered by a barcode
 /// strip (`SyntheticSource::next_frame_marked`) at a fixed rate. Needs no
 /// Screen Recording permission, so CI can stream end to end; everything
 /// after the source (encoder, sealing, network) is the real path.
+#[cfg(target_os = "macos")]
 pub(crate) struct SyntheticCapture {
     width: u32,
     height: u32,
@@ -224,6 +325,7 @@ pub(crate) struct SyntheticCapture {
     thread: Option<JoinHandle<()>>,
 }
 
+#[cfg(target_os = "macos")]
 impl SyntheticCapture {
     /// `width × height` (even) at `fps` frames per second.
     pub(crate) fn new(width: u32, height: u32, fps: u32) -> Self {
@@ -237,6 +339,7 @@ impl SyntheticCapture {
     }
 }
 
+#[cfg(target_os = "macos")]
 impl ScreenCapture for SyntheticCapture {
     fn start(&mut self, mut sink: EventSink) -> Result<(), CaptureError> {
         if self.thread.is_some() {
@@ -296,7 +399,9 @@ impl ScreenCapture for SyntheticCapture {
     }
 }
 
-#[cfg(test)]
+// The tests drive the macOS pipeline (pixel buffers from SyntheticSource);
+// the Linux pipeline is checked end to end on the laptop (phase 4.6 step 6).
+#[cfg(all(test, target_os = "macos"))]
 mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used)] // test code
 
@@ -615,5 +720,79 @@ mod tests {
         want.sort_unstable();
         ends.sort_unstable();
         assert_eq!(ends, want);
+    }
+}
+
+/// LP4 on Linux, with openh264 and a fake screen (no desktop needed).
+#[cfg(all(test, target_os = "linux"))]
+mod linux_tests {
+    use std::sync::mpsc;
+
+    use remora_capture::{CaptureError, CapturedFrame, CpuImage, EventSink, FrameStatus};
+    use remora_session::CaptureStatus;
+
+    use super::*;
+
+    /// Sends three pictures, then nothing: a still screen.
+    struct StillScreen;
+
+    impl ScreenCapture for StillScreen {
+        fn start(&mut self, mut sink: EventSink) -> Result<(), CaptureError> {
+            for seq in 0..3u8 {
+                // Almost the same picture each time (a whole new picture
+                // is a "scene change" to openh264, which then sends IDRs).
+                let mut px = vec![100; 64 * 36 * 4];
+                px[usize::from(seq) * 4] = 200;
+                sink(CaptureEvent::Frame(CapturedFrame {
+                    seq: u64::from(seq),
+                    status: FrameStatus::Complete,
+                    arrival: Instant::now(),
+                    delivery_ns: None,
+                    dirty_rects: Vec::new(),
+                    image: CpuImage::new(64, 36, px),
+                }));
+            }
+            Ok(())
+        }
+        fn stop(&mut self) -> Result<(), CaptureError> {
+            Ok(())
+        }
+        fn output_size(&self) -> (u32, u32) {
+            (64, 36)
+        }
+    }
+
+    struct Frames(Mutex<mpsc::Sender<bool>>);
+
+    impl VideoOut for Frames {
+        fn video(&self, keyframe: bool, _: u64, _: &[u8]) {
+            if let Ok(tx) = self.0.lock() {
+                let _ = tx.send(keyframe);
+            }
+        }
+        fn capture(&self, _: CaptureStatus) {}
+        fn captured(&self, _: u64) {}
+        fn not_encoded(&self, _: u64, _: NotEncoded) {}
+    }
+
+    #[test]
+    fn lp4_a_keyframe_asked_for_on_a_still_screen_comes_from_the_last_picture() {
+        let (tx, rx) = mpsc::channel();
+        let s = Streamer::start(Box::new(StillScreen), Arc::new(Frames(Mutex::new(tx))))
+            .expect("start");
+        let first: Vec<bool> = rx.iter().take(3).collect();
+        assert_eq!(first, [true, false, false], "first picture is a keyframe");
+        // Still screen: nothing more unless asked.
+        assert!(rx.recv_timeout(Duration::from_millis(150)).is_err());
+        let asked = Instant::now();
+        s.force_keyframe();
+        let k = rx
+            .recv_timeout(Duration::from_millis(300))
+            .expect("a keyframe within 300 ms on a still screen");
+        assert!(k, "the repeat is a keyframe");
+        assert!(asked.elapsed() < Duration::from_millis(200), "LP4 budget");
+        // Asked once, sent once.
+        assert!(rx.recv_timeout(Duration::from_millis(150)).is_err());
+        s.stop();
     }
 }

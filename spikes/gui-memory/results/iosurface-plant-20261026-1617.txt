@@ -1,0 +1,14 @@
+pid 28945; plant A = 8 × 3840×2160 NV12 ≈ 94.9 MB (no row padding)
+0. baseline (pool created, no picture)       footprint     2.9 MB | IOSurface virtual     0.0 resident     0.0 dirty     0.0 MB
+A. holding 8 IOSurface pictures              footprint    98.0 MB | IOSurface virtual    95.0 resident    95.0 dirty    95.0 MB
+   delta A: footprint +95.1 MB, IOSurface virtual +95.0 MB
+A'. pictures dropped (pool keeps buffers?)   footprint    98.0 MB | IOSurface virtual    95.0 resident    95.0 dirty    95.0 MB
+A''. pool dropped too                        footprint     3.1 MB | IOSurface virtual     0.0 resident     0.0 dirty     0.0 MB
+plant C = 28 decoded 1920×1248 NV12 ≈ 96.0 MB (no row padding)
+C0. encoder gone, decoder created            footprint     7.4 MB | IOSurface virtual     0.2 resident     0.0 dirty     0.0 MB
+C. holding 28 decoded pictures               footprint     7.8 MB | IOSurface virtual    96.4 resident     0.0 dirty     0.0 MB
+   delta C: footprint +0.4 MB, IOSurface virtual +96.2 MB
+C''. pictures and decoder dropped            footprint     7.8 MB | IOSurface virtual     0.2 resident     0.0 dirty     0.0 MB
+B. + 100 MiB heap, every page written        footprint   108.0 MB | IOSurface virtual     0.2 resident     0.0 dirty     0.0 MB
+   delta B: footprint +100.2 MB, IOSurface virtual +0.0 MB
+   (A' vs A: footprint +0.0, IOSurface +0.0; A'' vs A': -94.9, -95.0)

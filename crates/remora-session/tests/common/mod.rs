@@ -43,12 +43,29 @@ pub fn exporter(b: u8) -> Exporter {
 
 pub const T0: Millis = Millis(1_000_000);
 
+/// A host as the apps run it: one active session at a time (H9).
 pub fn host_with(host: &Device, trusted: Vec<remora_crypto::identity::IdentityPublic>) -> Host {
+    host_config(host, trusted, true)
+}
+
+/// A host that serves several Active viewers at once, for tests whose point
+/// is behaviour across viewers (per-session keys, shared keyframe limit).
+#[allow(dead_code)] // not every test binary uses it
+pub fn host_multi_viewer(host: &Device) -> Host {
+    host_config(host, vec![], false)
+}
+
+fn host_config(
+    host: &Device,
+    trusted: Vec<remora_crypto::identity::IdentityPublic>,
+    one_active_session: bool,
+) -> Host {
     Host::new(
         HostConfig {
             identity: host.identity.clone(),
             password_enabled: true,
             trusted,
+            one_active_session,
         },
         &mut OsRng,
     )

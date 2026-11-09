@@ -20,6 +20,9 @@ pub enum DatagramKind {
     FecRepair,
     /// Absolute pointer position (latest wins).
     PointerMotion,
+    /// One 20 ms Opus packet of the host's sound (phase 4.8;
+    /// [`crate::audio`]).
+    AudioPacket,
 }
 
 /// Bits of `flags` that have a meaning; all others must be zero.
@@ -101,6 +104,7 @@ impl DatagramHeader {
             1 => DatagramKind::VideoFragment,
             2 => DatagramKind::FecRepair,
             3 => DatagramKind::PointerMotion,
+            4 => DatagramKind::AudioPacket,
             other => return Err(DatagramError::UnknownKind(other)),
         };
         if flags & !KNOWN_FLAGS != 0 {
@@ -126,6 +130,7 @@ impl DatagramHeader {
             DatagramKind::VideoFragment => 1,
             DatagramKind::FecRepair => 2,
             DatagramKind::PointerMotion => 3,
+            DatagramKind::AudioPacket => 4,
         };
         let [k0, k1] = self.key_id.to_be_bytes();
         let [c0, c1, c2, c3, c4, c5, c6, c7] = self.counter.to_be_bytes();

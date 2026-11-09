@@ -132,3 +132,26 @@ fn hello_carries_version_mode_nonce_and_device_id() {
         DeviceId::of(&h.key.public()).as_bytes().to_vec()
     );
 }
+
+/// phase4.7-criteria C2/C7 in the session layer: `set_trusted` decides
+/// who may use trusted mode for the next connection (remember / forget at
+/// the host); a remembered viewer still reaches the prompt (C3).
+#[test]
+fn c7_set_trusted_remembers_and_forgets_for_the_next_connection() {
+    let (h, v) = (device("host"), device("viewer"));
+    let mode = || ViewerMode::Trusted {
+        pinned: h.key.public(),
+    };
+    let mut host = host_with(&h, vec![]);
+    let c = connect(&mut host, &v, mode(), ip(1), T0);
+    assert!(c.log.prompt().is_none(), "unknown viewer: no trusted mode");
+    host.set_trusted(vec![v.key.public()]);
+    let c = connect(&mut host, &v, mode(), ip(2), T0);
+    assert!(c.log.prompt().is_some(), "remembered: prompted, not let in");
+    host.set_trusted(vec![]);
+    let c = connect(&mut host, &v, mode(), ip(3), T0);
+    assert!(
+        c.log.prompt().is_none(),
+        "forgotten: no trusted mode any more"
+    );
+}

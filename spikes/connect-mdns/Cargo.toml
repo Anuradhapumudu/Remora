@@ -1,0 +1,15 @@
+# THROWAWAY spike S-C1 (phase4.7-criteria step 1, roadmap D-52): can the
+# Mac find the Fedora laptop on the owner's home Wi-Fi by mDNS, announcing
+# only a device code, a nonce and a port? Own workspace; deleted at the end
+# of the phase like the other spikes (D-41).
+[package]
+name = "sc1-mdns"
+version = "0.0.0"
+edition = "2024"
+publish = false
+license = "GPL-3.0-or-later"
+
+[workspace]
+
+[dependencies]
+mdns-sd = { version = "=0.21.6", default-features = false }

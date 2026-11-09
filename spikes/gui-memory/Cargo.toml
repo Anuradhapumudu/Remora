@@ -1,0 +1,26 @@
+# THROWAWAY spike S1 (phase4.5-criteria §3, owner-approved 2026-10-25):
+# what does a Slint GUI add to the viewer's memory, and does option C′
+# (Slint window + our own winit/wgpu video window on ONE event loop, no
+# `unsafe`) work? Separate workspace: nothing here reaches the main crates.
+# The video path is the real viewer's (`remora_viewer::render::Renderer`).
+[package]
+name = "gui-memory-spike"
+version = "0.0.0"
+edition = "2024"
+publish = false
+license = "GPL-3.0-or-later"
+
+[workspace]
+
+[dependencies]
+remora-viewer = { path = "../../crates/remora-viewer" }
+remora-codec = { path = "../../crates/remora-codec" }
+slint = { version = "=1.18.1", default-features = false, features = ["std", "compat-1-2", "accessibility", "backend-winit", "renderer-femtovg-wgpu", "renderer-software", "unstable-wgpu-30", "unstable-winit-030"] }
+wgpu = { version = "=30.0.1", default-features = false, features = ["std", "wgsl", "metal"] }
+winit = { version = "=0.30.13", default-features = false, features = ["rwh_06"] }
+pollster = "1.0.1"
+# `thermal` mode: ProcessInfo.thermalState, as bench-capture (remora-host sysmon.rs).
+objc2-foundation = { version = "=0.3.2", default-features = false, features = ["std", "NSProcessInfo"] }
+
+[dev-dependencies]
+i-slint-backend-testing = "=1.18.1"

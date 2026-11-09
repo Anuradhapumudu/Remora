@@ -17,6 +17,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod discovery;
 mod host;
 mod media;
 mod tls;

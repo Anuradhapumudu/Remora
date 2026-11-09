@@ -19,15 +19,27 @@ remora-proto = { workspace = true }
 remora-session = { workspace = true }
 anyhow = { workspace = true }
 clap = { workspace = true }
-tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync", "time"] }
+# "signal": Ctrl-C ends the session with a Goodbye (signal-hook-registry is
+# already in the lock).
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync", "time", "signal"] }
 tracing-subscriber = { workspace = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
+# Sound playback (phase 4.8): CoreAudio through cpal (its `unsafe`, not ours).
+cpal = { workspace = true }
+# The Phase 4.5 GUI: the screens (remora-ui, D45) and Slint's runtime API.
+remora-ui = { workspace = true }
+slint = { workspace = true }
 wgpu = { workspace = true }
 winit = { workspace = true }
 pollster = { workspace = true }
 
+[target.'cfg(target_os = "macos")'.dev-dependencies]
+# Drives the GUI from Rust tests (D-4, phase4.5-criteria §5).
+i-slint-backend-testing = { workspace = true }
+
 [dev-dependencies]
+prost = { workspace = true }
 rand_core = { workspace = true }
 remora-testkit = { workspace = true }
 

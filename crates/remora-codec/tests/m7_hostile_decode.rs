@@ -220,6 +220,32 @@ fn m7_live_sessions_and_pictures_are_counted() {
     assert_eq!(live(&dec).0, 0, "a failed session is not kept");
 }
 
+#[test]
+fn self_count_follows_the_pictures_and_their_size() {
+    // phase4.5-criteria §3b: the viewer's own count of decoded pictures.
+    let real = encode(1280, 720, 3, 0);
+    let mut dec = VtDecoder::new(SizeLimit::default());
+    let count = dec.picture_count();
+    assert_eq!(count.get(), 0);
+    let a = dec.decode(0, &real[0].1).unwrap();
+    let b = dec.decode(1, &real[1].1).unwrap();
+    assert_eq!(
+        count.get(),
+        2,
+        "read from the handle, as another thread does"
+    );
+    // NV12: a full-size luma plane and a half-height chroma plane, rows
+    // padded at most to a few hundred bytes.
+    let nv12 = 1280 * 720 * 3 / 2;
+    let size = a.byte_size();
+    assert!((nv12..nv12 + 720 * 3 / 2 * 512).contains(&size), "{size}");
+    assert_eq!(b.byte_size(), size);
+    drop(a);
+    assert_eq!(count.get(), 1);
+    drop(b);
+    assert_eq!(count.get(), 0);
+}
+
 fn live(dec: &VtDecoder) -> (u64, u64) {
     let s = dec.stats();
     (s.sessions_alive, s.pictures_alive)

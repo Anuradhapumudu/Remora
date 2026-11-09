@@ -1,0 +1,18 @@
+[package]
+name = "remora-ui"
+description = "Remora's GUI screens (Slint markup only); the host and viewer drive them."
+version.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+license = "GPL-3.0-or-later"
+
+# The GUI is macOS-only until Phase 6.5: elsewhere this crate is empty.
+[target.'cfg(target_os = "macos")'.dependencies]
+slint = { workspace = true }
+
+[lints]
+workspace = true

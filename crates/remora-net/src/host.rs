@@ -11,8 +11,9 @@ use rand_core::{OsRng, RngCore};
 use remora_crypto::identity::IdentityPublic;
 use remora_crypto::sas::Sas;
 use remora_crypto::secret::Otp;
+use remora_session::limiter::Refusal;
 use remora_session::{
-    AppMessage, ApproveError, CloseCode, FailReason, Host, HostAction, HostConfig, Millis,
+    AppMessage, ApproveError, CloseCode, FailReason, Host, HostAction, HostConfig, Millis, Refused,
     SendVideoError, SessionId, Step,
 };
 use tokio::sync::mpsc;
@@ -82,6 +83,13 @@ pub enum HostEvent {
         id: SessionId,
         /// Code sent to the peer.
         code: CloseCode,
+    },
+    /// A connection was refused because a session is active (one at a time,
+    /// phase4.5-criteria H9). Refused before any handshake: it was not a
+    /// password attempt. Logged on the host with its time and address.
+    RefusedBusy {
+        /// Who tried to connect.
+        peer: SocketAddr,
     },
     /// The connection for `id` died without a close from either side: the
     /// viewer went silent for [`crate::IDLE_TIMEOUT`] (network gone, viewer
@@ -170,6 +178,12 @@ impl HostServer {
         nonce
     }
 
+    /// Replaces the viewer keys allowed in trusted mode; see
+    /// [`remora_session::Host::set_trusted`].
+    pub fn set_trusted(&self, keys: Vec<IdentityPublic>) {
+        lock(&self.shared.host).set_trusted(keys);
+    }
+
     /// Accept on the prompt for `id` showing `sas`.
     pub fn approve(&self, id: SessionId, sas: Sas) -> Result<(), ApproveError> {
         let now = self.shared.now();
@@ -214,6 +228,14 @@ impl HostServer {
             lock(&self.shared.host).send_video(keyframe, capture_ts_us, data, now, &mut OsRng)?;
         self.shared.apply(actions, None);
         Ok(())
+    }
+
+    /// Sends one audio packet to every Active session (phase 4.8); see
+    /// [`remora_session::Host::send_audio`].
+    pub fn send_audio(&self, packet: &remora_proto::audio::AudioPacket) {
+        let now = self.shared.now();
+        let actions = lock(&self.shared.host).send_audio(packet, now, &mut OsRng);
+        self.shared.apply(actions, None);
     }
 
     /// Every media datagram payload handed to quinn from now on
@@ -418,6 +440,13 @@ async fn run_connection(incoming: quinn::Incoming, shared: Arc<Shared>) {
         lock(&shared.host).accept_connection(peer.ip(), exporter, shared.now(), &mut OsRng);
     let id = match admitted {
         Ok(id) => id,
+        Err(Refused(Refusal::HostBusy)) => {
+            // One active session at a time (H9): before any crypto, and
+            // reported so the host can show every refused attempt.
+            close(&conn, CloseCode::HostBusy);
+            let _ = shared.events.send(HostEvent::RefusedBusy { peer });
+            return;
+        }
         Err(_) => {
             // Refused before any crypto (A03).
             close(&conn, CloseCode::RateLimited);

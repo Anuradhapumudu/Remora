@@ -8,9 +8,11 @@
 
 #![forbid(unsafe_code)]
 
+pub mod audio;
 pub mod code;
 mod crc32;
 pub mod datagram;
+pub mod display_text;
 pub mod frame;
 pub mod limits;
 pub mod messages;

@@ -1,0 +1,23 @@
+# THROWAWAY spike S-L1 (roadmap D-50, owner 2026-11-01): can Remora capture
+# GNOME's screen on Wayland through the desktop portal + PipeWire, and how
+# fast? Built and run on the owner's Fedora 44 laptop. Own workspace; goes at
+# the end of the phase like the other spikes (D-41).
+[package]
+name = "sl1-capture"
+version = "0.0.0"
+edition = "2024"
+publish = false
+license = "GPL-3.0-or-later"
+
+[workspace]
+
+[dependencies]
+ashpd = { version = "=0.13.13", default-features = false, features = ["tokio", "screencast", "remote_desktop"] }
+pipewire = "=0.10.1"
+openh264 = "=0.9.8"
+tokio = { version = "=1.53.3", features = ["rt-multi-thread", "macros", "time", "sync"] }
+# S-L1c: Remora's own host stack (QUIC, SPAKE2 + Noise, approval, sealed media).
+remora-net = { path = "../../crates/remora-net" }
+remora-session = { path = "../../crates/remora-session" }
+remora-app = { path = "../../crates/remora-app" }
+remora-crypto = { path = "../../crates/remora-crypto" }
