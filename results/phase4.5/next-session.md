@@ -10,7 +10,7 @@ but it lives only as long as that session, so this file is the record.
 |---|---|---|
 | ~~After 2026-10-28 15:24~~ **Done 2026-10-30** | Remove the `tokio 1.53.3` line from `.cargo/crate-age-exceptions.txt` (own commit, `scripts/ci/pre-push.sh` first) | D-37 |
 | ~~After 2026-10-28 15:24~~ **Done 2026-10-30** | Remove the `rustls 0.23.46` line (own commit, pre-push first) | D-42 |
-| After 2026-11-03 14:28 | Remove the `rustls-webpki 0.103.16` line (own commit, pre-push first) | D-43 |
+| ~~After 2026-11-03 14:28~~ **Done 2026-11-09** | Remove the `rustls-webpki 0.103.16` line (own commit, pre-push first) | D-43 |
 | **After 2026-11-06 10:56** | Push the Slint GUI commits (they stay local until `clipboard-win` 5.4.2 is 14 days old); pre-push first, then report CI | D-47 |
 
 Not before those times: until then the release is under 14 days old and the
