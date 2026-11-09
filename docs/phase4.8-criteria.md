@@ -217,12 +217,13 @@ and host speaker files.
 - No separate "sound is being captured" indicator on the laptop (sound
   flows only during a session GNOME already shows).
 
-### Open question for the owner (not approved work)
+### Open question for the owner (decided 2026-11-09: not needed)
 
 **"Watch mode"**: delay the picture to match slow outputs such as
 Bluetooth earbuds, for watching videos only (it would also delay the
-mouse). Proposed 2026-11-03; the owner has not chosen yet. It becomes a
-roadmap row only if approved.
+mouse). Proposed 2026-11-03; **decided 2026-11-09** (owner: "Not needed
+right now — keep low-latency interactive video as the priority"). Not
+added to the roadmap.
 
 ### Deferred items, row by row
 

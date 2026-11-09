@@ -1,7 +1,12 @@
 # Phase 4.9 (D-56): Smooth 60 fps — hardware encoding on the Linux host, CPU as the fallback, and no freezes — criteria
 
-**Status: DRAFT, 2026-11-03 (written overnight for the owner to read).
-Not approved: nothing in it is built until the owner decides §2.**
+**Status: APPROVED by the owner, 2026-11-09**, with the recommended
+answer to every decision in §2: Q1 H.264 through RPM Fusion's
+`intel-media-driver` (with VP9 through Fedora's driver measured in the
+spike as a later option), Q2 `cros-codecs` if the spike shows it works,
+Q3 1920 wide cap, Q4 the owner runs the RPM Fusion install commands.
+Building starts with §6 step 0 (freeze diagnosis counters) alongside the
+final Phase 4.8 live check.
 
 Owner's request (roadmap D-56, 2026-11-02/03): "if the pc have nvidia
 amd intel or any graphics can we use them … else we can use the cpu";
