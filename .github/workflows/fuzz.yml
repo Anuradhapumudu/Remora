@@ -14,6 +14,7 @@ on:
       - "crates/remora-session/**"
       - "crates/remora-codec/src/h264.rs"
       - "crates/remora-codec/src/bitstream.rs"
+      - "crates/remora-codec/src/audio.rs"
       - "fuzz/**"
 
 permissions:
@@ -44,6 +45,7 @@ jobs:
             device_list,
             mdns_record,
             audio_packet,
+            opus_decode,
           ]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
